@@ -1,4 +1,4 @@
-mod flurl;
+pub mod flurl;
 
 pub use flurl::url_utils::*;
 pub use flurl::FlUrl;
