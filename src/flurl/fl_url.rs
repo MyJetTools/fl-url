@@ -84,6 +84,28 @@ impl<'t> FlUrl {
         return Ok(FlUrlResponse::new(response));
     }
 
+    pub async fn head(self) -> Result<FlUrlResponse, Error> {
+        let url = self.get_url();
+
+        let mut req = Request::builder().method(Method::HEAD).uri(url);
+
+        if self.headers.len() > 0 {
+            let headers = req.headers_mut().unwrap();
+            for (key, value) in self.headers {
+                let h = HeaderName::from_str(key.as_str()).unwrap();
+                headers.insert(h, HeaderValue::from_str(value.as_str()).unwrap());
+            }
+        };
+
+        let req = req.body(Body::empty()).expect("request builder");
+
+        let https = HttpsConnector::new();
+        let client = Client::builder().build::<_, hyper::Body>(https);
+        let response = client.request(req).await?;
+
+        return Ok(FlUrlResponse::new(response));
+    }
+
     pub async fn post(self, body: Option<Vec<u8>>) -> Result<FlUrlResponse, Error> {
         let url = self.get_url();
 
