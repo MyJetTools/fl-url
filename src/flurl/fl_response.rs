@@ -10,7 +10,7 @@ impl FlUrlResponse {
         Self { response }
     }
 
-    pub async fn get_headers(&self) -> HashMap<&str, &str> {
+    pub fn get_headers(&self) -> HashMap<&str, &str> {
         let mut result: HashMap<&str, &str> = HashMap::new();
 
         let headers = self.response.headers();
