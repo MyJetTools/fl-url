@@ -10,15 +10,15 @@ impl FlUrlResponse {
         Self { response }
     }
 
-    pub fn get_headers(&self) -> HashMap<String, String> {
+    pub fn get_headers(&self) -> HashMap<&str, &str> {
         let mut result = HashMap::new();
 
         let headers = self.response.headers();
 
         for (header_name, header_val) in headers.into_iter() {
-            let key = header_name.as_str().to_string();
+            let key = header_name.as_str();
 
-            let value = String::from_utf8(header_val.as_bytes().to_vec()).unwrap();
+            let value = std::str::from_utf8(header_val.as_bytes()).unwrap();
             result.insert(key, value);
         }
 
