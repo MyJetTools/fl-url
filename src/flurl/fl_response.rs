@@ -25,14 +25,14 @@ impl FlUrlResponse {
         result
     }
 
-    pub fn fill_headers_to_hashmap<'t>(&'t self, dest: &mut HashMap<&'t str, &'t str>) {
+    pub fn fill_headers_to_hashmap(&self, dest: &mut HashMap<String, String>) {
         let headers = self.response.headers();
 
         for (header_name, header_val) in headers.into_iter() {
             let key = header_name.as_str();
 
             let value = std::str::from_utf8(header_val.as_bytes()).unwrap();
-            dest.insert(key, value);
+            dest.insert(key.to_string(), value.to_string());
         }
     }
 
