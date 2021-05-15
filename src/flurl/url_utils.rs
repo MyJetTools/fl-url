@@ -29,7 +29,7 @@ pub fn decode_from_url_string(src: &str) -> String {
     let mut escape_pos: u32 = 0;
     let mut escape0: u8 = 0;
 
-    for (i, c) in src.chars().enumerate() {
+    for (_, c) in src.chars().enumerate() {
         if is_escape_symbol_mode {
             if escape_pos == 0 {
                 escape0 = c as u8;

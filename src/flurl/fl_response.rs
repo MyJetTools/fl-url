@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use hyper::{Body, Error, Response, StatusCode};
+use hyper::{Body, Error, Response};
 pub struct FlUrlResponse {
     pub response: Response<Body>,
 }
@@ -23,6 +23,17 @@ impl FlUrlResponse {
         }
 
         result
+    }
+
+    pub fn fill_headers_to_hashmap<'t>(&'t self, dest: &mut HashMap<&'t str, &'t str>) {
+        let headers = self.response.headers();
+
+        for (header_name, header_val) in headers.into_iter() {
+            let key = header_name.as_str();
+
+            let value = std::str::from_utf8(header_val.as_bytes()).unwrap();
+            dest.insert(key, value);
+        }
     }
 
     pub async fn get_body(self) -> Result<Vec<u8>, Error> {
