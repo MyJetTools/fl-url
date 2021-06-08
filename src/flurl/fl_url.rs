@@ -106,7 +106,7 @@ impl<'t> FlUrl {
         return Ok(FlUrlResponse::new(response));
     }
 
-    pub async fn post(self, body: Option<Vec<u8>>) -> Result<FlUrlResponse, Error> {
+    pub async fn post(self, body: Option<&'static [u8]>) -> Result<FlUrlResponse, Error> {
         let url = self.get_url();
 
         let mut req = Request::builder().method(Method::GET).uri(url);
@@ -133,7 +133,7 @@ impl<'t> FlUrl {
         return Ok(FlUrlResponse::new(response));
     }
 
-    pub async fn put(self, body: Option<Vec<u8>>) -> Result<FlUrlResponse, Error> {
+    pub async fn put(self, body: Option<&'static [u8]>) -> Result<FlUrlResponse, Error> {
         let url = self.get_url();
 
         let mut req = Request::builder().method(Method::PUT).uri(url);
