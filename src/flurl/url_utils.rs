@@ -79,7 +79,7 @@ pub fn decode_url_escape(s0: u8, s1: u8) -> u8 {
         }
     }
 
-    panic!(format!("Invalid URL Symbol %{}{}", s0 as char, s1 as char));
+    panic!("Invalid URL Symbol %{}{}", s0 as char, s1 as char);
 }
 
 pub fn encode_to_url_string_and_copy(res: &mut Vec<u8>, src: &str) {
