@@ -12,11 +12,8 @@ pub struct FlUrlWithTelemetry<TMyTelemetry: MyTelemetry> {
 }
 
 impl<TMyTelemetry: MyTelemetry> FlUrlWithTelemetry<TMyTelemetry> {
-    pub fn new(url: &str, telemetry: Option<TMyTelemetry>) -> Self {
-        Self {
-            fl_url: FlUrl::new(url),
-            telemetry,
-        }
+    pub fn new(fl_url: FlUrl, telemetry: Option<TMyTelemetry>) -> Self {
+        Self { fl_url, telemetry }
     }
 
     pub fn get_path(&self) -> String {
