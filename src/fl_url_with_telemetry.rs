@@ -12,10 +12,10 @@ pub struct FlUrlWithTelemetry<TMyTelemetry: MyTelemetry> {
 }
 
 impl<TMyTelemetry: MyTelemetry> FlUrlWithTelemetry<TMyTelemetry> {
-    pub fn new(url: &str, telemetry: TMyTelemetry) -> Self {
+    pub fn new(url: &str, telemetry: Option<TMyTelemetry>) -> Self {
         Self {
             fl_url: FlUrl::new(url),
-            telemetry: Some(telemetry),
+            telemetry,
         }
     }
 
