@@ -25,6 +25,11 @@ impl<'t> FlUrl {
         }
     }
 
+    pub fn get_protocol(&self) -> &str {
+        let index = self.url.find(":").unwrap();
+        return &self.url[..index];
+    }
+
     pub fn get_path(&self) -> String {
         if self.path.len() == 0 {
             return "/".to_string();
@@ -182,7 +187,7 @@ impl<'t> FlUrl {
         return Ok(FlUrlResponse::new(response));
     }
 
-    fn get_url(&self) -> String {
+    pub fn get_url(&self) -> String {
         if self.path.len() == 0 && self.query.len() == 0 {
             return self.url.to_string();
         }
