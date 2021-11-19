@@ -7,7 +7,7 @@ use crate::FlUrl;
 use super::FlUrlResponse;
 
 pub struct FlUrlWithTelemetry<TMyTelemetry: MyTelemetry> {
-    fl_url: FlUrl,
+    pub fl_url: FlUrl,
     pub telemetry: Option<TMyTelemetry>,
 }
 
