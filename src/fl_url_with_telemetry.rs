@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use hyper::Error;
 use my_telemetry::MyTelemetry;
 
@@ -8,18 +10,18 @@ use super::FlUrlResponse;
 
 pub struct FlUrlWithTelemetry<TMyTelemetry: MyTelemetry> {
     pub fl_url: FlUrl,
-    pub telemetry: Option<TMyTelemetry>,
+    pub telemetry: Option<Arc<TMyTelemetry>>,
 }
 
-impl<TMyTelemetry: MyTelemetry> FlUrlWithTelemetry<TMyTelemetry> {
-    pub fn new(url: &str, telemetry: Option<TMyTelemetry>) -> Self {
+impl<'s, TMyTelemetry: MyTelemetry> FlUrlWithTelemetry<TMyTelemetry> {
+    pub fn new(url: &str, telemetry: Option<Arc<TMyTelemetry>>) -> Self {
         Self {
             fl_url: FlUrl::new(url),
             telemetry,
         }
     }
 
-    pub fn from_fl_url(fl_url: FlUrl, telemetry: Option<TMyTelemetry>) -> Self {
+    pub fn from_fl_url(fl_url: FlUrl, telemetry: Option<Arc<TMyTelemetry>>) -> Self {
         Self { fl_url, telemetry }
     }
 
@@ -110,7 +112,7 @@ impl<TMyTelemetry: MyTelemetry> FlUrlWithTelemetry<TMyTelemetry> {
 }
 
 struct TelemetryData<TMyTelemetry: MyTelemetry> {
-    pub telemetry: Option<TMyTelemetry>,
+    pub telemetry: Option<Arc<TMyTelemetry>>,
     pub sw: StopWatch,
     pub host: String,
     pub protocol: String,
