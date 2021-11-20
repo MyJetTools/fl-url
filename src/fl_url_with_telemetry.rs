@@ -62,7 +62,7 @@ impl<'s, TMyTelemetry: MyTelemetry> FlUrlWithTelemetry<TMyTelemetry> {
             sw,
             host: self.fl_url.url.get_host().to_string(),
             protocol: self.fl_url.url.get_scheme().to_string(),
-            resource: format!("{} {}", verb, self.fl_url.url.get_path_and_query()),
+            resource: format!("{} {}", verb, self.fl_url.url.to_string()),
         }
     }
 
