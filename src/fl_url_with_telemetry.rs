@@ -25,10 +25,6 @@ impl<'s, TMyTelemetry: MyTelemetry> FlUrlWithTelemetry<TMyTelemetry> {
         Self { fl_url, telemetry }
     }
 
-    pub fn get_path(&self) -> String {
-        return self.fl_url.get_path();
-    }
-
     pub fn append_path_segment(mut self, path: &str) -> Self {
         self.fl_url = self.fl_url.append_path_segment(path);
         self
@@ -64,9 +60,9 @@ impl<'s, TMyTelemetry: MyTelemetry> FlUrlWithTelemetry<TMyTelemetry> {
         TelemetryData {
             telemetry: result,
             sw,
-            host: self.fl_url.get_url(),
-            protocol: self.fl_url.get_protocol().to_string(),
-            resource: format!("{} {}", verb, self.get_path()),
+            host: self.fl_url.url.get_host().to_string(),
+            protocol: self.fl_url.url.get_scheme().to_string(),
+            resource: format!("{} {}", verb, self.fl_url.url.get_path_and_query()),
         }
     }
 
