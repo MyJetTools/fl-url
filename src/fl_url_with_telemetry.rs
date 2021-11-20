@@ -11,18 +11,28 @@ use super::FlUrlResponse;
 pub struct FlUrlWithTelemetry<TMyTelemetry: MyTelemetry> {
     pub fl_url: FlUrl,
     pub telemetry: Option<Arc<TMyTelemetry>>,
+    pub dependency_type: String,
 }
 
 impl<'s, TMyTelemetry: MyTelemetry> FlUrlWithTelemetry<TMyTelemetry> {
-    pub fn new(url: &str, telemetry: Option<Arc<TMyTelemetry>>) -> Self {
+    pub fn new(url: &str, telemetry: Option<Arc<TMyTelemetry>>, dependency_type: String) -> Self {
         Self {
             fl_url: FlUrl::new(url),
             telemetry,
+            dependency_type,
         }
     }
 
-    pub fn from_fl_url(fl_url: FlUrl, telemetry: Option<Arc<TMyTelemetry>>) -> Self {
-        Self { fl_url, telemetry }
+    pub fn from_fl_url(
+        fl_url: FlUrl,
+        telemetry: Option<Arc<TMyTelemetry>>,
+        dependency_type: String,
+    ) -> Self {
+        Self {
+            fl_url,
+            telemetry,
+            dependency_type,
+        }
     }
 
     pub fn append_path_segment(mut self, path: &str) -> Self {
@@ -60,9 +70,9 @@ impl<'s, TMyTelemetry: MyTelemetry> FlUrlWithTelemetry<TMyTelemetry> {
         TelemetryData {
             telemetry: result,
             sw,
-            host: format!("{} {}", verb, self.fl_url.url.get_path_and_query()),
-            protocol: self.fl_url.url.get_scheme().to_string(),
-            resource: self.fl_url.url.get_host().to_string(),
+            target: self.fl_url.url.get_host().to_string(),
+            dependency_type: self.dependency_type.to_string(),
+            name: format!("{} {}", verb, self.fl_url.url.get_path_and_query()),
         }
     }
 
@@ -110,9 +120,9 @@ impl<'s, TMyTelemetry: MyTelemetry> FlUrlWithTelemetry<TMyTelemetry> {
 struct TelemetryData<TMyTelemetry: MyTelemetry> {
     pub telemetry: Option<Arc<TMyTelemetry>>,
     pub sw: StopWatch,
-    pub host: String,
-    pub protocol: String,
-    pub resource: String,
+    pub name: String,
+    pub dependency_type: String,
+    pub target: String,
 }
 
 impl<TMyTelemetry: MyTelemetry> TelemetryData<TMyTelemetry> {
@@ -124,26 +134,26 @@ impl<TMyTelemetry: MyTelemetry> TelemetryData<TMyTelemetry> {
                 Ok(result) => {
                     if result.get_status_code() < 300 {
                         telemetry.track_dependency_duration(
-                            self.host,
-                            self.protocol,
-                            self.resource,
+                            self.name,
+                            self.dependency_type,
+                            self.target,
                             true,
                             self.sw.duration(),
                         )
                     } else {
                         telemetry.track_dependency_duration(
-                            self.host,
-                            self.protocol,
-                            self.resource,
+                            self.name,
+                            self.dependency_type,
+                            self.target,
                             false,
                             self.sw.duration(),
                         )
                     }
                 }
                 Err(_) => telemetry.track_dependency_duration(
-                    self.host,
-                    self.protocol,
-                    self.resource,
+                    self.name,
+                    self.dependency_type,
+                    self.target,
                     false,
                     self.sw.duration(),
                 ),
