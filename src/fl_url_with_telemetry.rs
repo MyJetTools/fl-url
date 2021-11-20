@@ -60,9 +60,9 @@ impl<'s, TMyTelemetry: MyTelemetry> FlUrlWithTelemetry<TMyTelemetry> {
         TelemetryData {
             telemetry: result,
             sw,
-            host: self.fl_url.url.get_path_and_query().to_string(),
+            host: format!("{} {}", verb, self.fl_url.url.get_path_and_query()),
             protocol: self.fl_url.url.get_scheme().to_string(),
-            resource: format!("{} {}", verb, self.fl_url.url.get_host()),
+            resource: self.fl_url.url.get_host().to_string(),
         }
     }
 
