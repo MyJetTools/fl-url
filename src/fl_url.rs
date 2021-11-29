@@ -27,12 +27,17 @@ impl<'t> FlUrl {
     }
 
     pub fn append_query_param(mut self, param: &str, value: &str) -> Self {
-        self.url.append_query_param(param, value.to_string());
+        self.url.append_query_param(param, Some(value.to_string()));
+        self
+    }
+
+    pub fn set_query_param(mut self, param: &str) -> Self {
+        self.url.append_query_param(param, None);
         self
     }
 
     pub fn append_query_param_string(mut self, param: &str, value: String) -> Self {
-        self.url.append_query_param(param, value);
+        self.url.append_query_param(param, Some(value));
         self
     }
 

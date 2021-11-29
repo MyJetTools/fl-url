@@ -45,6 +45,11 @@ impl<'s, TMyTelemetry: MyTelemetry> FlUrlWithTelemetry<TMyTelemetry> {
         self
     }
 
+    pub fn set_query_param(mut self, param: &str) -> Self {
+        self.fl_url = self.fl_url.set_query_param(param);
+        self
+    }
+
     pub fn append_query_param_string(mut self, param: &str, value: String) -> Self {
         self.fl_url = self.fl_url.append_query_param_string(param, value);
         self
