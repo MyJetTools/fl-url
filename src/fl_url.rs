@@ -12,7 +12,7 @@ use crate::FlUrlUriBuilder;
 use super::FlUrlResponse;
 
 pub struct FlUrlTelemetry {
-    pub telemetry: Arc<dyn MyTelemetry>,
+    pub telemetry: Arc<dyn MyTelemetry + Send + Sync + 'static>,
     pub dependency_type: String,
 }
 

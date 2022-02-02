@@ -6,7 +6,7 @@ use my_telemetry::MyTelemetry;
 use crate::{stop_watch::StopWatch, FlUrlResponse};
 
 pub struct TelemetryFlow {
-    pub telemetry: Arc<dyn MyTelemetry>,
+    pub telemetry: Arc<dyn MyTelemetry + Send + Sync + 'static>,
     pub sw: StopWatch,
     pub name: String,
     pub dependency_type: String,
