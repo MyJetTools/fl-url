@@ -1,23 +1,33 @@
-use hyper::{header::*, Error};
-use hyper::{Body, Client, Method, Request};
-use hyper_tls::HttpsConnector;
-use std::{collections::HashMap, str::FromStr};
+use hyper::Error;
+use hyper::Method;
+use my_telemetry::MyTelemetry;
+use std::collections::HashMap;
+use std::sync::Arc;
 
+use crate::fl_request::FlRequest;
+use crate::stop_watch::StopWatch;
+use crate::telemetry_flow::TelemetryFlow;
 use crate::FlUrlUriBuilder;
 
 use super::FlUrlResponse;
 
+pub struct FlUrlTelemetry {
+    pub telemetry: Arc<dyn MyTelemetry>,
+    dependency_type: String,
+}
+
 pub struct FlUrl {
     pub url: FlUrlUriBuilder,
     pub headers: HashMap<String, String>,
+    pub telemetry: Option<FlUrlTelemetry>,
 }
 
 impl<'t> FlUrl {
     pub fn new(url: &'t str) -> FlUrl {
         FlUrl {
             url: FlUrlUriBuilder::from_str(url),
-
             headers: HashMap::new(),
+            telemetry: None,
         }
     }
 
@@ -51,123 +61,45 @@ impl<'t> FlUrl {
         self
     }
 
+    fn get_telemetry(&self, verb: &str) -> Option<TelemetryFlow> {
+        let telemetry = self.telemetry.as_ref()?;
+
+        let mut sw = StopWatch::new();
+        sw.start();
+
+        TelemetryFlow {
+            telemetry: telemetry.telemetry.clone(),
+            sw,
+            target: self.url.get_host().to_string(),
+            dependency_type: telemetry.dependency_type.to_string(),
+            name: format!("{} {}", verb, self.url.get_path()),
+        }
+        .into()
+    }
+
+    async fn execute(self, method: Method, body: Option<Vec<u8>>) -> Result<FlUrlResponse, Error> {
+        let telemetry = self.get_telemetry(method.as_str());
+        let request = FlRequest::new(&self, method, body);
+        request.execute(telemetry).await
+    }
+
     pub async fn get(self) -> Result<FlUrlResponse, Error> {
-        let url = self.url.to_string();
-
-        let mut req = Request::builder().method(Method::GET).uri(url);
-
-        if self.headers.len() > 0 {
-            let headers = req.headers_mut().unwrap();
-            for (key, value) in self.headers {
-                let h = HeaderName::from_str(key.as_str()).unwrap();
-                headers.insert(h, HeaderValue::from_str(value.as_str()).unwrap());
-            }
-        };
-
-        let req = req.body(Body::empty()).expect("request builder");
-
-        let https = HttpsConnector::new();
-        let client = Client::builder().build::<_, hyper::Body>(https);
-        let response = client.request(req).await?;
-
-        return Ok(FlUrlResponse::new(response));
+        self.execute(Method::GET, None).await
     }
 
     pub async fn head(self) -> Result<FlUrlResponse, Error> {
-        let url = self.url.to_string();
-
-        let mut req = Request::builder().method(Method::HEAD).uri(url);
-
-        if self.headers.len() > 0 {
-            let headers = req.headers_mut().unwrap();
-            for (key, value) in self.headers {
-                let h = HeaderName::from_str(key.as_str()).unwrap();
-                headers.insert(h, HeaderValue::from_str(value.as_str()).unwrap());
-            }
-        };
-
-        let req = req.body(Body::empty()).expect("request builder");
-
-        let https = HttpsConnector::new();
-        let client = Client::builder().build::<_, hyper::Body>(https);
-        let response = client.request(req).await?;
-
-        return Ok(FlUrlResponse::new(response));
+        self.execute(Method::HEAD, None).await
     }
 
     pub async fn post(self, body: Option<Vec<u8>>) -> Result<FlUrlResponse, Error> {
-        let url = self.url.to_string();
-
-        let mut req = Request::builder().method(Method::POST).uri(url);
-
-        if self.headers.len() > 0 {
-            let headers = req.headers_mut().unwrap();
-            for (key, value) in self.headers {
-                let h = HeaderName::from_str(key.as_str()).unwrap();
-                headers.insert(h, HeaderValue::from_str(value.as_str()).unwrap());
-            }
-        };
-
-        let body = match body {
-            Some(payload) => Body::from(payload),
-            None => Body::empty(),
-        };
-
-        let req = req.body(Body::from(body)).expect("request builder");
-
-        let https = HttpsConnector::new();
-        let client = Client::builder().build::<_, hyper::Body>(https);
-        let response = client.request(req).await?;
-
-        return Ok(FlUrlResponse::new(response));
+        self.execute(Method::POST, body).await
     }
 
     pub async fn put(self, body: Option<Vec<u8>>) -> Result<FlUrlResponse, Error> {
-        let url = self.url.to_string();
-
-        let mut req = Request::builder().method(Method::PUT).uri(url);
-
-        if self.headers.len() > 0 {
-            let headers = req.headers_mut().unwrap();
-            for (key, value) in self.headers {
-                let h = HeaderName::from_str(key.as_str()).unwrap();
-                headers.insert(h, HeaderValue::from_str(value.as_str()).unwrap());
-            }
-        };
-
-        let body = match body {
-            Some(payload) => Body::from(payload.to_vec()),
-            None => Body::empty(),
-        };
-
-        let req = req.body(body).expect("request builder");
-
-        let https = HttpsConnector::new();
-        let client = Client::builder().build::<_, hyper::Body>(https);
-        let response = client.request(req).await?;
-
-        return Ok(FlUrlResponse::new(response));
+        self.execute(Method::PUT, body).await
     }
 
     pub async fn delete(self) -> Result<FlUrlResponse, Error> {
-        let url = self.url.to_string();
-
-        let mut req = Request::builder().method(Method::DELETE).uri(url);
-
-        if self.headers.len() > 0 {
-            let headers = req.headers_mut().unwrap();
-            for (key, value) in self.headers {
-                let h = HeaderName::from_str(key.as_str()).unwrap();
-                headers.insert(h, HeaderValue::from_str(value.as_str()).unwrap());
-            }
-        };
-
-        let req = req.body(Body::empty()).expect("request builder");
-
-        let https = HttpsConnector::new();
-        let client = Client::builder().build::<_, hyper::Body>(https);
-        let response = client.request(req).await?;
-
-        return Ok(FlUrlResponse::new(response));
+        self.execute(Method::DELETE, None).await
     }
 }

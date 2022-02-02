@@ -5,7 +5,6 @@ pub struct StopWatch {
     stop_time: SystemTime,
 }
 
-//Bug - negative duration;
 impl StopWatch {
     pub fn new() -> Self {
         let now = SystemTime::now();
