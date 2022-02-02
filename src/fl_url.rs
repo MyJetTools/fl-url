@@ -13,7 +13,7 @@ use super::FlUrlResponse;
 
 pub struct FlUrlTelemetry {
     pub telemetry: Arc<dyn MyTelemetry>,
-    dependency_type: String,
+    pub dependency_type: String,
 }
 
 pub struct FlUrl {
