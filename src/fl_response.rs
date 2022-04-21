@@ -2,18 +2,40 @@ use std::collections::HashMap;
 
 use hyper::{Body, Error, Response};
 pub struct FlUrlResponse {
-    pub response: Response<Body>,
+    status_code: u16,
+    pub response: Option<Response<Body>>,
+    body: Option<Vec<u8>>,
 }
 
 impl FlUrlResponse {
     pub fn new(response: Response<Body>) -> Self {
-        Self { response }
+        Self {
+            status_code: response.status().as_u16(),
+            response: Some(response),
+            body: None,
+        }
+    }
+
+    fn get_response(&self) -> &Response<Body> {
+        match &self.response {
+            Some(response) => response,
+            None => {
+                panic!("Body is already disposed");
+            }
+        }
+    }
+
+    pub fn read_header(&self, name: &str) -> Option<&str> {
+        self.get_response()
+            .headers()
+            .get(name)
+            .map(|value| value.to_str().unwrap())
     }
 
     pub fn get_headers(&self) -> HashMap<&str, &str> {
         let mut result = HashMap::new();
 
-        let headers = self.response.headers();
+        let headers = self.get_response().headers();
 
         for (header_name, header_val) in headers.into_iter() {
             let key = header_name.as_str();
@@ -26,7 +48,7 @@ impl FlUrlResponse {
     }
 
     pub fn fill_headers_to_hashmap(&self, dest: &mut HashMap<String, String>) {
-        let headers = self.response.headers();
+        let headers = self.get_response().headers();
 
         for (header_name, header_val) in headers.into_iter() {
             let key = header_name.as_str();
@@ -36,20 +58,50 @@ impl FlUrlResponse {
         }
     }
 
-    pub async fn get_body(self) -> Result<Vec<u8>, Error> {
-        let body = self.response.into_body();
+    async fn init_body(&mut self) -> Result<(), Error> {
+        if self.body.is_some() {
+            return Ok(());
+        }
+
+        let mut result = None;
+        std::mem::swap(&mut self.response, &mut result);
+
+        if result.is_none() {
+            panic!("Body can not be received for a second time");
+        }
+
+        let body = result.unwrap().into_body();
         let full_body = hyper::body::to_bytes(body).await?;
 
-        Ok(full_body.iter().cloned().collect::<Vec<u8>>())
+        let result: Vec<u8> = full_body.into_iter().collect();
+
+        self.body = Some(result);
+
+        Ok(())
     }
 
-    pub async fn get_body_as_ut8string(self) -> Result<String, Error> {
-        let body = self.get_body().await?;
-        let result = String::from_utf8(body).unwrap();
-        Ok(result)
+    pub async fn get_body(&mut self) -> Result<&[u8], Error> {
+        self.init_body().await?;
+
+        match &self.body {
+            Some(result) => Ok(result),
+            None => {
+                panic!("Body is already disposed");
+            }
+        }
+    }
+
+    pub async fn receive_body(mut self) -> Result<Vec<u8>, Error> {
+        self.init_body().await?;
+        match self.body {
+            Some(result) => Ok(result),
+            None => {
+                panic!("Body is already disposed");
+            }
+        }
     }
 
     pub fn get_status_code(&self) -> u16 {
-        self.response.status().as_u16()
+        self.status_code
     }
 }
