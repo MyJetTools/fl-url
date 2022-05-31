@@ -1,3 +1,4 @@
+#[derive(Debug)]
 pub enum FlUrlError {
     HyperError(hyper::Error),
     Timeout,
