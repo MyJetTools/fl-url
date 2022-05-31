@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
-use hyper::{Body, Error, Response};
+use hyper::{Body, Response};
+
+use crate::FlUrlError;
 pub struct FlUrlResponse {
     status_code: u16,
     pub response: Option<Response<Body>>,
@@ -58,7 +60,7 @@ impl FlUrlResponse {
         }
     }
 
-    async fn init_body(&mut self) -> Result<(), Error> {
+    async fn init_body(&mut self) -> Result<(), FlUrlError> {
         if self.body.is_some() {
             return Ok(());
         }
@@ -80,7 +82,7 @@ impl FlUrlResponse {
         Ok(())
     }
 
-    pub async fn get_body(&mut self) -> Result<&[u8], Error> {
+    pub async fn get_body(&mut self) -> Result<&[u8], FlUrlError> {
         self.init_body().await?;
 
         match &self.body {
@@ -91,7 +93,7 @@ impl FlUrlResponse {
         }
     }
 
-    pub async fn receive_body(mut self) -> Result<Vec<u8>, Error> {
+    pub async fn receive_body(mut self) -> Result<Vec<u8>, FlUrlError> {
         self.init_body().await?;
         match self.body {
             Some(result) => Ok(result),
