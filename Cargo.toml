@@ -11,3 +11,4 @@ my-telemetry = { branch = "main", git = "https://github.com/MyJetTools/my-teleme
 hyper-tls = "*"
 hyper = { version = "*", features = ["full"] }
 lazy_static = "*"
+tokio = { version = "*", features = ["full"] }

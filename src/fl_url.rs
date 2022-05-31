@@ -1,12 +1,13 @@
-use hyper::Error;
 use hyper::Method;
 use my_telemetry::MyTelemetry;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::fl_request::FlRequest;
 use crate::stop_watch::StopWatch;
 use crate::telemetry_flow::TelemetryFlow;
+use crate::FlUrlError;
 use crate::FlUrlUriBuilder;
 
 use super::FlUrlResponse;
@@ -20,6 +21,7 @@ pub struct FlUrl {
     pub url: FlUrlUriBuilder,
     pub headers: HashMap<String, String>,
     pub telemetry: Option<FlUrlTelemetry>,
+    execute_timeout: Option<Duration>,
 }
 
 impl<'t> FlUrl {
@@ -28,6 +30,25 @@ impl<'t> FlUrl {
             url: FlUrlUriBuilder::from_str(url),
             headers: HashMap::new(),
             telemetry: None,
+            execute_timeout: Some(Duration::from_secs(30)),
+        }
+    }
+
+    pub fn new_with_timeout(url: &'t str, time_out: Duration) -> FlUrl {
+        FlUrl {
+            url: FlUrlUriBuilder::from_str(url),
+            headers: HashMap::new(),
+            telemetry: None,
+            execute_timeout: Some(time_out),
+        }
+    }
+
+    pub fn new_without_timeout(url: &'t str) -> FlUrl {
+        FlUrl {
+            url: FlUrlUriBuilder::from_str(url),
+            headers: HashMap::new(),
+            telemetry: None,
+            execute_timeout: None,
         }
     }
 
@@ -77,29 +98,34 @@ impl<'t> FlUrl {
         .into()
     }
 
-    async fn execute(self, method: Method, body: Option<Vec<u8>>) -> Result<FlUrlResponse, Error> {
+    async fn execute(
+        self,
+        method: Method,
+        body: Option<Vec<u8>>,
+    ) -> Result<FlUrlResponse, FlUrlError> {
         let telemetry = self.get_telemetry(method.as_str());
         let request = FlRequest::new(&self, method, body);
-        request.execute(telemetry).await
+        let execute_timeout = self.execute_timeout;
+        request.execute(execute_timeout, telemetry).await
     }
 
-    pub async fn get(self) -> Result<FlUrlResponse, Error> {
+    pub async fn get(self) -> Result<FlUrlResponse, FlUrlError> {
         self.execute(Method::GET, None).await
     }
 
-    pub async fn head(self) -> Result<FlUrlResponse, Error> {
+    pub async fn head(self) -> Result<FlUrlResponse, FlUrlError> {
         self.execute(Method::HEAD, None).await
     }
 
-    pub async fn post(self, body: Option<Vec<u8>>) -> Result<FlUrlResponse, Error> {
+    pub async fn post(self, body: Option<Vec<u8>>) -> Result<FlUrlResponse, FlUrlError> {
         self.execute(Method::POST, body).await
     }
 
-    pub async fn put(self, body: Option<Vec<u8>>) -> Result<FlUrlResponse, Error> {
+    pub async fn put(self, body: Option<Vec<u8>>) -> Result<FlUrlResponse, FlUrlError> {
         self.execute(Method::PUT, body).await
     }
 
-    pub async fn delete(self) -> Result<FlUrlResponse, Error> {
+    pub async fn delete(self) -> Result<FlUrlResponse, FlUrlError> {
         self.execute(Method::DELETE, None).await
     }
 }
