@@ -106,7 +106,9 @@ impl<'t> FlUrl {
         let telemetry = self.get_telemetry(method.as_str());
         let request = FlRequest::new(&self, method, body);
         let execute_timeout = self.execute_timeout;
-        request.execute(execute_timeout, telemetry).await
+        request
+            .execute(self.url.is_https, execute_timeout, telemetry)
+            .await
     }
 
     pub async fn get(self) -> Result<FlUrlResponse, FlUrlError> {

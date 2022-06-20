@@ -36,13 +36,14 @@ impl FlRequest {
 
     pub async fn execute(
         self,
+        is_https: bool,
         execute_timeout: Option<Duration>,
         telemetry_flow: Option<TelemetryFlow>,
     ) -> Result<FlUrlResponse, FlUrlError> {
         match execute_timeout {
             Some(timeout) => match tokio::time::timeout(
                 timeout,
-                execute_request(self.hyper_request, telemetry_flow),
+                execute_request(is_https, self.hyper_request, telemetry_flow),
             )
             .await
             {
@@ -54,7 +55,7 @@ impl FlRequest {
                     return Err(FlUrlError::Timeout);
                 }
             },
-            None => execute_request(self.hyper_request, telemetry_flow).await,
+            None => execute_request(is_https, self.hyper_request, telemetry_flow).await,
         }
     }
 }
@@ -67,11 +68,42 @@ fn compile_body(body_payload: Option<Vec<u8>>) -> hyper::body::Body {
 }
 
 async fn execute_request(
+    is_https: bool,
+    hyper_request: Request<Body>,
+    telemetry_flow: Option<TelemetryFlow>,
+) -> Result<FlUrlResponse, FlUrlError> {
+    if is_https {
+        return execute_request_https(hyper_request, telemetry_flow).await;
+    }
+
+    execute_request_http(hyper_request, telemetry_flow).await
+}
+
+async fn execute_request_https(
     hyper_request: Request<Body>,
     telemetry_flow: Option<TelemetryFlow>,
 ) -> Result<FlUrlResponse, FlUrlError> {
     let https = HttpsConnector::new();
     let client = Client::builder().build::<_, hyper::Body>(https);
+
+    let result = match client.request(hyper_request).await {
+        Ok(response) => Ok(FlUrlResponse::new(response)),
+        Err(err) => Err(err),
+    };
+
+    if let Some(telemetry) = telemetry_flow {
+        telemetry.write_telemetry(&result);
+    }
+
+    let result = result?;
+    Ok(result)
+}
+
+async fn execute_request_http(
+    hyper_request: Request<Body>,
+    telemetry_flow: Option<TelemetryFlow>,
+) -> Result<FlUrlResponse, FlUrlError> {
+    let client = Client::builder().build_http();
 
     let result = match client.request(hyper_request).await {
         Ok(response) => Ok(FlUrlResponse::new(response)),
