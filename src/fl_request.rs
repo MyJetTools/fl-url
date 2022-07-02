@@ -10,7 +10,7 @@ use crate::{FlUrl, FlUrlError};
 use super::FlUrlResponse;
 
 pub struct FlRequest {
-    hyper_request: Request<Body>,
+    pub hyper_request: Request<Body>,
 }
 
 impl FlRequest {
@@ -91,8 +91,8 @@ async fn execute_request_https(
         Err(err) => Err(err),
     };
 
-    if let Some(telemetry) = telemetry_flow {
-        telemetry.write_telemetry(&result);
+    if let Some(mut telemetry) = telemetry_flow {
+        telemetry.write_telemetry(&result).await;
     }
 
     let result = result?;
@@ -110,8 +110,8 @@ async fn execute_request_http(
         Err(err) => Err(err),
     };
 
-    if let Some(telemetry) = telemetry_flow {
-        telemetry.write_telemetry(&result);
+    if let Some(mut telemetry) = telemetry_flow {
+        telemetry.write_telemetry(&result).await;
     }
 
     let result = result?;

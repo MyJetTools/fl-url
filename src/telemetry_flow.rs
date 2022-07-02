@@ -1,49 +1,88 @@
 use hyper::Error;
-use std::sync::Arc;
+use my_telemetry::{MyTelemetryContext, TelemetryEvent};
+use rust_extensions::date_time::DateTimeAsMicroseconds;
 
-use my_telemetry::MyTelemetry;
+use crate::FlUrlResponse;
 
-use crate::{stop_watch::StopWatch, FlUrlResponse};
+pub struct TelemetryData {
+    pub method: hyper::Method,
+    pub url: String,
+}
+
+impl TelemetryData {
+    pub fn as_string(&self) -> String {
+        format!("[{}]{}", self.method, self.url)
+    }
+}
 
 pub struct TelemetryFlow {
-    pub telemetry: Arc<dyn MyTelemetry + Send + Sync + 'static>,
-    pub sw: StopWatch,
-    pub name: String,
-    pub dependency_type: String,
-    pub target: String,
+    started: DateTimeAsMicroseconds,
+    telemetry_context: MyTelemetryContext,
+    pub data: Option<TelemetryData>,
 }
 
 impl TelemetryFlow {
-    pub fn write_telemetry(mut self, result: &Result<FlUrlResponse, Error>) {
-        self.sw.pause();
+    pub fn new(telemetry_context: Option<MyTelemetryContext>) -> Option<Self> {
+        let telemetry_context = telemetry_context?;
+        Self {
+            started: DateTimeAsMicroseconds::now(),
+            telemetry_context,
+            data: None,
+        }
+        .into()
+    }
 
-        match &result {
+    pub async fn write_telemetry(&mut self, result: &Result<FlUrlResponse, Error>) {
+        if !my_telemetry::TELEMETRY_INTERFACE.is_telemetry_set_up() {
+            return;
+        }
+
+        let data = self.data.take();
+
+        if data.is_none() {
+            return;
+        }
+
+        let data = data.unwrap();
+
+        let telemetry_event = match &result {
             Ok(result) => {
-                if result.get_status_code() < 300 {
-                    self.telemetry.track_dependency_duration(
-                        self.name,
-                        self.dependency_type,
-                        self.target,
-                        true,
-                        self.sw.duration(),
-                    )
+                let status_code = result.get_status_code();
+                if status_code < 300 {
+                    TelemetryEvent {
+                        process_id: self.telemetry_context.process_id,
+                        started: self.started.unix_microseconds,
+                        finished: DateTimeAsMicroseconds::now().unix_microseconds,
+                        data: data.as_string(),
+                        success: format!("Status Code: {}", status_code).into(),
+                        fail: None,
+                    }
                 } else {
-                    self.telemetry.track_dependency_duration(
-                        self.name,
-                        self.dependency_type,
-                        self.target,
-                        false,
-                        self.sw.duration(),
-                    )
+                    TelemetryEvent {
+                        process_id: self.telemetry_context.process_id,
+                        started: self.started.unix_microseconds,
+                        finished: DateTimeAsMicroseconds::now().unix_microseconds,
+                        data: data.as_string(),
+                        success: None,
+                        fail: format!("Status Code: {}", status_code).into(),
+                    }
                 }
             }
-            Err(_) => self.telemetry.track_dependency_duration(
-                self.name,
-                self.dependency_type,
-                self.target,
-                false,
-                self.sw.duration(),
-            ),
-        }
+            Err(err) => TelemetryEvent {
+                process_id: self.telemetry_context.process_id,
+                started: self.started.unix_microseconds,
+                finished: DateTimeAsMicroseconds::now().unix_microseconds,
+                data: data.as_string(),
+                success: None,
+                fail: format!("Err: {}", err).into(),
+            },
+        };
+
+        let mut write_access = my_telemetry::TELEMETRY_INTERFACE
+            .telemetry_collector
+            .lock()
+            .await;
+
+        write_access.write(telemetry_event)
     }
 }
