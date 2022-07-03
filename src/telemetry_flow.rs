@@ -56,6 +56,7 @@ impl TelemetryFlow {
                         data: data.as_string(),
                         success: format!("Status Code: {}", status_code).into(),
                         fail: None,
+                        ip: None,
                     }
                 } else {
                     TelemetryEvent {
@@ -65,6 +66,7 @@ impl TelemetryFlow {
                         data: data.as_string(),
                         success: None,
                         fail: format!("Status Code: {}", status_code).into(),
+                        ip: None,
                     }
                 }
             }
@@ -75,6 +77,7 @@ impl TelemetryFlow {
                 data: data.as_string(),
                 success: None,
                 fail: format!("Err: {}", err).into(),
+                ip: None,
             },
         };
 
