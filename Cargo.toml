@@ -1,15 +1,15 @@
 [package]
 name = "flurl"
-version = "0.2.0"
+version = "0.2.1"
 authors = ["Andrey <amigin@gmail.com>"]
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-my-telemetry = { branch = "0.2.0", git = "https://github.com/MyJetTools/my-telemetry.git" }
+my-telemetry = { branch = "0.2.1", git = "https://github.com/MyJetTools/my-telemetry.git" }
 hyper-tls = "*"
 hyper = { version = "*", features = ["full"] }
 lazy_static = "*"
 tokio = { version = "*", features = ["full"] }
-rust-extensions = { branch = "0.1.0", git = "https://github.com/MyJetTools/rust-extensions.git" }
+rust-extensions = { branch = "0.1.1", git = "https://github.com/MyJetTools/rust-extensions.git" }
