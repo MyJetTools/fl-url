@@ -18,8 +18,8 @@ pub struct FlUrl {
     execute_timeout: Option<Duration>,
 }
 
-impl<'t> FlUrl {
-    pub fn new(url: &'t str, telemetry_context: Option<MyTelemetryContext>) -> FlUrl {
+impl FlUrl {
+    pub fn new(url: &str, telemetry_context: Option<MyTelemetryContext>) -> FlUrl {
         FlUrl {
             url: FlUrlUriBuilder::from_str(url),
             headers: HashMap::new(),
@@ -29,7 +29,7 @@ impl<'t> FlUrl {
     }
 
     pub fn new_with_timeout(
-        url: &'t str,
+        url: &str,
         time_out: Duration,
         telemetry_context: Option<MyTelemetryContext>,
     ) -> FlUrl {
@@ -41,10 +41,7 @@ impl<'t> FlUrl {
         }
     }
 
-    pub fn new_without_timeout(
-        url: &'t str,
-        telemetry_context: Option<MyTelemetryContext>,
-    ) -> FlUrl {
+    pub fn new_without_timeout(url: &str, telemetry_context: Option<MyTelemetryContext>) -> FlUrl {
         FlUrl {
             url: FlUrlUriBuilder::from_str(url),
             headers: HashMap::new(),
