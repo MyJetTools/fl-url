@@ -5,7 +5,7 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use crate::telemetry_flow::TelemetryFlow;
-use crate::{FlUrl, FlUrlError};
+use crate::{FlUrl, FlUrlError, FlUrlUriBuilder};
 
 use super::FlUrlResponse;
 
@@ -36,14 +36,14 @@ impl FlRequest {
 
     pub async fn execute(
         self,
-        is_https: bool,
+        url: FlUrlUriBuilder,
         execute_timeout: Option<Duration>,
         telemetry_flow: Option<TelemetryFlow>,
     ) -> Result<FlUrlResponse, FlUrlError> {
         match execute_timeout {
             Some(timeout) => match tokio::time::timeout(
                 timeout,
-                execute_request(is_https, self.hyper_request, telemetry_flow),
+                execute_request(url, self.hyper_request, telemetry_flow),
             )
             .await
             {
@@ -55,7 +55,7 @@ impl FlRequest {
                     return Err(FlUrlError::Timeout);
                 }
             },
-            None => execute_request(is_https, self.hyper_request, telemetry_flow).await,
+            None => execute_request(url, self.hyper_request, telemetry_flow).await,
         }
     }
 }
@@ -68,18 +68,19 @@ fn compile_body(body_payload: Option<Vec<u8>>) -> hyper::body::Body {
 }
 
 async fn execute_request(
-    is_https: bool,
+    url: FlUrlUriBuilder,
     hyper_request: Request<Body>,
     telemetry_flow: Option<TelemetryFlow>,
 ) -> Result<FlUrlResponse, FlUrlError> {
-    if is_https {
-        return execute_request_https(hyper_request, telemetry_flow).await;
+    if url.is_https {
+        return execute_request_https(url, hyper_request, telemetry_flow).await;
     }
 
-    execute_request_http(hyper_request, telemetry_flow).await
+    execute_request_http(url, hyper_request, telemetry_flow).await
 }
 
 async fn execute_request_https(
+    url: FlUrlUriBuilder,
     hyper_request: Request<Body>,
     telemetry_flow: Option<TelemetryFlow>,
 ) -> Result<FlUrlResponse, FlUrlError> {
@@ -87,7 +88,7 @@ async fn execute_request_https(
     let client = Client::builder().build::<_, hyper::Body>(https);
 
     let result = match client.request(hyper_request).await {
-        Ok(response) => Ok(FlUrlResponse::new(response)),
+        Ok(response) => Ok(FlUrlResponse::new(url, response)),
         Err(err) => Err(err),
     };
 
@@ -100,13 +101,14 @@ async fn execute_request_https(
 }
 
 async fn execute_request_http(
+    url: FlUrlUriBuilder,
     hyper_request: Request<Body>,
     telemetry_flow: Option<TelemetryFlow>,
 ) -> Result<FlUrlResponse, FlUrlError> {
     let client = Client::builder().build_http();
 
     let result = match client.request(hyper_request).await {
-        Ok(response) => Ok(FlUrlResponse::new(response)),
+        Ok(response) => Ok(FlUrlResponse::new(url, response)),
         Err(err) => Err(err),
     };
 

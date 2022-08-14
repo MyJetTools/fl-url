@@ -2,19 +2,21 @@ use std::collections::HashMap;
 
 use hyper::{Body, Response};
 
-use crate::FlUrlError;
+use crate::{FlUrlError, FlUrlUriBuilder};
 pub struct FlUrlResponse {
+    pub url: FlUrlUriBuilder,
     status_code: u16,
     pub response: Option<Response<Body>>,
     body: Option<Vec<u8>>,
 }
 
 impl FlUrlResponse {
-    pub fn new(response: Response<Body>) -> Self {
+    pub fn new(url: FlUrlUriBuilder, response: Response<Body>) -> Self {
         Self {
             status_code: response.status().as_u16(),
             response: Some(response),
             body: None,
+            url,
         }
     }
 

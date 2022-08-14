@@ -96,7 +96,7 @@ impl FlUrl {
         }
 
         request
-            .execute(self.url.is_https, execute_timeout, self.telemetry_flow)
+            .execute(self.url, execute_timeout, self.telemetry_flow)
             .await
     }
 
