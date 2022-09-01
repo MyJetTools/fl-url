@@ -80,6 +80,11 @@ impl FlUrl {
         self
     }
 
+    pub fn append_raw_ending(mut self, raw: &str) -> Self {
+        self.url.append_raw_ending(raw);
+        self
+    }
+
     async fn execute(
         mut self,
         method: Method,
