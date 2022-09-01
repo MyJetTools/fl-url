@@ -6,6 +6,7 @@ pub struct FlUrlUriBuilder {
     scheme_index: usize,
     pub query: Vec<(String, Option<String>)>,
     pub is_https: bool,
+    raw_ending: Option<String>,
 }
 
 const DEFAULT_SCHEME: &str = "http";
@@ -33,7 +34,12 @@ impl FlUrlUriBuilder {
             scheme_index,
             scheme_and_host,
             is_https,
+            raw_ending: None,
         }
+    }
+
+    pub fn append_raw_ending(&mut self, raw_ending: &str) {
+        self.raw_ending = Some(raw_ending.to_string());
     }
 
     pub fn append_path_segment(&mut self, path: &str) {
@@ -95,6 +101,10 @@ impl FlUrlUriBuilder {
 
         if self.query.len() > 0 {
             fill_with_query(&mut result, &self.query)
+        }
+
+        if let Some(raw_ending) = &self.raw_ending {
+            result.extend_from_slice(raw_ending.as_bytes())
         }
 
         return String::from_utf8(result).unwrap();
