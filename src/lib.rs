@@ -3,7 +3,7 @@ mod fl_request;
 mod fl_response;
 mod fl_url;
 mod fl_url_uri;
-mod telemetry_flow;
+
 pub mod url_utils;
 pub use error::FlUrlError;
 pub use fl_response::FlUrlResponse;

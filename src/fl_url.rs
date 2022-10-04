@@ -1,11 +1,10 @@
 use hyper::Method;
-use my_telemetry::MyTelemetryContext;
+
 use std::collections::HashMap;
 use std::time::Duration;
 
 use crate::fl_request::FlRequest;
-use crate::telemetry_flow::TelemetryData;
-use crate::telemetry_flow::TelemetryFlow;
+
 use crate::FlUrlError;
 use crate::FlUrlUriBuilder;
 
@@ -14,38 +13,31 @@ use super::FlUrlResponse;
 pub struct FlUrl {
     pub url: FlUrlUriBuilder,
     pub headers: HashMap<String, String>,
-    pub telemetry_flow: Option<TelemetryFlow>,
     execute_timeout: Option<Duration>,
 }
 
 impl FlUrl {
-    pub fn new(url: &str, telemetry_context: Option<MyTelemetryContext>) -> FlUrl {
+    pub fn new(url: &str) -> FlUrl {
         FlUrl {
             url: FlUrlUriBuilder::from_str(url),
             headers: HashMap::new(),
-            telemetry_flow: TelemetryFlow::new(telemetry_context),
             execute_timeout: Some(Duration::from_secs(30)),
         }
     }
 
-    pub fn new_with_timeout(
-        url: &str,
-        time_out: Duration,
-        telemetry_context: Option<MyTelemetryContext>,
-    ) -> FlUrl {
+    pub fn new_with_timeout(url: &str, time_out: Duration) -> FlUrl {
         FlUrl {
             url: FlUrlUriBuilder::from_str(url),
             headers: HashMap::new(),
-            telemetry_flow: TelemetryFlow::new(telemetry_context),
+
             execute_timeout: Some(time_out),
         }
     }
 
-    pub fn new_without_timeout(url: &str, telemetry_context: Option<MyTelemetryContext>) -> FlUrl {
+    pub fn new_without_timeout(url: &str) -> FlUrl {
         FlUrl {
             url: FlUrlUriBuilder::from_str(url),
             headers: HashMap::new(),
-            telemetry_flow: TelemetryFlow::new(telemetry_context),
             execute_timeout: None,
         }
     }
@@ -86,23 +78,14 @@ impl FlUrl {
     }
 
     async fn execute(
-        mut self,
+        self,
         method: Method,
         body: Option<Vec<u8>>,
     ) -> Result<FlUrlResponse, FlUrlError> {
         let request = FlRequest::new(&self, method, body);
         let execute_timeout = self.execute_timeout;
 
-        if let Some(telemetry) = &mut self.telemetry_flow {
-            telemetry.data = Some(TelemetryData {
-                method: request.hyper_request.method().clone(),
-                url: self.url.to_string(),
-            });
-        }
-
-        request
-            .execute(self.url, execute_timeout, self.telemetry_flow)
-            .await
+        request.execute(self.url, execute_timeout).await
     }
 
     pub async fn get(self) -> Result<FlUrlResponse, FlUrlError> {

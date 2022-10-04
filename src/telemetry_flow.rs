@@ -32,6 +32,7 @@ impl TelemetryFlow {
         .into()
     }
 
+    
     pub async fn write_telemetry(&mut self, result: &Result<FlUrlResponse, Error>) {
         if !my_telemetry::TELEMETRY_INTERFACE.is_telemetry_set_up() {
             return;
