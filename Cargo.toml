@@ -7,14 +7,13 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [features]
 default = []
+with-client-cert = ["native-tls", "tokio-native-tls", "hyper-native-tls"]
 
 [dependencies]
-rust-extensions = { tag = "0.1.2", git = "https://github.com/MyJetTools/rust-extensions.git" }
-
 hyper = { version = "*", features = ["full"] }
 tokio = { version = "*", features = ["full"] }
 hyper-tls = "*"
 lazy_static = "*"
-hyper-native-tls = "*"
-native-tls = "*"
-tokio-native-tls = "*"
+hyper-native-tls = { version = "*", optional = true }
+native-tls = { version = "*", optional = true }
+tokio-native-tls = { version = "*", optional = true }

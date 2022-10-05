@@ -1,4 +1,5 @@
 use hyper::Method;
+#[cfg(feature = "with-client-cert")]
 use native_tls::Identity;
 
 use std::collections::HashMap;
@@ -14,6 +15,7 @@ use super::FlUrlResponse;
 pub struct FlUrl {
     pub url: FlUrlUriBuilder,
     pub headers: HashMap<String, String>,
+    #[cfg(feature = "with-client-cert")]
     pub client_cert: Option<Identity>,
     execute_timeout: Option<Duration>,
 }
@@ -24,6 +26,7 @@ impl FlUrl {
             url: FlUrlUriBuilder::from_str(url),
             headers: HashMap::new(),
             execute_timeout: Some(Duration::from_secs(30)),
+            #[cfg(feature = "with-client-cert")]
             client_cert: None,
         }
     }
@@ -33,6 +36,7 @@ impl FlUrl {
             url: FlUrlUriBuilder::from_str(url),
             headers: HashMap::new(),
             execute_timeout: Some(time_out),
+            #[cfg(feature = "with-client-cert")]
             client_cert: None,
         }
     }
@@ -42,10 +46,12 @@ impl FlUrl {
             url: FlUrlUriBuilder::from_str(url),
             headers: HashMap::new(),
             execute_timeout: None,
+            #[cfg(feature = "with-client-cert")]
             client_cert: None,
         }
     }
 
+    #[cfg(feature = "with-client-cert")]
     pub fn with_client_certificate(mut self, certificate: Identity) -> Self {
         if self.client_cert.is_some() {
             panic!("Client certificate is already set");
@@ -102,7 +108,12 @@ impl FlUrl {
         let execute_timeout = self.execute_timeout;
 
         request
-            .execute(self.url, execute_timeout, self.client_cert.take())
+            .execute(
+                self.url,
+                execute_timeout,
+                #[cfg(feature = "with-client-cert")]
+                self.client_cert.take(),
+            )
             .await
     }
 
