@@ -1,4 +1,5 @@
 use hyper::Method;
+use native_tls::Identity;
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -13,6 +14,7 @@ use super::FlUrlResponse;
 pub struct FlUrl {
     pub url: FlUrlUriBuilder,
     pub headers: HashMap<String, String>,
+    pub client_cert: Option<Identity>,
     execute_timeout: Option<Duration>,
 }
 
@@ -22,6 +24,7 @@ impl FlUrl {
             url: FlUrlUriBuilder::from_str(url),
             headers: HashMap::new(),
             execute_timeout: Some(Duration::from_secs(30)),
+            client_cert: None,
         }
     }
 
@@ -29,8 +32,8 @@ impl FlUrl {
         FlUrl {
             url: FlUrlUriBuilder::from_str(url),
             headers: HashMap::new(),
-
             execute_timeout: Some(time_out),
+            client_cert: None,
         }
     }
 
@@ -39,7 +42,20 @@ impl FlUrl {
             url: FlUrlUriBuilder::from_str(url),
             headers: HashMap::new(),
             execute_timeout: None,
+            client_cert: None,
         }
+    }
+
+    pub fn with_client_certificate(mut self, certificate: Identity) -> Self {
+        if self.client_cert.is_some() {
+            panic!("Client certificate is already set");
+        }
+        if self.url.get_scheme() != "https" {
+            panic!("Client certificate can only be used with https");
+        }
+
+        self.client_cert = Some(certificate);
+        self
     }
 
     pub fn append_path_segment(mut self, path: &str) -> Self {
@@ -78,14 +94,16 @@ impl FlUrl {
     }
 
     async fn execute(
-        self,
+        mut self,
         method: Method,
         body: Option<Vec<u8>>,
     ) -> Result<FlUrlResponse, FlUrlError> {
-        let request = FlRequest::new(&self, method, body);
+        let request = FlRequest::new(&mut self, method, body);
         let execute_timeout = self.execute_timeout;
 
-        request.execute(self.url, execute_timeout).await
+        request
+            .execute(self.url, execute_timeout, self.client_cert.take())
+            .await
     }
 
     pub async fn get(self) -> Result<FlUrlResponse, FlUrlError> {
