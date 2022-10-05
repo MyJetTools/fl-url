@@ -11,12 +11,17 @@ use crate::FlUrlError;
 use crate::FlUrlUriBuilder;
 
 use super::FlUrlResponse;
+#[cfg(feature = "with-client-cert")]
+pub struct CertInfo {
+    pub certificate: Identity,
+    pub accept_invalid_cert: bool,
+}
 
 pub struct FlUrl {
     pub url: FlUrlUriBuilder,
     pub headers: HashMap<String, String>,
     #[cfg(feature = "with-client-cert")]
-    pub client_cert: Option<Identity>,
+    pub client_cert: Option<CertInfo>,
     execute_timeout: Option<Duration>,
 }
 
@@ -52,7 +57,11 @@ impl FlUrl {
     }
 
     #[cfg(feature = "with-client-cert")]
-    pub fn with_client_certificate(mut self, certificate: Identity) -> Self {
+    pub fn with_client_certificate(
+        mut self,
+        certificate: Identity,
+        accept_invalid_cert: bool,
+    ) -> Self {
         if self.client_cert.is_some() {
             panic!("Client certificate is already set");
         }
@@ -60,7 +69,10 @@ impl FlUrl {
             panic!("Client certificate can only be used with https");
         }
 
-        self.client_cert = Some(certificate);
+        self.client_cert = Some(CertInfo {
+            accept_invalid_cert,
+            certificate,
+        });
         self
     }
 

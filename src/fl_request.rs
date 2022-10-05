@@ -1,9 +1,9 @@
+#[cfg(feature = "with-client-cert")]
+use crate::fl_url::CertInfo;
 use crate::{FlUrl, FlUrlError, FlUrlUriBuilder};
 use hyper::header::*;
 use hyper::{Body, Method, Request};
 
-#[cfg(feature = "with-client-cert")]
-use native_tls::Identity;
 use std::str::FromStr;
 use std::time::Duration;
 
@@ -38,7 +38,7 @@ impl FlRequest {
         self,
         url: FlUrlUriBuilder,
         execute_timeout: Option<Duration>,
-        #[cfg(feature = "with-client-cert")] certificate: Option<Identity>,
+        #[cfg(feature = "with-client-cert")] certificate: Option<CertInfo>,
     ) -> Result<FlUrlResponse, FlUrlError> {
         match execute_timeout {
             Some(timeout) => {
@@ -85,7 +85,7 @@ fn compile_body(body_payload: Option<Vec<u8>>) -> hyper::body::Body {
 async fn execute_request(
     url: FlUrlUriBuilder,
     hyper_request: Request<Body>,
-    #[cfg(feature = "with-client-cert")] certificate: Option<Identity>,
+    #[cfg(feature = "with-client-cert")] certificate: Option<CertInfo>,
 ) -> Result<FlUrlResponse, FlUrlError> {
     if url.is_https {
         return execute_request_https(
@@ -103,15 +103,16 @@ async fn execute_request(
 async fn execute_request_https(
     url: FlUrlUriBuilder,
     hyper_request: Request<Body>,
-    #[cfg(feature = "with-client-cert")] certificate: Option<Identity>,
+    #[cfg(feature = "with-client-cert")] certificate: Option<CertInfo>,
 ) -> Result<FlUrlResponse, FlUrlError> {
     #[cfg(feature = "with-client-cert")]
-    if let Some(certificate) = certificate {
+    if let Some(cert) = certificate {
         let mut http_connector = hyper::client::HttpConnector::new();
         http_connector.enforce_http(false);
 
         let tls_conn = native_tls::TlsConnector::builder()
-            .identity(certificate)
+            .identity(cert.certificate)
+            .danger_accept_invalid_certs(cert.accept_invalid_cert)
             .build()
             .unwrap();
 
