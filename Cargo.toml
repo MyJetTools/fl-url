@@ -4,6 +4,11 @@ version = "0.2.3"
 authors = ["Andrey <amigin@gmail.com>"]
 edition = "2021"
 
+
+[features]
+default = []
+with-native-tls = ["hyper-native-tls", "native-tls", "tokio-native-tls"]
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [dependencies]
 
@@ -12,6 +17,6 @@ tokio = { version = "*", features = ["full"] }
 hyper-tls = "*"
 lazy_static = "*"
 
-hyper-native-tls = "*"
-native-tls = "*"
-tokio-native-tls = "*"
+hyper-native-tls = { version = "*", optional = true }
+native-tls = { version = "*", optional = true }
+tokio-native-tls = { version = "*", optional = true }

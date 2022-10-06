@@ -67,7 +67,7 @@ impl FlRequest {
         let result = result?;
         Ok(result)
     }
-
+    #[cfg(feature = "with-native-tls")]
     async fn execute_request_https(self) -> Result<FlUrlResponse, FlUrlError> {
         let mut http_connector = hyper::client::HttpConnector::new();
         http_connector.enforce_http(false);
@@ -92,6 +92,20 @@ impl FlRequest {
 
         //create hyper client with https connector
         let client = hyper::Client::builder().build::<_, hyper::Body>(ct);
+
+        let result = match client.request(self.hyper_request).await {
+            Ok(response) => Ok(FlUrlResponse::new(self.fl_url.url, response)),
+            Err(err) => Err(err),
+        };
+
+        let result = result?;
+        Ok(result)
+    }
+
+    #[cfg(not(feature = "with-native-tls"))]
+    async fn execute_request_https(self) -> Result<FlUrlResponse, FlUrlError> {
+        let https = hyper_tls::HttpsConnector::new();
+        let client = hyper::Client::builder().build::<_, hyper::Body>(https);
 
         let result = match client.request(self.hyper_request).await {
             Ok(response) => Ok(FlUrlResponse::new(self.fl_url.url, response)),

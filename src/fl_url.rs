@@ -1,5 +1,6 @@
 use hyper::Method;
 
+#[cfg(feature = "with-native-tls")]
 use native_tls::Identity;
 
 use std::collections::HashMap;
@@ -15,9 +16,9 @@ use super::FlUrlResponse;
 pub struct FlUrl {
     pub url: FlUrlUriBuilder,
     pub headers: HashMap<String, String>,
-
+    #[cfg(feature = "with-native-tls")]
     pub client_cert: Option<Identity>,
-
+    #[cfg(feature = "with-native-tls")]
     pub accept_invalid_certificate: bool,
     pub execute_timeout: Option<Duration>,
 }
@@ -28,8 +29,9 @@ impl FlUrl {
             url: FlUrlUriBuilder::from_str(url),
             headers: HashMap::new(),
             execute_timeout: Some(Duration::from_secs(30)),
-
+            #[cfg(feature = "with-native-tls")]
             client_cert: None,
+            #[cfg(feature = "with-native-tls")]
             accept_invalid_certificate: false,
         }
     }
@@ -39,8 +41,9 @@ impl FlUrl {
             url: FlUrlUriBuilder::from_str(url),
             headers: HashMap::new(),
             execute_timeout: Some(time_out),
-
+            #[cfg(feature = "with-native-tls")]
             client_cert: None,
+            #[cfg(feature = "with-native-tls")]
             accept_invalid_certificate: false,
         }
     }
@@ -50,12 +53,13 @@ impl FlUrl {
             url: FlUrlUriBuilder::from_str(url),
             headers: HashMap::new(),
             execute_timeout: None,
-
+            #[cfg(feature = "with-native-tls")]
             client_cert: None,
+            #[cfg(feature = "with-native-tls")]
             accept_invalid_certificate: false,
         }
     }
-
+    #[cfg(feature = "with-native-tls")]
     pub fn with_client_certificate(mut self, certificate: Identity) -> Self {
         if self.client_cert.is_some() {
             panic!("Client certificate is already set");
@@ -67,7 +71,7 @@ impl FlUrl {
         self.client_cert = Some(certificate);
         self
     }
-
+    #[cfg(feature = "with-native-tls")]
     pub fn accept_invalid_certificate(mut self) -> Self {
         self.accept_invalid_certificate = true;
         self
