@@ -72,7 +72,6 @@ impl FlRequest {
         let mut http_connector = hyper::client::HttpConnector::new();
         http_connector.enforce_http(false);
 
-        #[cfg(feature = "with-client-cert")]
         let tls_conn = if let Some(client_cert) = self.fl_url.client_cert {
             native_tls::TlsConnector::builder()
                 .identity(client_cert)
@@ -85,12 +84,6 @@ impl FlRequest {
                 .build()
                 .unwrap()
         };
-
-        #[cfg(not(feature = "with-client-cert"))]
-        let tls_conn = native_tls::TlsConnector::builder()
-            .danger_accept_invalid_certs(self.fl_url.accept_invalid_certificate)
-            .build()
-            .unwrap();
 
         let tls_conn = tokio_native_tls::TlsConnector::from(tls_conn);
 

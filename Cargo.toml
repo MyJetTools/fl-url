@@ -5,10 +5,6 @@ authors = ["Andrey <amigin@gmail.com>"]
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-[features]
-default = []
-with-client-cert = []
-
 [dependencies]
 
 hyper = { version = "*", features = ["full"] }
