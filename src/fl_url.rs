@@ -17,7 +17,7 @@ pub struct FlUrl {
     pub headers: HashMap<String, String>,
     #[cfg(feature = "with-client-cert")]
     pub client_cert: Option<Identity>,
-    #[cfg(feature = "accept-invalid-cert")]
+
     pub accept_invalid_certificate: bool,
     pub execute_timeout: Option<Duration>,
 }
@@ -30,7 +30,6 @@ impl FlUrl {
             execute_timeout: Some(Duration::from_secs(30)),
             #[cfg(feature = "with-client-cert")]
             client_cert: None,
-            #[cfg(feature = "accept-invalid-cert")]
             accept_invalid_certificate: false,
         }
     }
@@ -42,7 +41,6 @@ impl FlUrl {
             execute_timeout: Some(time_out),
             #[cfg(feature = "with-client-cert")]
             client_cert: None,
-            #[cfg(feature = "accept-invalid-cert")]
             accept_invalid_certificate: false,
         }
     }
@@ -54,7 +52,6 @@ impl FlUrl {
             execute_timeout: None,
             #[cfg(feature = "with-client-cert")]
             client_cert: None,
-            #[cfg(feature = "accept-invalid-cert")]
             accept_invalid_certificate: false,
         }
     }
@@ -71,7 +68,7 @@ impl FlUrl {
         self.client_cert = Some(certificate);
         self
     }
-    #[cfg(feature = "accept-invalid-cert")]
+
     pub fn accept_invalid_certificate(mut self) -> Self {
         self.accept_invalid_certificate = true;
         self
