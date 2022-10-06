@@ -11,18 +11,15 @@ use crate::FlUrlError;
 use crate::FlUrlUriBuilder;
 
 use super::FlUrlResponse;
-#[cfg(feature = "with-client-cert")]
-pub struct CertInfo {
-    pub certificate: Identity,
-    pub accept_invalid_cert: bool,
-}
 
 pub struct FlUrl {
     pub url: FlUrlUriBuilder,
     pub headers: HashMap<String, String>,
     #[cfg(feature = "with-client-cert")]
-    pub client_cert: Option<CertInfo>,
-    execute_timeout: Option<Duration>,
+    pub client_cert: Option<Identity>,
+    #[cfg(feature = "accept-invalid-cert")]
+    pub accept_invalid_certificate: bool,
+    pub execute_timeout: Option<Duration>,
 }
 
 impl FlUrl {
@@ -33,6 +30,8 @@ impl FlUrl {
             execute_timeout: Some(Duration::from_secs(30)),
             #[cfg(feature = "with-client-cert")]
             client_cert: None,
+            #[cfg(feature = "accept-invalid-cert")]
+            accept_invalid_certificate: false,
         }
     }
 
@@ -43,6 +42,8 @@ impl FlUrl {
             execute_timeout: Some(time_out),
             #[cfg(feature = "with-client-cert")]
             client_cert: None,
+            #[cfg(feature = "accept-invalid-cert")]
+            accept_invalid_certificate: false,
         }
     }
 
@@ -53,15 +54,13 @@ impl FlUrl {
             execute_timeout: None,
             #[cfg(feature = "with-client-cert")]
             client_cert: None,
+            #[cfg(feature = "accept-invalid-cert")]
+            accept_invalid_certificate: false,
         }
     }
 
     #[cfg(feature = "with-client-cert")]
-    pub fn with_client_certificate(
-        mut self,
-        certificate: Identity,
-        accept_invalid_cert: bool,
-    ) -> Self {
+    pub fn with_client_certificate(mut self, certificate: Identity) -> Self {
         if self.client_cert.is_some() {
             panic!("Client certificate is already set");
         }
@@ -69,10 +68,12 @@ impl FlUrl {
             panic!("Client certificate can only be used with https");
         }
 
-        self.client_cert = Some(CertInfo {
-            accept_invalid_cert,
-            certificate,
-        });
+        self.client_cert = Some(certificate);
+        self
+    }
+    #[cfg(feature = "accept-invalid-cert")]
+    pub fn accept_invalid_certificate(mut self) -> Self {
+        self.accept_invalid_certificate = true;
         self
     }
 
@@ -112,21 +113,13 @@ impl FlUrl {
     }
 
     async fn execute(
-        mut self,
+        self,
         method: Method,
         body: Option<Vec<u8>>,
     ) -> Result<FlUrlResponse, FlUrlError> {
-        let request = FlRequest::new(&mut self, method, body);
-        let execute_timeout = self.execute_timeout;
+        let request = FlRequest::new(self, method, body);
 
-        request
-            .execute(
-                self.url,
-                execute_timeout,
-                #[cfg(feature = "with-client-cert")]
-                self.client_cert.take(),
-            )
-            .await
+        request.execute().await
     }
 
     pub async fn get(self) -> Result<FlUrlResponse, FlUrlError> {
