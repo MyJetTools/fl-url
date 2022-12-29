@@ -212,6 +212,21 @@ mod tests {
     }
 
     #[test]
+    pub fn test_path_segmets_with_slug_at_the_end() {
+        let mut uri_builder = FlUrlUriBuilder::from_str("https://google.com/");
+        uri_builder.append_path_segment("first");
+        uri_builder.append_path_segment("second");
+
+        assert_eq!("https://google.com/first/second", uri_builder.to_string());
+        assert_eq!("https://google.com", uri_builder.get_scheme_and_host());
+
+        assert_eq!("https", uri_builder.get_scheme());
+        assert_eq!("google.com", uri_builder.get_host());
+        assert_eq!("/first/second", uri_builder.get_path());
+        assert_eq!("/first/second", uri_builder.get_path_and_query());
+    }
+
+    #[test]
     pub fn test_query_with_no_path() {
         let mut uri_builder = FlUrlUriBuilder::from_str("https://google.com");
         uri_builder.append_query_param("first", Some("first_value".to_string()));
@@ -253,6 +268,19 @@ mod tests {
         assert_eq!(
             "/first/second?first=first_value&second=second_value",
             uri_builder.get_path_and_query()
+        );
+    }
+
+    #[test]
+    fn test_remove_last_symbol_if_exists() {
+        assert_eq!(
+            "http://google.com",
+            super::remove_last_symbol_if_exists("http://google.com/", '/')
+        );
+
+        assert_eq!(
+            "http://google.com",
+            super::remove_last_symbol_if_exists("http://google.com", '/')
         );
     }
 }
