@@ -36,6 +36,18 @@ impl FlUrl {
         }
     }
 
+    pub fn new_without_url_change(url: &str) -> FlUrl {
+        FlUrl {
+            url: FlUrlUriBuilder::from_str(url),
+            headers: HashMap::new(),
+            execute_timeout: Some(Duration::from_secs(30)),
+            #[cfg(feature = "with-native-tls")]
+            client_cert: None,
+            #[cfg(feature = "with-native-tls")]
+            accept_invalid_certificate: false,
+        }
+    }
+
     pub fn new_with_timeout(url: &str, time_out: Duration) -> FlUrl {
         FlUrl {
             url: FlUrlUriBuilder::from_str(url),

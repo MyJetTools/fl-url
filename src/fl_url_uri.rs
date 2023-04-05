@@ -38,6 +38,30 @@ impl FlUrlUriBuilder {
         }
     }
 
+    pub fn from_str_without_change(host: &str) -> Self {
+        let scheme_index = host.find("://");
+
+        let (scheme_index, scheme_and_host) = if let Some(scheme_index) = scheme_index {
+            (scheme_index, host.to_string())
+        } else {
+            (
+                DEFAULT_SCHEME.len(),
+                format!("{}://{}", DEFAULT_SCHEME, host),
+            )
+        };
+
+        let is_https = scheme_and_host.starts_with("https");
+
+        Self {
+            query: Vec::new(),
+            path: Vec::new(),
+            scheme_index,
+            scheme_and_host,
+            is_https,
+            raw_ending: None,
+        }
+    }
+
     pub fn append_raw_ending(&mut self, raw_ending: &str) {
         self.raw_ending = Some(raw_ending.to_string());
     }
