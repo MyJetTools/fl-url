@@ -10,12 +10,12 @@ use std::time::Duration;
 use crate::fl_request::FlRequest;
 
 use crate::FlUrlError;
-use crate::UrlUriBuilder;
+use crate::UrlBuilder;
 
 use super::FlUrlResponse;
 
 pub struct FlUrl {
-    pub url: UrlUriBuilder,
+    pub url: UrlBuilder,
     pub headers: HashMap<String, String>,
     #[cfg(feature = "with-native-tls")]
     pub client_cert: Option<Identity>,
@@ -27,7 +27,7 @@ pub struct FlUrl {
 impl FlUrl {
     pub fn new<'s>(url: impl Into<StrOrString<'s>>) -> FlUrl {
         FlUrl {
-            url: UrlUriBuilder::new(url),
+            url: UrlBuilder::new(url),
             headers: HashMap::new(),
             execute_timeout: Some(Duration::from_secs(30)),
             #[cfg(feature = "with-native-tls")]
@@ -39,7 +39,7 @@ impl FlUrl {
 
     pub fn new_with_timeout<'s>(url: impl Into<StrOrString<'s>>, time_out: Duration) -> FlUrl {
         FlUrl {
-            url: UrlUriBuilder::new(url),
+            url: UrlBuilder::new(url),
             headers: HashMap::new(),
             execute_timeout: Some(time_out),
             #[cfg(feature = "with-native-tls")]
@@ -51,7 +51,7 @@ impl FlUrl {
 
     pub fn new_without_timeout<'s>(url: impl Into<StrOrString<'s>>) -> FlUrl {
         FlUrl {
-            url: UrlUriBuilder::new(url),
+            url: UrlBuilder::new(url),
             headers: HashMap::new(),
             execute_timeout: None,
             #[cfg(feature = "with-native-tls")]

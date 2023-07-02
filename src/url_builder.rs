@@ -2,8 +2,8 @@ use rust_extensions::StrOrString;
 
 use crate::url_utils;
 
-pub struct UrlUriBuilder {
-    path: Vec<String>,
+pub struct UrlBuilder {
+    path_segments: Vec<String>,
     pub scheme_and_host: String,
     scheme_index: usize,
     pub query: Vec<(String, Option<String>)>,
@@ -13,10 +13,9 @@ pub struct UrlUriBuilder {
 
 const DEFAULT_SCHEME: &str = "http";
 
-impl UrlUriBuilder {
+impl UrlBuilder {
     pub fn new<'s>(host: impl Into<StrOrString<'s>>) -> Self {
-        let mut host: StrOrString<'s> = host.into();
-        remove_last_symbol_if_exists(&mut host, '/');
+        let host: StrOrString<'s> = host.into();
 
         let scheme_index = host.as_str().find("://");
 
@@ -33,7 +32,7 @@ impl UrlUriBuilder {
 
         Self {
             query: Vec::new(),
-            path: Vec::new(),
+            path_segments: Vec::new(),
             scheme_index,
             scheme_and_host,
             is_https,
@@ -46,7 +45,7 @@ impl UrlUriBuilder {
     }
 
     pub fn append_path_segment(&mut self, path: String) {
-        self.path.push(path);
+        self.path_segments.push(path);
     }
 
     pub fn append_query_param(&mut self, param: String, value: Option<String>) {
@@ -58,17 +57,17 @@ impl UrlUriBuilder {
     }
 
     pub fn get_host(&self) -> &str {
-        &self.scheme_and_host[self.scheme_index + 3..]
+        remove_last_symbol_if_exists(&self.scheme_and_host[self.scheme_index + 3..], '/')
     }
 
     pub fn get_scheme_and_host(&self) -> &str {
-        &self.scheme_and_host
+        remove_last_symbol_if_exists(&self.scheme_and_host, '/')
     }
 
     pub fn get_path_and_query(&self) -> String {
         let mut result: Vec<u8> = Vec::new();
 
-        fill_with_path(&mut result, &self.path);
+        fill_with_path(&mut result, &self.path_segments);
 
         if self.query.len() > 0 {
             fill_with_query(&mut result, &self.query)
@@ -78,28 +77,30 @@ impl UrlUriBuilder {
     }
 
     pub fn get_path(&self) -> String {
-        if self.path.len() == 0 {
+        if self.path_segments.len() == 0 {
             return "/".to_string();
         }
 
         let mut result: Vec<u8> = vec![];
 
-        fill_with_path(&mut result, &self.path);
+        fill_with_path(&mut result, &self.path_segments);
 
         return String::from_utf8(result).unwrap();
     }
 
     pub fn to_string(&self) -> String {
-        if self.path.len() == 0 && self.query.len() == 0 {
+        if self.path_segments.len() == 0 && self.query.len() == 0 {
             return self.scheme_and_host.to_string();
         }
 
         let mut result: Vec<u8> = Vec::new();
 
-        fill_with_url(&mut result, &self.scheme_and_host);
+        fill_with_url(&mut result, self.scheme_and_host.as_bytes());
 
-        if self.path.len() > 0 {
-            fill_with_path(&mut result, &self.path);
+        println!("result: {:?}", std::str::from_utf8(&result).unwrap());
+
+        if self.path_segments.len() > 0 {
+            fill_with_path(&mut result, &self.path_segments);
         }
 
         if self.query.len() > 0 {
@@ -114,8 +115,12 @@ impl UrlUriBuilder {
     }
 }
 
-fn fill_with_url(res: &mut Vec<u8>, src: &str) {
-    res.extend(src.as_bytes());
+fn fill_with_url(res: &mut Vec<u8>, scheme_and_url: &[u8]) {
+    if scheme_and_url[scheme_and_url.len() - 1] == b'/' {
+        res.extend_from_slice(&scheme_and_url[..scheme_and_url.len() - 1]);
+        return;
+    }
+    res.extend_from_slice(scheme_and_url);
 }
 
 fn fill_with_path(res: &mut Vec<u8>, src: &Vec<String>) {
@@ -130,12 +135,15 @@ fn fill_with_path(res: &mut Vec<u8>, src: &Vec<String>) {
     }
 }
 
-fn remove_last_symbol_if_exists<'s>(src: &mut StrOrString<'s>, last_symbol: char) {
+fn remove_last_symbol_if_exists(src: &str, last_symbol: char) -> &str {
     let last_char = last_symbol as u8;
-    let src_as_bytes = src.as_str().as_bytes();
+    let src_as_bytes = src.as_bytes();
     if src_as_bytes[src_as_bytes.len() - 1] == last_char {
-        src.slice_it(None, Some(src_as_bytes.len() - 1));
+        let result = &src_as_bytes[..src.len() - 1];
+        return std::str::from_utf8(result).unwrap();
     }
+
+    src
 }
 
 fn fill_with_query(res: &mut Vec<u8>, src: &Vec<(String, Option<String>)>) {
@@ -158,13 +166,12 @@ fn fill_with_query(res: &mut Vec<u8>, src: &Vec<(String, Option<String>)>) {
 
 #[cfg(test)]
 mod tests {
-    use rust_extensions::StrOrString;
 
-    use crate::UrlUriBuilder;
+    use crate::UrlBuilder;
 
     #[test]
     pub fn test_with_default_scheme() {
-        let uri_builder = UrlUriBuilder::new("google.com");
+        let uri_builder = UrlBuilder::new("google.com");
 
         assert_eq!("http://google.com", uri_builder.to_string());
         assert_eq!("http://google.com", uri_builder.get_scheme_and_host());
@@ -176,7 +183,7 @@ mod tests {
 
     #[test]
     pub fn test_with_http_scheme() {
-        let uri_builder = UrlUriBuilder::new("http://google.com");
+        let uri_builder = UrlBuilder::new("http://google.com");
 
         assert_eq!("http://google.com", uri_builder.to_string());
         assert_eq!("http://google.com", uri_builder.get_scheme_and_host());
@@ -187,8 +194,20 @@ mod tests {
     }
 
     #[test]
+    pub fn test_with_http_scheme_and_last_slash() {
+        let uri_builder = UrlBuilder::new("http://google.com/");
+
+        assert_eq!("http://google.com/", uri_builder.to_string());
+        assert_eq!("http://google.com", uri_builder.get_scheme_and_host());
+        assert_eq!("http", uri_builder.get_scheme());
+        assert_eq!("google.com", uri_builder.get_host());
+        assert_eq!("/", uri_builder.get_path());
+        assert_eq!("/", uri_builder.get_path_and_query());
+    }
+
+    #[test]
     pub fn test_with_https_scheme() {
-        let uri_builder = UrlUriBuilder::new("https://google.com");
+        let uri_builder = UrlBuilder::new("https://google.com");
 
         assert_eq!("https://google.com", uri_builder.to_string());
         assert_eq!("https://google.com", uri_builder.get_scheme_and_host());
@@ -201,7 +220,7 @@ mod tests {
 
     #[test]
     pub fn test_path_segments() {
-        let mut uri_builder = UrlUriBuilder::new("https://google.com");
+        let mut uri_builder = UrlBuilder::new("https://google.com");
         uri_builder.append_path_segment("first".to_string());
         uri_builder.append_path_segment("second".to_string());
 
@@ -216,7 +235,7 @@ mod tests {
 
     #[test]
     pub fn test_path_segments_with_slug_at_the_end() {
-        let mut uri_builder = UrlUriBuilder::new("https://google.com/");
+        let mut uri_builder = UrlBuilder::new("https://google.com/");
         uri_builder.append_path_segment("first".to_string());
         uri_builder.append_path_segment("second".to_string());
 
@@ -231,7 +250,7 @@ mod tests {
 
     #[test]
     pub fn test_query_with_no_path() {
-        let mut uri_builder = UrlUriBuilder::new("https://google.com");
+        let mut uri_builder = UrlBuilder::new("https://google.com");
         uri_builder.append_query_param("first".to_string(), Some("first_value".to_string()));
         uri_builder.append_query_param("second".to_string(), Some("second_value".to_string()));
 
@@ -252,7 +271,7 @@ mod tests {
 
     #[test]
     pub fn test_path_and_query() {
-        let mut uri_builder = UrlUriBuilder::new("https://google.com");
+        let mut uri_builder = UrlBuilder::new("https://google.com");
         uri_builder.append_path_segment("first".to_string());
         uri_builder.append_path_segment("second".to_string());
 
@@ -272,16 +291,5 @@ mod tests {
             "/first/second?first=first_value&second=second_value",
             uri_builder.get_path_and_query()
         );
-    }
-
-    #[test]
-    fn test_remove_last_symbol_if_exists() {
-        let mut src: StrOrString<'_> = "http://google.com/".into();
-        super::remove_last_symbol_if_exists(&mut src, '/');
-        assert_eq!("http://google.com", src.as_str());
-
-        let mut src: StrOrString<'_> = "http://google.com".into();
-        super::remove_last_symbol_if_exists(&mut src, '/');
-        assert_eq!("http://google.com", src.as_str());
     }
 }
