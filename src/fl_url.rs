@@ -2,6 +2,7 @@ use hyper::Method;
 
 #[cfg(feature = "with-native-tls")]
 use native_tls::Identity;
+use rust_extensions::StrOrString;
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -9,12 +10,12 @@ use std::time::Duration;
 use crate::fl_request::FlRequest;
 
 use crate::FlUrlError;
-use crate::FlUrlUriBuilder;
+use crate::UrlUriBuilder;
 
 use super::FlUrlResponse;
 
 pub struct FlUrl {
-    pub url: FlUrlUriBuilder,
+    pub url: UrlUriBuilder,
     pub headers: HashMap<String, String>,
     #[cfg(feature = "with-native-tls")]
     pub client_cert: Option<Identity>,
@@ -24,9 +25,9 @@ pub struct FlUrl {
 }
 
 impl FlUrl {
-    pub fn new(url: &str) -> FlUrl {
+    pub fn new<'s>(url: impl Into<StrOrString<'s>>) -> FlUrl {
         FlUrl {
-            url: FlUrlUriBuilder::from_str(url),
+            url: UrlUriBuilder::new(url),
             headers: HashMap::new(),
             execute_timeout: Some(Duration::from_secs(30)),
             #[cfg(feature = "with-native-tls")]
@@ -36,21 +37,9 @@ impl FlUrl {
         }
     }
 
-    pub fn new_without_url_change(url: &str) -> FlUrl {
+    pub fn new_with_timeout<'s>(url: impl Into<StrOrString<'s>>, time_out: Duration) -> FlUrl {
         FlUrl {
-            url: FlUrlUriBuilder::from_str_without_change(url),
-            headers: HashMap::new(),
-            execute_timeout: Some(Duration::from_secs(30)),
-            #[cfg(feature = "with-native-tls")]
-            client_cert: None,
-            #[cfg(feature = "with-native-tls")]
-            accept_invalid_certificate: false,
-        }
-    }
-
-    pub fn new_with_timeout(url: &str, time_out: Duration) -> FlUrl {
-        FlUrl {
-            url: FlUrlUriBuilder::from_str(url),
+            url: UrlUriBuilder::new(url),
             headers: HashMap::new(),
             execute_timeout: Some(time_out),
             #[cfg(feature = "with-native-tls")]
@@ -60,9 +49,9 @@ impl FlUrl {
         }
     }
 
-    pub fn new_without_timeout(url: &str) -> FlUrl {
+    pub fn new_without_timeout<'s>(url: impl Into<StrOrString<'s>>) -> FlUrl {
         FlUrl {
-            url: FlUrlUriBuilder::from_str(url),
+            url: UrlUriBuilder::new(url),
             headers: HashMap::new(),
             execute_timeout: None,
             #[cfg(feature = "with-native-tls")]
@@ -89,38 +78,44 @@ impl FlUrl {
         self
     }
 
-    pub fn append_path_segment(mut self, path: &str) -> Self {
-        self.url.append_path_segment(path);
+    pub fn append_path_segment<'s>(mut self, path_segment: impl Into<StrOrString<'s>>) -> Self {
+        let path_segment: StrOrString<'s> = path_segment.into();
+        self.url.append_path_segment(path_segment.to_string());
         self
     }
 
-    pub fn append_query_param(mut self, param: &str, value: &str) -> Self {
-        self.url.append_query_param(param, Some(value.to_string()));
+    pub fn append_query_param<'n, 'v>(
+        mut self,
+        param_name: impl Into<StrOrString<'n>>,
+        value: Option<impl Into<StrOrString<'v>>>,
+    ) -> Self {
+        let param_name = param_name.into().to_string();
+
+        let value: Option<String> = if let Some(value) = value {
+            Some(value.into().to_string())
+        } else {
+            None
+        };
+
+        self.url.append_query_param(param_name, value);
         self
     }
 
-    pub fn set_query_param(mut self, param: &str) -> Self {
-        self.url.append_query_param(param, None);
-        self
-    }
+    pub fn with_header<'n, 'v>(
+        mut self,
+        name: impl Into<StrOrString<'n>>,
+        value: impl Into<StrOrString<'v>>,
+    ) -> Self {
+        let name: StrOrString<'n> = name.into();
+        let value: StrOrString<'v> = value.into();
 
-    pub fn append_query_param_string(mut self, param: &str, value: String) -> Self {
-        self.url.append_query_param(param, Some(value));
-        self
-    }
-
-    pub fn with_header(mut self, name: &str, value: &str) -> Self {
         self.headers.insert(name.to_string(), value.to_string());
         self
     }
 
-    pub fn with_header_val_string(mut self, name: &str, value: String) -> Self {
-        self.headers.insert(name.to_string(), value);
-        self
-    }
-
-    pub fn append_raw_ending(mut self, raw: &str) -> Self {
-        self.url.append_raw_ending(raw);
+    pub fn append_raw_ending_to_url<'r>(mut self, raw: impl Into<StrOrString<'r>>) -> Self {
+        let raw: StrOrString<'r> = raw.into();
+        self.url.append_raw_ending(raw.to_string());
         self
     }
 

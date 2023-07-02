@@ -1,6 +1,8 @@
+use rust_extensions::StrOrString;
+
 use crate::url_utils;
 
-pub struct FlUrlUriBuilder {
+pub struct UrlUriBuilder {
     path: Vec<String>,
     pub scheme_and_host: String,
     scheme_index: usize,
@@ -11,18 +13,19 @@ pub struct FlUrlUriBuilder {
 
 const DEFAULT_SCHEME: &str = "http";
 
-impl FlUrlUriBuilder {
-    pub fn from_str(host: &str) -> Self {
-        let host = remove_last_symbol_if_exists(host, '/');
+impl UrlUriBuilder {
+    pub fn new<'s>(host: impl Into<StrOrString<'s>>) -> Self {
+        let mut host: StrOrString<'s> = host.into();
+        remove_last_symbol_if_exists(&mut host, '/');
 
-        let scheme_index = host.find("://");
+        let scheme_index = host.as_str().find("://");
 
         let (scheme_index, scheme_and_host) = if let Some(scheme_index) = scheme_index {
             (scheme_index, host.to_string())
         } else {
             (
                 DEFAULT_SCHEME.len(),
-                format!("{}://{}", DEFAULT_SCHEME, host),
+                format!("{}://{}", DEFAULT_SCHEME, host.as_str()),
             )
         };
 
@@ -38,39 +41,15 @@ impl FlUrlUriBuilder {
         }
     }
 
-    pub fn from_str_without_change(host: &str) -> Self {
-        let scheme_index = host.find("://");
-
-        let (scheme_index, scheme_and_host) = if let Some(scheme_index) = scheme_index {
-            (scheme_index, host.to_string())
-        } else {
-            (
-                DEFAULT_SCHEME.len(),
-                format!("{}://{}", DEFAULT_SCHEME, host),
-            )
-        };
-
-        let is_https = scheme_and_host.starts_with("https");
-
-        Self {
-            query: Vec::new(),
-            path: Vec::new(),
-            scheme_index,
-            scheme_and_host,
-            is_https,
-            raw_ending: None,
-        }
+    pub fn append_raw_ending(&mut self, raw_ending: String) {
+        self.raw_ending = Some(raw_ending);
     }
 
-    pub fn append_raw_ending(&mut self, raw_ending: &str) {
-        self.raw_ending = Some(raw_ending.to_string());
+    pub fn append_path_segment(&mut self, path: String) {
+        self.path.push(path);
     }
 
-    pub fn append_path_segment(&mut self, path: &str) {
-        self.path.push(path.to_string());
-    }
-
-    pub fn append_query_param(&mut self, param: &str, value: Option<String>) {
+    pub fn append_query_param(&mut self, param: String, value: Option<String>) {
         self.query.push((param.to_string(), value));
     }
 
@@ -151,14 +130,12 @@ fn fill_with_path(res: &mut Vec<u8>, src: &Vec<String>) {
     }
 }
 
-fn remove_last_symbol_if_exists(src: &str, last_symbol: char) -> &str {
+fn remove_last_symbol_if_exists<'s>(src: &mut StrOrString<'s>, last_symbol: char) {
     let last_char = last_symbol as u8;
-    let src_as_bytes = src.as_bytes();
+    let src_as_bytes = src.as_str().as_bytes();
     if src_as_bytes[src_as_bytes.len() - 1] == last_char {
-        return std::str::from_utf8(&src_as_bytes[..src_as_bytes.len() - 1]).unwrap();
+        src.slice_it(None, Some(src_as_bytes.len() - 1));
     }
-
-    return src;
 }
 
 fn fill_with_query(res: &mut Vec<u8>, src: &Vec<(String, Option<String>)>) {
@@ -181,11 +158,13 @@ fn fill_with_query(res: &mut Vec<u8>, src: &Vec<(String, Option<String>)>) {
 
 #[cfg(test)]
 mod tests {
-    use crate::FlUrlUriBuilder;
+    use rust_extensions::StrOrString;
+
+    use crate::UrlUriBuilder;
 
     #[test]
     pub fn test_with_default_scheme() {
-        let uri_builder = FlUrlUriBuilder::from_str("google.com");
+        let uri_builder = UrlUriBuilder::new("google.com");
 
         assert_eq!("http://google.com", uri_builder.to_string());
         assert_eq!("http://google.com", uri_builder.get_scheme_and_host());
@@ -197,7 +176,7 @@ mod tests {
 
     #[test]
     pub fn test_with_http_scheme() {
-        let uri_builder = FlUrlUriBuilder::from_str("http://google.com");
+        let uri_builder = UrlUriBuilder::new("http://google.com");
 
         assert_eq!("http://google.com", uri_builder.to_string());
         assert_eq!("http://google.com", uri_builder.get_scheme_and_host());
@@ -209,7 +188,7 @@ mod tests {
 
     #[test]
     pub fn test_with_https_scheme() {
-        let uri_builder = FlUrlUriBuilder::from_str("https://google.com");
+        let uri_builder = UrlUriBuilder::new("https://google.com");
 
         assert_eq!("https://google.com", uri_builder.to_string());
         assert_eq!("https://google.com", uri_builder.get_scheme_and_host());
@@ -221,10 +200,10 @@ mod tests {
     }
 
     #[test]
-    pub fn test_path_segmets() {
-        let mut uri_builder = FlUrlUriBuilder::from_str("https://google.com");
-        uri_builder.append_path_segment("first");
-        uri_builder.append_path_segment("second");
+    pub fn test_path_segments() {
+        let mut uri_builder = UrlUriBuilder::new("https://google.com");
+        uri_builder.append_path_segment("first".to_string());
+        uri_builder.append_path_segment("second".to_string());
 
         assert_eq!("https://google.com/first/second", uri_builder.to_string());
         assert_eq!("https://google.com", uri_builder.get_scheme_and_host());
@@ -236,10 +215,10 @@ mod tests {
     }
 
     #[test]
-    pub fn test_path_segmets_with_slug_at_the_end() {
-        let mut uri_builder = FlUrlUriBuilder::from_str("https://google.com/");
-        uri_builder.append_path_segment("first");
-        uri_builder.append_path_segment("second");
+    pub fn test_path_segments_with_slug_at_the_end() {
+        let mut uri_builder = UrlUriBuilder::new("https://google.com/");
+        uri_builder.append_path_segment("first".to_string());
+        uri_builder.append_path_segment("second".to_string());
 
         assert_eq!("https://google.com/first/second", uri_builder.to_string());
         assert_eq!("https://google.com", uri_builder.get_scheme_and_host());
@@ -252,9 +231,9 @@ mod tests {
 
     #[test]
     pub fn test_query_with_no_path() {
-        let mut uri_builder = FlUrlUriBuilder::from_str("https://google.com");
-        uri_builder.append_query_param("first", Some("first_value".to_string()));
-        uri_builder.append_query_param("second", Some("second_value".to_string()));
+        let mut uri_builder = UrlUriBuilder::new("https://google.com");
+        uri_builder.append_query_param("first".to_string(), Some("first_value".to_string()));
+        uri_builder.append_query_param("second".to_string(), Some("second_value".to_string()));
 
         assert_eq!(
             "https://google.com?first=first_value&second=second_value",
@@ -273,12 +252,12 @@ mod tests {
 
     #[test]
     pub fn test_path_and_query() {
-        let mut uri_builder = FlUrlUriBuilder::from_str("https://google.com");
-        uri_builder.append_path_segment("first");
-        uri_builder.append_path_segment("second");
+        let mut uri_builder = UrlUriBuilder::new("https://google.com");
+        uri_builder.append_path_segment("first".to_string());
+        uri_builder.append_path_segment("second".to_string());
 
-        uri_builder.append_query_param("first", Some("first_value".to_string()));
-        uri_builder.append_query_param("second", Some("second_value".to_string()));
+        uri_builder.append_query_param("first".to_string(), Some("first_value".to_string()));
+        uri_builder.append_query_param("second".to_string(), Some("second_value".to_string()));
 
         assert_eq!(
             "https://google.com/first/second?first=first_value&second=second_value",
@@ -297,14 +276,12 @@ mod tests {
 
     #[test]
     fn test_remove_last_symbol_if_exists() {
-        assert_eq!(
-            "http://google.com",
-            super::remove_last_symbol_if_exists("http://google.com/", '/')
-        );
+        let mut src: StrOrString<'_> = "http://google.com/".into();
+        super::remove_last_symbol_if_exists(&mut src, '/');
+        assert_eq!("http://google.com", src.as_str());
 
-        assert_eq!(
-            "http://google.com",
-            super::remove_last_symbol_if_exists("http://google.com", '/')
-        );
+        let mut src: StrOrString<'_> = "http://google.com".into();
+        super::remove_last_symbol_if_exists(&mut src, '/');
+        assert_eq!("http://google.com", src.as_str());
     }
 }

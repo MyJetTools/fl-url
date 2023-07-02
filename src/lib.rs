@@ -2,10 +2,12 @@ mod error;
 mod fl_request;
 mod fl_response;
 mod fl_url;
-mod fl_url_uri;
+mod into_fl_url;
+mod url_builder;
 
 pub mod url_utils;
-pub use error::FlUrlError;
-pub use fl_response::FlUrlResponse;
+pub use error::*;
+pub use fl_response::*;
 pub use fl_url::FlUrl;
-pub use fl_url_uri::FlUrlUriBuilder;
+pub use into_fl_url::*;
+pub use url_builder::*;
