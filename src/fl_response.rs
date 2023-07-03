@@ -29,6 +29,15 @@ impl FlUrlResponse {
         }
     }
 
+    pub fn into_hyper_response(self) -> Response<Body> {
+        match self.response {
+            Some(response) => response,
+            None => {
+                panic!("Body is already disposed");
+            }
+        }
+    }
+
     pub fn read_header(&self, name: &str) -> Option<&str> {
         self.get_response()
             .headers()
