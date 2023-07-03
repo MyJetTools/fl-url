@@ -1,0 +1,24 @@
+name: Test our build
+
+on:
+  push:
+    branches: [ "*" ]
+  pull_request:
+    branches: [ "*" ]
+
+jobs:
+  test:
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+      - name: Test out our build     
+        run: |
+          cargo test
+
+      - name: Build with-native-tls          
+        run: cargo build --features with-native-tls
