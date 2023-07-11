@@ -97,8 +97,6 @@ impl UrlBuilder {
 
         fill_with_url(&mut result, self.scheme_and_host.as_bytes());
 
-        println!("result: {:?}", std::str::from_utf8(&result).unwrap());
-
         if self.path_segments.len() > 0 {
             fill_with_path(&mut result, &self.path_segments);
         }
