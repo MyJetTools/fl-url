@@ -67,53 +67,52 @@ impl FlRequest {
         let result = result?;
         Ok(result)
     }
-    #[cfg(feature = "with-native-tls")]
+
     async fn execute_request_https(self) -> Result<FlUrlResponse, FlUrlError> {
-        let mut http_connector = hyper::client::HttpConnector::new();
-        http_connector.enforce_http(false);
+        use hyper_rustls::ConfigBuilderExt;
 
-        let tls_conn = if let Some(client_cert) = self.fl_url.client_cert {
-            native_tls::TlsConnector::builder()
-                .identity(client_cert)
-                .danger_accept_invalid_certs(self.fl_url.accept_invalid_certificate)
-                .build()
-                .unwrap()
-        } else {
-            native_tls::TlsConnector::builder()
-                .danger_accept_invalid_certs(self.fl_url.accept_invalid_certificate)
-                .build()
-                .unwrap()
-        };
+        if let Some(client_cert) = self.fl_url.client_cert {
+            let tls = rustls::ClientConfig::builder()
+                .with_safe_defaults()
+                .with_native_roots()
+                .with_client_auth_cert(vec![client_cert.cert], client_cert.pkey)
+                .unwrap();
 
-        let tls_conn = tokio_native_tls::TlsConnector::from(tls_conn);
+            let https = hyper_rustls::HttpsConnectorBuilder::new()
+                .with_tls_config(tls)
+                .https_or_http()
+                .enable_http1()
+                .build();
 
-        let ct: hyper_tls::HttpsConnector<hyper::client::HttpConnector> =
-            hyper_tls::HttpsConnector::from((http_connector, tls_conn));
+            let client = hyper::client::Client::builder().build(https);
 
-        //create hyper client with https connector
-        let client = hyper::Client::builder().build::<_, hyper::Body>(ct);
+            let result = match client.request(self.hyper_request).await {
+                Ok(response) => Ok(FlUrlResponse::new(self.fl_url.url, response)),
+                Err(err) => Err(err),
+            };
+
+            return Ok(result?);
+        }
+
+        let tls = rustls::ClientConfig::builder()
+            .with_safe_defaults()
+            .with_native_roots()
+            .with_no_client_auth();
+
+        let https = hyper_rustls::HttpsConnectorBuilder::new()
+            .with_tls_config(tls)
+            .https_or_http()
+            .enable_http1()
+            .build();
+
+        let client = hyper::client::Client::builder().build(https);
 
         let result = match client.request(self.hyper_request).await {
             Ok(response) => Ok(FlUrlResponse::new(self.fl_url.url, response)),
             Err(err) => Err(err),
         };
 
-        let result = result?;
-        Ok(result)
-    }
-
-    #[cfg(not(feature = "with-native-tls"))]
-    async fn execute_request_https(self) -> Result<FlUrlResponse, FlUrlError> {
-        let https = hyper_tls::HttpsConnector::new();
-        let client = hyper::Client::builder().build::<_, hyper::Body>(https);
-
-        let result = match client.request(self.hyper_request).await {
-            Ok(response) => Ok(FlUrlResponse::new(self.fl_url.url, response)),
-            Err(err) => Err(err),
-        };
-
-        let result = result?;
-        Ok(result)
+        return Ok(result?);
     }
 }
 

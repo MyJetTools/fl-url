@@ -1,3 +1,7 @@
+mod client_certificate;
+
+pub use client_certificate::*;
+
 mod error;
 mod fl_request;
 mod fl_response;

@@ -19,6 +19,3 @@ jobs:
       - name: Test out our build     
         run: |
           cargo test
-
-      - name: Build with-native-tls          
-        run: cargo build --features with-native-tls
