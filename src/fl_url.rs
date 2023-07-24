@@ -3,19 +3,23 @@ use hyper::Method;
 use rust_extensions::StrOrString;
 
 use std::collections::HashMap;
+use std::str::FromStr;
 use std::time::Duration;
 
-use crate::fl_request::FlRequest;
-
+use super::FlUrlResponse;
+use crate::ClientsCache;
+use crate::FlUrlClient;
 use crate::FlUrlError;
+use crate::FlUrlFactory;
 use crate::UrlBuilder;
 
-use super::FlUrlResponse;
+lazy_static::lazy_static! {
+    static ref CLIENTS_CACHED: ClientsCache = ClientsCache::new();
+}
 
 pub struct FlUrl {
     pub url: UrlBuilder,
     pub headers: HashMap<String, String>,
-
     pub client_cert: Option<crate::ClientCertificate>,
     pub accept_invalid_certificate: bool,
     pub execute_timeout: Option<Duration>,
@@ -23,23 +27,22 @@ pub struct FlUrl {
 
 impl FlUrl {
     pub fn new<'s>(url: impl Into<StrOrString<'s>>) -> FlUrl {
+        let url = UrlBuilder::new(url);
         FlUrl {
-            url: UrlBuilder::new(url),
             headers: HashMap::new(),
             execute_timeout: Some(Duration::from_secs(30)),
-
             client_cert: None,
-
+            url,
             accept_invalid_certificate: false,
         }
     }
 
     pub fn new_with_timeout<'s>(url: impl Into<StrOrString<'s>>, time_out: Duration) -> FlUrl {
+        let url = UrlBuilder::new(url);
         FlUrl {
-            url: UrlBuilder::new(url),
             headers: HashMap::new(),
             execute_timeout: Some(time_out),
-
+            url,
             client_cert: None,
 
             accept_invalid_certificate: false,
@@ -118,13 +121,42 @@ impl FlUrl {
     }
 
     async fn execute(
-        self,
+        mut self,
         method: Method,
         body: Option<Vec<u8>>,
     ) -> Result<FlUrlResponse, FlUrlError> {
-        let request = FlRequest::new(self, method, body);
+        let url = self.url.to_string();
 
-        request.execute().await
+        let mut req = hyper::Request::builder().method(method).uri(url);
+
+        if self.headers.len() > 0 {
+            let headers = req.headers_mut().unwrap();
+            for (key, value) in &self.headers {
+                let header_name = hyper::http::HeaderName::from_str(key).unwrap();
+                headers.insert(
+                    header_name,
+                    hyper::http::HeaderValue::from_str(value).unwrap(),
+                );
+            }
+        };
+
+        let body = req.body(hyper::Body::from(compile_body(body))).unwrap();
+
+        let scheme_and_host = self.url.get_scheme_and_host().to_lowercase();
+
+        let client = CLIENTS_CACHED
+            .get(scheme_and_host.as_str(), &mut self)
+            .await;
+
+        match client.execute(self.url, body).await {
+            Ok(result) => {
+                return Ok(result);
+            }
+            Err(err) => {
+                CLIENTS_CACHED.remove(scheme_and_host.as_str()).await;
+                return Err(err);
+            }
+        }
     }
 
     pub async fn get(self) -> Result<FlUrlResponse, FlUrlError> {
@@ -145,5 +177,17 @@ impl FlUrl {
 
     pub async fn delete(self) -> Result<FlUrlResponse, FlUrlError> {
         self.execute(Method::DELETE, None).await
+    }
+}
+
+impl FlUrlFactory for FlUrl {
+    fn create(&mut self) -> FlUrlClient {
+        FlUrlClient::new(self.url.is_https, self.client_cert.take())
+    }
+}
+fn compile_body(body_payload: Option<Vec<u8>>) -> hyper::body::Body {
+    match body_payload {
+        Some(payload) => hyper::Body::from(payload),
+        None => hyper::Body::empty(),
     }
 }
