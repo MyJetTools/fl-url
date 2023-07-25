@@ -50,13 +50,15 @@ impl DropConnectionScenario for MyCustomDropConnectionScenario {
 }
 
 
-    let response = "http://mywebsite.com"
-        .override_drop_connection_scenario(MyCustomDropConnectionScenario)
-        .append_path_segment("Row")
-        .append_query_param("tableName", Some(table_name))
-        .append_query_param("partitionKey", Some(partition_key))
-        .get()
-        .await;
+let response = "http://mywebsite.com"
+//  VVVVV
+    .override_drop_connection_scenario(MyCustomDropConnectionScenario)
+
+    .append_path_segment("Row")
+    .append_query_param("tableName", Some(table_name))
+    .append_query_param("partitionKey", Some(partition_key))
+    .get()
+    .await;
 ```
 
 
