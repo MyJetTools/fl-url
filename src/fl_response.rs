@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use hyper::{Body, Response};
+use serde::de::DeserializeOwned;
 
 use crate::{FlUrlError, UrlBuilder};
 pub struct FlUrlResponse {
@@ -102,6 +103,12 @@ impl FlUrlResponse {
                 panic!("Body is already disposed");
             }
         }
+    }
+
+    pub async fn get_json<TResponse: DeserializeOwned>(&mut self) -> Result<TResponse, FlUrlError> {
+        let body = self.get_body().await?;
+        let result = serde_json::from_slice(body)?;
+        Ok(result)
     }
 
     pub async fn receive_body(mut self) -> Result<Vec<u8>, FlUrlError> {

@@ -203,8 +203,18 @@ impl FlUrl {
         self.execute(Method::POST, body).await
     }
 
+    pub async fn post_json(self, json: impl serde::Serialize) -> Result<FlUrlResponse, FlUrlError> {
+        let body = serde_json::to_vec(&json).unwrap();
+        self.execute(Method::POST, Some(body)).await
+    }
+
     pub async fn put(self, body: Option<Vec<u8>>) -> Result<FlUrlResponse, FlUrlError> {
         self.execute(Method::PUT, body).await
+    }
+
+    pub async fn put_json(self, json: impl serde::Serialize) -> Result<FlUrlResponse, FlUrlError> {
+        let body = serde_json::to_vec(&json).unwrap();
+        self.execute(Method::PUT, Some(body)).await
     }
 
     pub async fn delete(self) -> Result<FlUrlResponse, FlUrlError> {

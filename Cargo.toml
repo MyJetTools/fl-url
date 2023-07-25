@@ -15,7 +15,8 @@ rust-extensions = { tag = "0.1.3", git = "https://github.com/MyJetTools/rust-ext
 lazy_static = "*"
 async-trait = "*"
 
-
+serde = { version = "*", features = ["derive"] }
+serde_json = { version = "*" }
 hyper-rustls = { version = "*" }
 rustls = { version = "*" }
 openssl = { version = "*" }
