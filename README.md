@@ -21,7 +21,7 @@ Basic Example:
 
 ## Reuse of connection
 
-Since HTTP1.1 and higher reuses a connection not to pay expenses  for the new connection establishment 
+Since HTTP1.1 and higher reuses a connection not to pay costs for the new connection establishment 
 and as well not to pay the costs for a TLS Handshake each request - connections are reused based on schema+domain
 
 The connection is going to be dropped and reestablished if 
@@ -30,7 +30,7 @@ The connection is going to be dropped and reestablished if
 
 The default drop connection scenario is here: https://github.com/MyJetTools/fl-url/blob/main/src/fl_drop_connection_scenario.rs
 
-To implement a custom drop connection strategy on positive fl-url response trait DropConnectionScenario should be implemented and
+To implement a custom drop connection strategy on positive fl-url response trait, DropConnectionScenario should be implemented and
 
 
 ```rust
