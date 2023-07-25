@@ -4,6 +4,8 @@ pub use client_certificate::*;
 
 mod clients_cache;
 mod error;
+mod fl_drop_connection_scenario;
+pub use fl_drop_connection_scenario::*;
 //mod fl_request;
 mod fl_response;
 mod fl_url;

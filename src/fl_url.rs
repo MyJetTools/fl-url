@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use super::FlUrlResponse;
 use crate::ClientsCache;
+use crate::DropConnectionScenario;
 use crate::FlUrlClient;
 use crate::FlUrlError;
 use crate::FlUrlFactory;
@@ -24,6 +25,8 @@ pub struct FlUrl {
     pub accept_invalid_certificate: bool,
     pub execute_timeout: Option<Duration>,
     pub do_not_reuse_connection: bool,
+
+    pub drop_connection_scenario: Box<dyn DropConnectionScenario + Send + Sync + 'static>,
 }
 
 impl FlUrl {
@@ -36,6 +39,7 @@ impl FlUrl {
             url,
             accept_invalid_certificate: false,
             do_not_reuse_connection: false,
+            drop_connection_scenario: Box::new(crate::DefaultDropConnectionScenario),
         }
     }
 
@@ -48,6 +52,7 @@ impl FlUrl {
             client_cert: None,
             do_not_reuse_connection: false,
             accept_invalid_certificate: false,
+            drop_connection_scenario: Box::new(crate::DefaultDropConnectionScenario),
         }
     }
 
@@ -59,7 +64,16 @@ impl FlUrl {
             client_cert: None,
             accept_invalid_certificate: false,
             do_not_reuse_connection: false,
+            drop_connection_scenario: Box::new(crate::DefaultDropConnectionScenario),
         }
+    }
+
+    pub fn override_drop_connection_scenario(
+        mut self,
+        drop_connection_scenario: impl DropConnectionScenario + Send + Sync + 'static,
+    ) -> Self {
+        self.drop_connection_scenario = Box::new(drop_connection_scenario);
+        self
     }
 
     pub fn do_not_reuse_connection(mut self) -> FlUrl {
@@ -165,6 +179,9 @@ impl FlUrl {
 
         match result {
             Ok(result) => {
+                if self.drop_connection_scenario.should_we_drop_it(&result) {
+                    CLIENTS_CACHED.remove(scheme_and_host.as_str()).await;
+                }
                 return Ok(result);
             }
             Err(err) => {
