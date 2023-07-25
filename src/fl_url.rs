@@ -23,6 +23,7 @@ pub struct FlUrl {
     pub client_cert: Option<crate::ClientCertificate>,
     pub accept_invalid_certificate: bool,
     pub execute_timeout: Option<Duration>,
+    pub do_not_reuse_connection: bool,
 }
 
 impl FlUrl {
@@ -34,6 +35,7 @@ impl FlUrl {
             client_cert: None,
             url,
             accept_invalid_certificate: false,
+            do_not_reuse_connection: false,
         }
     }
 
@@ -44,7 +46,7 @@ impl FlUrl {
             execute_timeout: Some(time_out),
             url,
             client_cert: None,
-
+            do_not_reuse_connection: false,
             accept_invalid_certificate: false,
         }
     }
@@ -56,7 +58,13 @@ impl FlUrl {
             execute_timeout: None,
             client_cert: None,
             accept_invalid_certificate: false,
+            do_not_reuse_connection: false,
         }
+    }
+
+    pub fn do_not_reuse_connection(mut self) -> FlUrl {
+        self.do_not_reuse_connection = true;
+        self
     }
 
     pub fn with_client_certificate(
@@ -144,11 +152,18 @@ impl FlUrl {
 
         let scheme_and_host = self.url.get_scheme_and_host().to_lowercase();
 
-        let client = CLIENTS_CACHED
-            .get(scheme_and_host.as_str(), &mut self)
-            .await;
+        let result = if self.do_not_reuse_connection {
+            let client = self.create();
+            client.execute(self.url, body).await
+        } else {
+            let client = CLIENTS_CACHED
+                .get(scheme_and_host.as_str(), &mut self)
+                .await;
 
-        match client.execute(self.url, body).await {
+            client.execute(self.url, body).await
+        };
+
+        match result {
             Ok(result) => {
                 return Ok(result);
             }
