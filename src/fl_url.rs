@@ -209,7 +209,7 @@ impl FlUrl {
             hyper::Client::builder().build(UnixClient);
         let addr: hyper::Uri = hyper_unix_connector::Uri::new(
             self.url.get_scheme_and_host().as_str(),
-            &self.url.get_path(),
+            &self.url.get_path_and_query(),
         )
         .into();
 
