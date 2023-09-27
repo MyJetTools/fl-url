@@ -142,6 +142,18 @@ impl FlUrl {
     }
 
     async fn execute(
+        self,
+        method: Method,
+        body: Option<Vec<u8>>,
+    ) -> Result<FlUrlResponse, FlUrlError> {
+        if self.url.scheme.is_unix_socket() {
+            return self.execute_unix_socket().await;
+        }
+
+        self.execute_http_or_https(method, body).await
+    }
+
+    async fn execute_http_or_https(
         mut self,
         method: Method,
         body: Option<Vec<u8>>,
@@ -186,6 +198,28 @@ impl FlUrl {
             Err(err) => {
                 CLIENTS_CACHED.remove(scheme_and_host.as_str()).await;
                 return Err(err);
+            }
+        }
+    }
+
+    async fn execute_unix_socket(self) -> Result<FlUrlResponse, FlUrlError> {
+        use hyper_unix_connector::UnixClient;
+        let client: hyper::Client<UnixClient, hyper::Body> =
+            hyper::Client::builder().build(UnixClient);
+        let addr: hyper::Uri = hyper_unix_connector::Uri::new(
+            self.url.get_scheme_and_host().as_str(),
+            &self.url.get_path(),
+        )
+        .into();
+
+        let result = client.get(addr).await;
+
+        match result {
+            Ok(result) => {
+                return Ok(FlUrlResponse::new(self.url, result));
+            }
+            Err(err) => {
+                return Err(FlUrlError::HyperError(err));
             }
         }
     }
@@ -238,3 +272,19 @@ fn compile_body(body_payload: Option<Vec<u8>>) -> hyper::body::Body {
         None => hyper::Body::empty(),
     }
 }
+
+/*
+#[cfg(test)]
+mod tests {
+    use crate::IntoFlUrl;
+
+    #[tokio::test]
+    async fn test_unix_socket() {
+        let url = "http+unix://Users/test/.orbstack/run/docker.sock";
+
+        let mut result = url.append_path_segment("Test").get().await.unwrap();
+
+        let response = result.get_body().await.unwrap();
+    }
+}
+ */
