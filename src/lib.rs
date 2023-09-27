@@ -1,4 +1,6 @@
 mod client_certificate;
+mod scheme;
+pub use scheme::*;
 
 pub use client_certificate::*;
 

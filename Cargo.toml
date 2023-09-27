@@ -4,6 +4,10 @@ version = "0.4.0"
 authors = ["Andrey <amigin@gmail.com>"]
 edition = "2021"
 
+[features]
+default = []
+support-unix-socket = ["hyper-unix-connector"]
+
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [dependencies]
@@ -20,3 +24,4 @@ serde_json = { version = "*" }
 hyper-rustls = { version = "*" }
 rustls = { version = "*" }
 openssl = { version = "*" }
+hyper-unix-connector = { version = "*", optional = true }

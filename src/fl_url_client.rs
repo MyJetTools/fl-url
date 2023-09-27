@@ -6,59 +6,47 @@ use crate::{ClientCertificate, FlUrlError, FlUrlResponse, UrlBuilder};
 pub enum FlUrlClient {
     Http(Client<HttpConnector>),
     Https(Client<HttpsConnector<HttpConnector>>),
+    #[cfg(feature = "support-unix-socket")]
+    UnixSocket(Client<hyper_unix_connector::UnixClient>),
 }
 
 impl FlUrlClient {
-    pub fn new(is_https: bool, cert: Option<ClientCertificate>) -> Self {
-        if is_https {
-            if let Some(client_cert) = cert {
-                Self::new_https_with_client_cert(client_cert)
-            } else {
-                Self::new_https()
-            }
-        } else {
-            Self::new_http()
-        }
+    #[cfg(feature = "support-unix-socket")]
+    pub fn new_unix_socket() -> Self {
+        let client: Client<hyper_unix_connector::UnixClient, Body> =
+            Client::builder().build(hyper_unix_connector::UnixClient);
+        Self::UnixSocket(client)
     }
+
     pub fn new_http() -> Self {
         Self::Http(Client::builder().build_http())
     }
 
-    pub fn new_https() -> Self {
+    pub fn new_https(client_certificate: Option<ClientCertificate>) -> Self {
         use hyper_rustls::ConfigBuilderExt;
 
-        let tls = rustls::ClientConfig::builder()
-            .with_safe_defaults()
-            .with_native_roots()
-            .with_no_client_auth();
+        let client_connector = if let Some(client_cert) = client_certificate {
+            rustls::ClientConfig::builder()
+                .with_safe_defaults()
+                .with_native_roots()
+                .with_client_auth_cert(vec![client_cert.cert], client_cert.pkey)
+                .unwrap()
+        } else {
+            rustls::ClientConfig::builder()
+                .with_safe_defaults()
+                .with_native_roots()
+                .with_no_client_auth()
+        };
 
-        let https = hyper_rustls::HttpsConnectorBuilder::new()
-            .with_tls_config(tls)
+        let https_connector = hyper_rustls::HttpsConnectorBuilder::new()
+            .with_tls_config(client_connector)
             .https_or_http()
             .enable_http1()
             .build();
 
-        let client = hyper::client::Client::builder().build(https);
+        let client = hyper::client::Client::builder();
 
-        Self::Https(client)
-    }
-
-    pub fn new_https_with_client_cert(client_cert: ClientCertificate) -> Self {
-        use hyper_rustls::ConfigBuilderExt;
-        let tls = rustls::ClientConfig::builder()
-            .with_safe_defaults()
-            .with_native_roots()
-            .with_client_auth_cert(vec![client_cert.cert], client_cert.pkey)
-            .unwrap();
-
-        let https = hyper_rustls::HttpsConnectorBuilder::new()
-            .with_tls_config(tls)
-            .https_or_http()
-            .enable_http1()
-            .build();
-
-        let client = hyper::client::Client::builder().build(https);
-        Self::Https(client)
+        Self::Https(client.build(https_connector))
     }
 
     pub async fn execute(
@@ -68,20 +56,18 @@ impl FlUrlClient {
     ) -> Result<FlUrlResponse, FlUrlError> {
         match self {
             FlUrlClient::Http(client) => {
-                let result = match client.request(request).await {
-                    Ok(response) => Ok(FlUrlResponse::new(url, response)),
-                    Err(err) => Err(err),
-                };
-
-                return Ok(result?);
+                let response = client.request(request).await?;
+                return Ok(FlUrlResponse::new(url, response));
             }
             FlUrlClient::Https(client) => {
-                let result = match client.request(request).await {
-                    Ok(response) => Ok(FlUrlResponse::new(url, response)),
-                    Err(err) => Err(err),
-                };
+                let response = client.request(request).await?;
+                return Ok(FlUrlResponse::new(url, response));
+            }
+            #[cfg(feature = "support-unix-socket")]
+            FlUrlClient::UnixSocket(client) => {
+                let response = client.request(request).await?;
 
-                return Ok(result?);
+                return Ok(FlUrlResponse::new(url, response));
             }
         }
     }

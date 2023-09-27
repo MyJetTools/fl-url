@@ -82,7 +82,7 @@ pub fn decode_url_escape(s0: u8, s1: u8) -> u8 {
     panic!("Invalid URL Symbol %{}{}", s0 as char, s1 as char);
 }
 
-pub fn encode_to_url_string_and_copy(res: &mut Vec<u8>, src: &str) {
+pub fn encode_to_url_string_and_copy(res: &mut String, src: &str) {
     let mut has_symbol_to_encode = false;
     for (_, c) in src.chars().enumerate() {
         if URL_ENCODE_SYMBOLS.contains_key(&c) {
@@ -92,7 +92,7 @@ pub fn encode_to_url_string_and_copy(res: &mut Vec<u8>, src: &str) {
     }
 
     if !has_symbol_to_encode {
-        res.extend(src.as_bytes());
+        res.push_str(src);
         return;
     }
 
@@ -101,10 +101,10 @@ pub fn encode_to_url_string_and_copy(res: &mut Vec<u8>, src: &str) {
 
         match found {
             Some(str) => {
-                res.extend(str.as_bytes());
+                res.push_str(str);
             }
             None => {
-                res.push(c as u8);
+                res.push(c);
             }
         }
     }

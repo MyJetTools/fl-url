@@ -30,9 +30,9 @@ pub struct FlUrl {
 }
 
 impl FlUrl {
-    pub fn new<'s>(url: impl Into<StrOrString<'s>>) -> FlUrl {
+    pub fn new(url: impl Into<StrOrString<'static>>) -> Self {
         let url = UrlBuilder::new(url);
-        FlUrl {
+        Self {
             headers: HashMap::new(),
             execute_timeout: Some(Duration::from_secs(30)),
             client_cert: None,
@@ -43,9 +43,9 @@ impl FlUrl {
         }
     }
 
-    pub fn new_with_timeout<'s>(url: impl Into<StrOrString<'s>>, time_out: Duration) -> FlUrl {
+    pub fn new_with_timeout(url: impl Into<StrOrString<'static>>, time_out: Duration) -> Self {
         let url = UrlBuilder::new(url);
-        FlUrl {
+        Self {
             headers: HashMap::new(),
             execute_timeout: Some(time_out),
             url,
@@ -56,8 +56,8 @@ impl FlUrl {
         }
     }
 
-    pub fn new_without_timeout<'s>(url: impl Into<StrOrString<'s>>) -> FlUrl {
-        FlUrl {
+    pub fn new_without_timeout(url: impl Into<StrOrString<'static>>) -> Self {
+        Self {
             url: UrlBuilder::new(url),
             headers: HashMap::new(),
             execute_timeout: None,
@@ -76,7 +76,7 @@ impl FlUrl {
         self
     }
 
-    pub fn do_not_reuse_connection(mut self) -> FlUrl {
+    pub fn do_not_reuse_connection(mut self) -> Self {
         self.do_not_reuse_connection = true;
         self
     }
@@ -88,7 +88,7 @@ impl FlUrl {
         if self.client_cert.is_some() {
             panic!("Client certificate is already set");
         }
-        if self.url.get_scheme() != "https" {
+        if !self.url.get_scheme().is_https() {
             panic!("Client certificate can only be used with https");
         }
 
@@ -101,9 +101,8 @@ impl FlUrl {
         self
     }
 
-    pub fn append_path_segment<'s>(mut self, path_segment: impl Into<StrOrString<'s>>) -> Self {
-        let path_segment: StrOrString<'s> = path_segment.into();
-        self.url.append_path_segment(path_segment.to_string());
+    pub fn append_path_segment(mut self, path_segment: impl Into<StrOrString<'static>>) -> Self {
+        self.url.append_path_segment(path_segment.into());
         self
     }
 
@@ -164,7 +163,7 @@ impl FlUrl {
 
         let body = req.body(hyper::Body::from(compile_body(body))).unwrap();
 
-        let scheme_and_host = self.url.get_scheme_and_host().to_lowercase();
+        let scheme_and_host = self.url.get_scheme_and_host().as_str().to_lowercase();
 
         let result = if self.do_not_reuse_connection {
             let client = self.create();
@@ -224,9 +223,15 @@ impl FlUrl {
 
 impl FlUrlFactory for FlUrl {
     fn create(&mut self) -> FlUrlClient {
-        FlUrlClient::new(self.url.is_https, self.client_cert.take())
+        match self.url.scheme {
+            crate::Scheme::Http => FlUrlClient::new_http(),
+            crate::Scheme::Https => FlUrlClient::new_https(self.client_cert.take()),
+            #[cfg(feature = "support-unix-socket")]
+            crate::Scheme::UnixSocket => FlUrlClient::new_unix_socket(),
+        }
     }
 }
+
 fn compile_body(body_payload: Option<Vec<u8>>) -> hyper::body::Body {
     match body_payload {
         Some(payload) => hyper::Body::from(payload),
