@@ -261,8 +261,7 @@ impl FlUrlFactory for FlUrl {
         match self.url.scheme {
             crate::Scheme::Http => FlUrlClient::new_http(),
             crate::Scheme::Https => FlUrlClient::new_https(self.client_cert.take()),
-            #[cfg(feature = "support-unix-socket")]
-            crate::Scheme::UnixSocket => FlUrlClient::new_unix_socket(),
+            crate::Scheme::UnixSocket => panic!("Unix socket is not supported in this case"),
         }
     }
 }
@@ -273,19 +272,3 @@ fn compile_body(body_payload: Option<Vec<u8>>) -> hyper::body::Body {
         None => hyper::Body::empty(),
     }
 }
-
-/*
-#[cfg(test)]
-mod tests {
-    use crate::IntoFlUrl;
-
-    #[tokio::test]
-    async fn test_unix_socket() {
-        let url = "http+unix://Users/test/.orbstack/run/docker.sock";
-
-        let mut result = url.append_path_segment("Test").get().await.unwrap();
-
-        let response = result.get_body().await.unwrap();
-    }
-}
- */
