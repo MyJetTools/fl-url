@@ -146,6 +146,7 @@ impl FlUrl {
         method: Method,
         body: Option<Vec<u8>>,
     ) -> Result<FlUrlResponse, FlUrlError> {
+        #[cfg(feature = "support-unix-socket")]
         if self.url.scheme.is_unix_socket() {
             return self.execute_unix_socket().await;
         }
@@ -201,7 +202,7 @@ impl FlUrl {
             }
         }
     }
-
+    #[cfg(feature = "support-unix-socket")]
     async fn execute_unix_socket(self) -> Result<FlUrlResponse, FlUrlError> {
         use hyper_unix_connector::UnixClient;
         let client: hyper::Client<UnixClient, hyper::Body> =

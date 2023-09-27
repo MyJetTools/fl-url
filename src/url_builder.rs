@@ -64,6 +64,7 @@ impl UrlBuilder {
     }
 
     pub fn get_scheme_and_host(&self) -> StrOrString<'_> {
+        #[cfg(feature = "support-unix-socket")]
         if self.scheme.is_unix_socket() {
             let mut result = String::new();
             result.push_str(self.scheme.scheme_as_str());
