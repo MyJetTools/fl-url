@@ -79,12 +79,12 @@ impl Scheme {
             _ => false,
         }
     }
-    pub fn as_str(&self) -> &str {
+    pub fn scheme_as_str(&self) -> &str {
         match self {
-            Scheme::Http => "http",
-            Scheme::Https => "https",
+            Scheme::Http => "http://",
+            Scheme::Https => "https://",
             #[cfg(feature = "support-unix-socket")]
-            Scheme::UnixSocket => "http+unix",
+            Scheme::UnixSocket => "./",
         }
     }
 }

@@ -54,8 +54,7 @@ impl UrlBuilder {
     }
 
     fn fill_schema_and_host(&self, result: &mut String) {
-        result.push_str(self.scheme.as_str());
-        result.push_str("://");
+        result.push_str(self.scheme.scheme_as_str());
         result.push_str(self.host_port.as_str());
     }
 
