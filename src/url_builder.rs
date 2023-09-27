@@ -55,10 +55,26 @@ impl UrlBuilder {
 
     fn fill_schema_and_host(&self, result: &mut String) {
         result.push_str(self.scheme.scheme_as_str());
-        result.push_str(self.host_port.as_str());
+
+        if let Some(index) = self.scheme_index {
+            result.push_str(&self.host_port.as_str()[index + 3..]);
+        } else {
+            result.push_str(self.host_port.as_str());
+        }
     }
 
     pub fn get_scheme_and_host(&self) -> StrOrString<'_> {
+        if self.scheme.is_unix_socket() {
+            let mut result = String::new();
+            result.push_str(self.scheme.scheme_as_str());
+            if let Some(index) = self.scheme_index {
+                result.push_str(&self.host_port.as_str()[index + 3..]);
+            } else {
+                result.push_str(self.host_port.as_str());
+            }
+            return result.into();
+        }
+
         if self.scheme_index.is_some() {
             return self.host_port.clone();
         }
@@ -95,11 +111,7 @@ impl UrlBuilder {
     pub fn to_string(&self) -> String {
         let mut result: String = String::new();
 
-        if self.scheme_index.is_some() {
-            result.push_str(self.host_port.as_str());
-        } else {
-            self.fill_schema_and_host(&mut result);
-        }
+        self.fill_schema_and_host(&mut result);
 
         if self.path_segments.len() > 0 {
             fill_with_path(&mut result, &self.path_segments);
@@ -307,6 +319,31 @@ mod tests {
         );
 
         assert_eq!(true, uri_builder.get_scheme().is_https());
+        assert_eq!("google.com", uri_builder.get_host_port());
+        assert_eq!("/first/second", uri_builder.get_path());
+        assert_eq!(
+            "/first/second?first=first_value&second=second_value",
+            uri_builder.get_path_and_query()
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "support-unix-socket")]
+    pub fn test_unix_path_and_query() {
+        let mut uri_builder = UrlBuilder::new("http+unix://google.com");
+        uri_builder.append_path_segment("first".to_string());
+        uri_builder.append_path_segment("second".to_string());
+
+        uri_builder.append_query_param("first".to_string(), Some("first_value".to_string()));
+        uri_builder.append_query_param("second".to_string(), Some("second_value".to_string()));
+
+        assert_eq!(
+            "./google.com/first/second?first=first_value&second=second_value",
+            uri_builder.to_string()
+        );
+        assert_eq!("./google.com", uri_builder.get_scheme_and_host().as_str());
+
+        assert_eq!(true, uri_builder.get_scheme().is_unix_socket());
         assert_eq!("google.com", uri_builder.get_host_port());
         assert_eq!("/first/second", uri_builder.get_path());
         assert_eq!(
