@@ -261,6 +261,7 @@ impl FlUrlFactory for FlUrl {
         match self.url.scheme {
             crate::Scheme::Http => FlUrlClient::new_http(),
             crate::Scheme::Https => FlUrlClient::new_https(self.client_cert.take()),
+            #[cfg(feature = "support-unix-socket")]
             crate::Scheme::UnixSocket => panic!("Unix socket is not supported in this case"),
         }
     }
