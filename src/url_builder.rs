@@ -1,20 +1,19 @@
-use rust_extensions::StrOrString;
+use rust_extensions::ShortString;
 
 use crate::{url_utils, Scheme, UrlBuilderOwned};
 
-pub struct UrlBuilder<'s> {
+pub struct UrlBuilder {
     path_segments: String,
     scheme_index: Option<usize>,
     pub query: Vec<(String, Option<String>)>,
     pub scheme: Scheme,
     raw_ending: Option<String>,
-    pub host_port: StrOrString<'s>,
+    pub host_port: ShortString,
     has_last_slash: bool,
 }
 
-impl<'s> UrlBuilder<'s> {
-    pub fn new(host_port: impl Into<StrOrString<'s>>) -> Self {
-        let mut host_port: StrOrString<'s> = host_port.into();
+impl UrlBuilder {
+    pub fn new(mut host_port: ShortString) -> Self {
         let has_last_slash = remove_last_symbol_if_exists(&mut host_port, '/');
 
         let (scheme, scheme_index) = Scheme::from_url(host_port.as_str());
@@ -66,29 +65,39 @@ impl<'s> UrlBuilder<'s> {
         }
     }
 
-    pub fn get_scheme_and_host(&self) -> StrOrString<'_> {
+    fn fill_schema_and_host_to_short_string(&self, result: &mut ShortString) {
+        result.push_str(self.scheme.scheme_as_str());
+
+        if let Some(index) = self.scheme_index {
+            result.push_str(&self.host_port.as_str()[index + 3..]);
+        } else {
+            result.push_str(self.host_port.as_str());
+        }
+    }
+
+    pub fn get_scheme_and_host(&self) -> ShortString {
         #[cfg(feature = "support-unix-socket")]
         if self.scheme.is_unix_socket() {
-            let mut result = String::new();
+            let mut result = ShortString::new_empty();
             result.push_str(self.scheme.scheme_as_str());
             if let Some(index) = self.scheme_index {
                 result.push_str(&self.host_port.as_str()[index + 3..]);
             } else {
                 result.push_str(self.host_port.as_str());
             }
-            return result.into();
+            return result;
         }
 
         if self.scheme_index.is_some() {
-            return self.host_port.clone();
+            return self.host_port.as_str().into();
         }
 
-        let mut result = String::new();
-        self.fill_schema_and_host(&mut result);
+        let mut result = ShortString::new_empty();
+        self.fill_schema_and_host_to_short_string(&mut result);
         result.into()
     }
 
-    pub fn get_path_and_query(&'s self) -> String {
+    pub fn get_path_and_query(self) -> String {
         let mut result = String::new();
 
         fill_with_path(&mut result, &self.path_segments);
@@ -150,11 +159,11 @@ fn fill_with_path<'s>(res: &mut String, path: &str) {
     res.push_str(path)
 }
 
-fn remove_last_symbol_if_exists<'s>(src: &mut StrOrString<'s>, last_symbol: char) -> bool {
+fn remove_last_symbol_if_exists<'s>(src: &mut ShortString, last_symbol: char) -> bool {
     let last_char = last_symbol as u8;
     let src_as_bytes = src.as_str().as_bytes();
     if src_as_bytes[src_as_bytes.len() - 1] == last_char {
-        src.slice_it(None, Some(src_as_bytes.len() - 1));
+        src.set_len(src_as_bytes.len() as u8 - 1);
         return true;
     }
 
@@ -186,7 +195,7 @@ mod tests {
 
     #[test]
     pub fn test_with_default_scheme() {
-        let uri_builder = UrlBuilder::new("google.com");
+        let uri_builder = UrlBuilder::new("google.com".into());
 
         assert_eq!("http://google.com", uri_builder.to_string());
         assert_eq!(
@@ -201,7 +210,7 @@ mod tests {
 
     #[test]
     pub fn test_with_http_scheme() {
-        let uri_builder = UrlBuilder::new("http://google.com");
+        let uri_builder = UrlBuilder::new("http://google.com".into());
 
         assert_eq!("http://google.com", uri_builder.to_string());
         assert_eq!(
@@ -216,7 +225,7 @@ mod tests {
 
     #[test]
     pub fn test_with_http_scheme_and_last_slash() {
-        let uri_builder = UrlBuilder::new("http://google.com/");
+        let uri_builder = UrlBuilder::new("http://google.com/".into());
 
         assert_eq!("http://google.com/", uri_builder.to_string());
         assert_eq!(
@@ -231,7 +240,7 @@ mod tests {
 
     #[test]
     pub fn test_with_https_scheme() {
-        let uri_builder = UrlBuilder::new("https://google.com");
+        let uri_builder = UrlBuilder::new("https://google.com".into());
 
         assert_eq!("https://google.com", uri_builder.to_string());
         assert_eq!(
@@ -247,7 +256,7 @@ mod tests {
 
     #[test]
     pub fn test_path_segments() {
-        let mut uri_builder = UrlBuilder::new("https://google.com");
+        let mut uri_builder = UrlBuilder::new("https://google.com".into());
         uri_builder.append_path_segment("first");
         uri_builder.append_path_segment("second");
 
@@ -265,7 +274,7 @@ mod tests {
 
     #[test]
     pub fn test_path_segments_with_slug_at_the_end() {
-        let mut uri_builder = UrlBuilder::new("https://google.com/");
+        let mut uri_builder = UrlBuilder::new("https://google.com/".into());
         uri_builder.append_path_segment("first");
         uri_builder.append_path_segment("second");
 
@@ -283,7 +292,7 @@ mod tests {
 
     #[test]
     pub fn test_query_with_no_path() {
-        let mut uri_builder = UrlBuilder::new("https://google.com");
+        let mut uri_builder = UrlBuilder::new("https://google.com".into());
         uri_builder.append_query_param("first".to_string(), Some("first_value".to_string()));
         uri_builder.append_query_param("second".to_string(), Some("second_value".to_string()));
 
@@ -307,7 +316,7 @@ mod tests {
 
     #[test]
     pub fn test_path_and_query() {
-        let mut uri_builder = UrlBuilder::new("https://google.com");
+        let mut uri_builder = UrlBuilder::new("https://google.com".into());
         uri_builder.append_path_segment("first");
         uri_builder.append_path_segment("second");
 
@@ -335,9 +344,9 @@ mod tests {
     #[test]
     #[cfg(feature = "support-unix-socket")]
     pub fn test_unix_path_and_query() {
-        let mut uri_builder = UrlBuilder::new("http+unix://google.com");
-        uri_builder.append_path_segment("first".to_string());
-        uri_builder.append_path_segment("second".to_string());
+        let mut uri_builder = UrlBuilder::new("http+unix://google.com".into());
+        uri_builder.append_path_segment("first");
+        uri_builder.append_path_segment("second");
 
         uri_builder.append_query_param("first".to_string(), Some("first_value".to_string()));
         uri_builder.append_query_param("second".to_string(), Some("second_value".to_string()));

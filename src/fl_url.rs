@@ -1,5 +1,6 @@
 use hyper::Method;
 
+use rust_extensions::ShortString;
 use rust_extensions::StrOrString;
 
 use std::collections::HashMap;
@@ -18,8 +19,8 @@ lazy_static::lazy_static! {
     static ref CLIENTS_CACHED: ClientsCache = ClientsCache::new();
 }
 
-pub struct FlUrl<'g> {
-    pub url: UrlBuilder<'g>,
+pub struct FlUrl {
+    pub url: UrlBuilder,
     pub headers: HashMap<String, String>,
     pub client_cert: Option<crate::ClientCertificate>,
     pub accept_invalid_certificate: bool,
@@ -29,9 +30,10 @@ pub struct FlUrl<'g> {
     pub drop_connection_scenario: Box<dyn DropConnectionScenario + Send + Sync + 'static>,
 }
 
-impl<'g> FlUrl<'g> {
-    pub fn new(url: impl Into<StrOrString<'g>>) -> Self {
-        let url = UrlBuilder::new(url);
+impl FlUrl {
+    pub fn new<'s>(url: impl Into<StrOrString<'s>>) -> Self {
+        let url: StrOrString<'s> = url.into();
+        let url = UrlBuilder::new(ShortString::from_str(url.as_str()));
         Self {
             headers: HashMap::new(),
             execute_timeout: Some(Duration::from_secs(30)),
@@ -43,8 +45,9 @@ impl<'g> FlUrl<'g> {
         }
     }
 
-    pub fn new_with_timeout(url: impl Into<StrOrString<'g>>, time_out: Duration) -> Self {
-        let url = UrlBuilder::new(url);
+    pub fn new_with_timeout<'s>(url: impl Into<StrOrString<'s>>, time_out: Duration) -> Self {
+        let url: StrOrString<'s> = url.into();
+        let url = UrlBuilder::new(ShortString::from_str(url.as_str()));
         Self {
             headers: HashMap::new(),
             execute_timeout: Some(time_out),
@@ -56,9 +59,11 @@ impl<'g> FlUrl<'g> {
         }
     }
 
-    pub fn new_without_timeout(url: impl Into<StrOrString<'g>>) -> Self {
+    pub fn new_without_timeout<'s>(url: impl Into<StrOrString<'s>>) -> Self {
+        let url: StrOrString<'s> = url.into();
+        let url = UrlBuilder::new(ShortString::from_str(url.as_str()));
         Self {
-            url: UrlBuilder::new(url),
+            url,
             headers: HashMap::new(),
             execute_timeout: None,
             client_cert: None,
@@ -207,15 +212,16 @@ impl<'g> FlUrl<'g> {
         use hyper_unix_connector::UnixClient;
         let client: hyper::Client<UnixClient, hyper::Body> =
             hyper::Client::builder().build(UnixClient);
+
+        let url = self.url.into_builder_owned();
+
         let addr: hyper::Uri = hyper_unix_connector::Uri::new(
             self.url.get_scheme_and_host().as_str(),
-            &self.url.get_path_and_query(),
+            self.url.get_path_and_query().as_str(),
         )
         .into();
 
         let result = client.get(addr).await;
-
-        let url = self.url.into_builder_owned();
 
         match result {
             Ok(result) => {
@@ -258,7 +264,7 @@ impl<'g> FlUrl<'g> {
     }
 }
 
-impl<'g> FlUrlFactory for FlUrl<'g> {
+impl FlUrlFactory for FlUrl {
     fn create(&mut self) -> FlUrlClient {
         match self.url.scheme {
             crate::Scheme::Http => FlUrlClient::new_http(),
