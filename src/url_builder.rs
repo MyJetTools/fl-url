@@ -3,7 +3,7 @@ use rust_extensions::StrOrString;
 use crate::{url_utils, Scheme, UrlBuilderOwned};
 
 pub struct UrlBuilder<'s> {
-    path_segments: Vec<StrOrString<'s>>,
+    path_segments: String,
     scheme_index: Option<usize>,
     pub query: Vec<(String, Option<String>)>,
     pub scheme: Scheme,
@@ -21,7 +21,7 @@ impl<'s> UrlBuilder<'s> {
 
         Self {
             query: Vec::new(),
-            path_segments: Vec::new(),
+            path_segments: String::new(),
             scheme,
             scheme_index,
             raw_ending: None,
@@ -34,8 +34,11 @@ impl<'s> UrlBuilder<'s> {
         self.raw_ending = Some(raw_ending);
     }
 
-    pub fn append_path_segment(&mut self, path: impl Into<StrOrString<'s>>) {
-        self.path_segments.push(path.into());
+    pub fn append_path_segment(&mut self, path: &str) {
+        if self.path_segments.len() > 0 {
+            self.path_segments.push('/');
+        }
+        self.path_segments.push_str(path);
     }
 
     pub fn append_query_param(&mut self, param: String, value: Option<String>) {
@@ -138,16 +141,13 @@ impl<'s> UrlBuilder<'s> {
     }
 }
 
-fn fill_with_path<'s>(res: &mut String, src: &Vec<StrOrString<'s>>) {
-    if src.len() == 0 {
-        res.push('/');
+fn fill_with_path<'s>(res: &mut String, path: &str) {
+    res.push('/');
+    if path.len() == 0 {
         return;
     }
 
-    for segment in src {
-        res.push('/');
-        res.push_str(segment.as_str())
-    }
+    res.push_str(path)
 }
 
 fn remove_last_symbol_if_exists<'s>(src: &mut StrOrString<'s>, last_symbol: char) -> bool {
@@ -266,8 +266,8 @@ mod tests {
     #[test]
     pub fn test_path_segments_with_slug_at_the_end() {
         let mut uri_builder = UrlBuilder::new("https://google.com/");
-        uri_builder.append_path_segment("first".to_string());
-        uri_builder.append_path_segment("second".to_string());
+        uri_builder.append_path_segment("first");
+        uri_builder.append_path_segment("second");
 
         assert_eq!("https://google.com/first/second", uri_builder.to_string());
         assert_eq!(
@@ -308,8 +308,8 @@ mod tests {
     #[test]
     pub fn test_path_and_query() {
         let mut uri_builder = UrlBuilder::new("https://google.com");
-        uri_builder.append_path_segment("first".to_string());
-        uri_builder.append_path_segment("second".to_string());
+        uri_builder.append_path_segment("first");
+        uri_builder.append_path_segment("second");
 
         uri_builder.append_query_param("first".to_string(), Some("first_value".to_string()));
         uri_builder.append_query_param("second".to_string(), Some("second_value".to_string()));

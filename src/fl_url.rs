@@ -101,8 +101,8 @@ impl<'g> FlUrl<'g> {
         self
     }
 
-    pub fn append_path_segment(mut self, path_segment: impl Into<StrOrString<'g>>) -> Self {
-        self.url.append_path_segment(path_segment.into());
+    pub fn append_path_segment<'s>(mut self, path_segment: impl Into<StrOrString<'s>>) -> Self {
+        self.url.append_path_segment(path_segment.into().as_str());
         self
     }
 
