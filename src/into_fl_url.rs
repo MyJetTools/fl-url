@@ -5,22 +5,22 @@ use rust_extensions::StrOrString;
 use crate::{FlUrl, FlUrlError, FlUrlResponse};
 
 #[async_trait::async_trait]
-pub trait IntoFlUrl {
-    fn create_http_request_with_timeout(self, timeout: Duration) -> FlUrl;
-    fn append_path_segment(self, path_segment: impl Into<StrOrString<'static>>) -> FlUrl;
+pub trait IntoFlUrl<'g> {
+    fn create_http_request_with_timeout(self, timeout: Duration) -> FlUrl<'g>;
+    fn append_path_segment(self, path_segment: impl Into<StrOrString<'static>>) -> FlUrl<'g>;
     fn append_query_param<'n, 'v>(
         self,
         name: impl Into<StrOrString<'n>>,
         value: Option<impl Into<StrOrString<'v>>>,
-    ) -> FlUrl;
+    ) -> FlUrl<'g>;
 
     fn with_header<'s, 'a>(
         self,
         name: impl Into<StrOrString<'s>>,
         value: impl Into<StrOrString<'a>>,
-    ) -> FlUrl;
+    ) -> FlUrl<'g>;
 
-    fn append_raw_ending_to_url<'s>(self, raw: impl Into<StrOrString<'s>>) -> FlUrl;
+    fn append_raw_ending_to_url<'s>(self, raw: impl Into<StrOrString<'s>>) -> FlUrl<'g>;
 
     async fn get(self) -> Result<FlUrlResponse, FlUrlError>;
     async fn post(self, body: Option<Vec<u8>>) -> Result<FlUrlResponse, FlUrlError>;
@@ -34,12 +34,12 @@ pub trait IntoFlUrl {
 }
 
 #[async_trait::async_trait]
-impl IntoFlUrl for &'static str {
-    fn create_http_request_with_timeout(self, timeout: Duration) -> FlUrl {
+impl<'g> IntoFlUrl<'g> for &'g str {
+    fn create_http_request_with_timeout(self, timeout: Duration) -> FlUrl<'g> {
         FlUrl::new_with_timeout(self, timeout)
     }
 
-    fn append_path_segment(self, path_segment: impl Into<StrOrString<'static>>) -> FlUrl {
+    fn append_path_segment(self, path_segment: impl Into<StrOrString<'static>>) -> FlUrl<'g> {
         FlUrl::new(self).append_path_segment(path_segment)
     }
 
@@ -47,7 +47,7 @@ impl IntoFlUrl for &'static str {
         self,
         name: impl Into<StrOrString<'n>>,
         value: Option<impl Into<StrOrString<'v>>>,
-    ) -> FlUrl {
+    ) -> FlUrl<'g> {
         FlUrl::new(self).append_query_param(name, value)
     }
 
@@ -55,11 +55,11 @@ impl IntoFlUrl for &'static str {
         self,
         name: impl Into<StrOrString<'s>>,
         value: impl Into<StrOrString<'a>>,
-    ) -> FlUrl {
+    ) -> FlUrl<'g> {
         FlUrl::new(self).with_header(name, value)
     }
 
-    fn append_raw_ending_to_url<'s>(self, raw: impl Into<StrOrString<'s>>) -> FlUrl {
+    fn append_raw_ending_to_url<'s>(self, raw: impl Into<StrOrString<'s>>) -> FlUrl<'g> {
         FlUrl::new(self).append_raw_ending_to_url(raw)
     }
 
@@ -92,11 +92,11 @@ impl IntoFlUrl for &'static str {
 }
 
 #[async_trait::async_trait]
-impl IntoFlUrl for &'static String {
-    fn create_http_request_with_timeout(self, timeout: Duration) -> FlUrl {
+impl<'g> IntoFlUrl<'g> for &'g String {
+    fn create_http_request_with_timeout(self, timeout: Duration) -> FlUrl<'g> {
         FlUrl::new_with_timeout(self, timeout)
     }
-    fn append_path_segment(self, path_segment: impl Into<StrOrString<'static>>) -> FlUrl {
+    fn append_path_segment(self, path_segment: impl Into<StrOrString<'static>>) -> FlUrl<'g> {
         FlUrl::new(self).append_path_segment(path_segment)
     }
 
@@ -104,7 +104,7 @@ impl IntoFlUrl for &'static String {
         self,
         name: impl Into<StrOrString<'n>>,
         value: Option<impl Into<StrOrString<'v>>>,
-    ) -> FlUrl {
+    ) -> FlUrl<'g> {
         FlUrl::new(self).append_query_param(name, value)
     }
 
@@ -112,11 +112,11 @@ impl IntoFlUrl for &'static String {
         self,
         name: impl Into<StrOrString<'s>>,
         value: impl Into<StrOrString<'a>>,
-    ) -> FlUrl {
+    ) -> FlUrl<'g> {
         FlUrl::new(self).with_header(name, value)
     }
 
-    fn append_raw_ending_to_url<'s>(self, raw: impl Into<StrOrString<'s>>) -> FlUrl {
+    fn append_raw_ending_to_url<'s>(self, raw: impl Into<StrOrString<'s>>) -> FlUrl<'g> {
         FlUrl::new(self).append_raw_ending_to_url(raw)
     }
 
@@ -149,12 +149,12 @@ impl IntoFlUrl for &'static String {
 }
 
 #[async_trait::async_trait]
-impl IntoFlUrl for String {
-    fn create_http_request_with_timeout(self, timeout: Duration) -> FlUrl {
+impl<'g> IntoFlUrl<'g> for String {
+    fn create_http_request_with_timeout(self, timeout: Duration) -> FlUrl<'g> {
         FlUrl::new_with_timeout(self, timeout)
     }
 
-    fn append_path_segment(self, path_segment: impl Into<StrOrString<'static>>) -> FlUrl {
+    fn append_path_segment(self, path_segment: impl Into<StrOrString<'static>>) -> FlUrl<'g> {
         FlUrl::new(self).append_path_segment(path_segment)
     }
 
@@ -162,7 +162,7 @@ impl IntoFlUrl for String {
         self,
         name: impl Into<StrOrString<'n>>,
         value: Option<impl Into<StrOrString<'v>>>,
-    ) -> FlUrl {
+    ) -> FlUrl<'g> {
         FlUrl::new(self).append_query_param(name, value)
     }
 
@@ -170,11 +170,11 @@ impl IntoFlUrl for String {
         self,
         name: impl Into<StrOrString<'n>>,
         value: impl Into<StrOrString<'v>>,
-    ) -> FlUrl {
+    ) -> FlUrl<'g> {
         FlUrl::new(self).with_header(name, value)
     }
 
-    fn append_raw_ending_to_url<'s>(self, raw: impl Into<StrOrString<'s>>) -> FlUrl {
+    fn append_raw_ending_to_url<'s>(self, raw: impl Into<StrOrString<'s>>) -> FlUrl<'g> {
         FlUrl::new(self).append_raw_ending_to_url(raw)
     }
 

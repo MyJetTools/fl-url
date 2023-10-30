@@ -18,8 +18,8 @@ lazy_static::lazy_static! {
     static ref CLIENTS_CACHED: ClientsCache = ClientsCache::new();
 }
 
-pub struct FlUrl {
-    pub url: UrlBuilder,
+pub struct FlUrl<'g> {
+    pub url: UrlBuilder<'g>,
     pub headers: HashMap<String, String>,
     pub client_cert: Option<crate::ClientCertificate>,
     pub accept_invalid_certificate: bool,
@@ -29,8 +29,8 @@ pub struct FlUrl {
     pub drop_connection_scenario: Box<dyn DropConnectionScenario + Send + Sync + 'static>,
 }
 
-impl FlUrl {
-    pub fn new(url: impl Into<StrOrString<'static>>) -> Self {
+impl<'g> FlUrl<'g> {
+    pub fn new(url: impl Into<StrOrString<'g>>) -> Self {
         let url = UrlBuilder::new(url);
         Self {
             headers: HashMap::new(),
@@ -43,7 +43,7 @@ impl FlUrl {
         }
     }
 
-    pub fn new_with_timeout(url: impl Into<StrOrString<'static>>, time_out: Duration) -> Self {
+    pub fn new_with_timeout(url: impl Into<StrOrString<'g>>, time_out: Duration) -> Self {
         let url = UrlBuilder::new(url);
         Self {
             headers: HashMap::new(),
@@ -159,9 +159,9 @@ impl FlUrl {
         method: Method,
         body: Option<Vec<u8>>,
     ) -> Result<FlUrlResponse, FlUrlError> {
-        let url = self.url.to_string();
+        let url = self.url.into_builder_owned();
 
-        let mut req = hyper::Request::builder().method(method).uri(url);
+        let mut req = hyper::Request::builder().method(method).uri(url.as_str());
 
         if self.headers.len() > 0 {
             let headers = req.headers_mut().unwrap();
@@ -176,17 +176,17 @@ impl FlUrl {
 
         let body = req.body(hyper::Body::from(compile_body(body))).unwrap();
 
-        let scheme_and_host = self.url.get_scheme_and_host().as_str().to_lowercase();
+        let scheme_and_host = url.get_scheme_and_host().to_lowercase();
 
         let result = if self.do_not_reuse_connection {
             let client = self.create();
-            client.execute(self.url, body).await
+            client.execute(url, body).await
         } else {
             let client = CLIENTS_CACHED
                 .get(scheme_and_host.as_str(), &mut self)
                 .await;
 
-            client.execute(self.url, body).await
+            client.execute(url, body).await
         };
 
         match result {
@@ -215,9 +215,11 @@ impl FlUrl {
 
         let result = client.get(addr).await;
 
+        let url = self.url.into_builder_owned();
+
         match result {
             Ok(result) => {
-                return Ok(FlUrlResponse::new(self.url, result));
+                return Ok(FlUrlResponse::new(url, result));
             }
             Err(err) => {
                 return Err(FlUrlError::HyperError(err));
@@ -256,7 +258,7 @@ impl FlUrl {
     }
 }
 
-impl FlUrlFactory for FlUrl {
+impl<'g> FlUrlFactory for FlUrl<'g> {
     fn create(&mut self) -> FlUrlClient {
         match self.url.scheme {
             crate::Scheme::Http => FlUrlClient::new_http(),

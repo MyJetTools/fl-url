@@ -22,3 +22,5 @@ pub use fl_url::FlUrl;
 pub use fl_url_client::*;
 pub use into_fl_url::*;
 pub use url_builder::*;
+mod url_builder_owned;
+pub use url_builder_owned::*;

@@ -3,16 +3,16 @@ use std::collections::HashMap;
 use hyper::{Body, Response};
 use serde::de::DeserializeOwned;
 
-use crate::{FlUrlError, UrlBuilder};
+use crate::{FlUrlError, UrlBuilderOwned};
 pub struct FlUrlResponse {
-    pub url: UrlBuilder,
+    pub url: UrlBuilderOwned,
     status_code: u16,
     pub response: Option<Response<Body>>,
     body: Option<Vec<u8>>,
 }
 
 impl FlUrlResponse {
-    pub fn new(url: UrlBuilder, response: Response<Body>) -> Self {
+    pub fn new(url: UrlBuilderOwned, response: Response<Body>) -> Self {
         Self {
             status_code: response.status().as_u16(),
             response: Some(response),

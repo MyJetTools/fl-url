@@ -1,7 +1,7 @@
 use hyper::{client::HttpConnector, Body, Client, Request};
 use hyper_rustls::HttpsConnector;
 
-use crate::{ClientCertificate, FlUrlError, FlUrlResponse, UrlBuilder};
+use crate::{ClientCertificate, FlUrlError, FlUrlResponse, UrlBuilderOwned};
 
 pub enum FlUrlClient {
     Http(Client<HttpConnector>),
@@ -42,7 +42,7 @@ impl FlUrlClient {
 
     pub async fn execute(
         &self,
-        url: UrlBuilder,
+        url: UrlBuilderOwned,
         request: Request<Body>,
     ) -> Result<FlUrlResponse, FlUrlError> {
         match self {

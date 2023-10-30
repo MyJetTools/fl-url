@@ -1,20 +1,20 @@
 use rust_extensions::StrOrString;
 
-use crate::{url_utils, Scheme};
+use crate::{url_utils, Scheme, UrlBuilderOwned};
 
-pub struct UrlBuilder {
-    path_segments: Vec<StrOrString<'static>>,
+pub struct UrlBuilder<'s> {
+    path_segments: Vec<StrOrString<'s>>,
     scheme_index: Option<usize>,
     pub query: Vec<(String, Option<String>)>,
     pub scheme: Scheme,
     raw_ending: Option<String>,
-    pub host_port: StrOrString<'static>,
+    pub host_port: StrOrString<'s>,
     has_last_slash: bool,
 }
 
-impl UrlBuilder {
-    pub fn new(host_port: impl Into<StrOrString<'static>>) -> Self {
-        let mut host_port: StrOrString<'static> = host_port.into();
+impl<'s> UrlBuilder<'s> {
+    pub fn new(host_port: impl Into<StrOrString<'s>>) -> Self {
+        let mut host_port: StrOrString<'s> = host_port.into();
         let has_last_slash = remove_last_symbol_if_exists(&mut host_port, '/');
 
         let (scheme, scheme_index) = Scheme::from_url(host_port.as_str());
@@ -85,7 +85,7 @@ impl UrlBuilder {
         result.into()
     }
 
-    pub fn get_path_and_query(&self) -> String {
+    pub fn get_path_and_query(&'s self) -> String {
         let mut result = String::new();
 
         fill_with_path(&mut result, &self.path_segments);
@@ -132,9 +132,13 @@ impl UrlBuilder {
 
         result
     }
+
+    pub fn into_builder_owned(&self) -> UrlBuilderOwned {
+        UrlBuilderOwned::new(self.to_string())
+    }
 }
 
-fn fill_with_path(res: &mut String, src: &Vec<StrOrString<'static>>) {
+fn fill_with_path<'s>(res: &mut String, src: &Vec<StrOrString<'s>>) {
     if src.len() == 0 {
         res.push('/');
         return;
@@ -146,7 +150,7 @@ fn fill_with_path(res: &mut String, src: &Vec<StrOrString<'static>>) {
     }
 }
 
-fn remove_last_symbol_if_exists<'s>(src: &mut StrOrString<'static>, last_symbol: char) -> bool {
+fn remove_last_symbol_if_exists<'s>(src: &mut StrOrString<'s>, last_symbol: char) -> bool {
     let last_char = last_symbol as u8;
     let src_as_bytes = src.as_str().as_bytes();
     if src_as_bytes[src_as_bytes.len() - 1] == last_char {
