@@ -56,7 +56,7 @@ impl<'g> FlUrl<'g> {
         }
     }
 
-    pub fn new_without_timeout(url: impl Into<StrOrString<'static>>) -> Self {
+    pub fn new_without_timeout(url: impl Into<StrOrString<'g>>) -> Self {
         Self {
             url: UrlBuilder::new(url),
             headers: HashMap::new(),
@@ -101,7 +101,7 @@ impl<'g> FlUrl<'g> {
         self
     }
 
-    pub fn append_path_segment(mut self, path_segment: impl Into<StrOrString<'static>>) -> Self {
+    pub fn append_path_segment(mut self, path_segment: impl Into<StrOrString<'g>>) -> Self {
         self.url.append_path_segment(path_segment.into());
         self
     }

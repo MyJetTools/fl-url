@@ -34,7 +34,7 @@ impl<'s> UrlBuilder<'s> {
         self.raw_ending = Some(raw_ending);
     }
 
-    pub fn append_path_segment(&mut self, path: impl Into<StrOrString<'static>>) {
+    pub fn append_path_segment(&mut self, path: impl Into<StrOrString<'s>>) {
         self.path_segments.push(path.into());
     }
 
