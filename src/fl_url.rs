@@ -33,7 +33,7 @@ pub struct FlUrl {
 impl FlUrl {
     pub fn new<'s>(url: impl Into<StrOrString<'s>>) -> Self {
         let url: StrOrString<'s> = url.into();
-        let url = UrlBuilder::new(ShortString::from_str(url.as_str()));
+        let url = UrlBuilder::new(ShortString::from_str(url.as_str()).unwrap());
         Self {
             headers: HashMap::new(),
             execute_timeout: Some(Duration::from_secs(30)),
@@ -47,7 +47,7 @@ impl FlUrl {
 
     pub fn new_with_timeout<'s>(url: impl Into<StrOrString<'s>>, time_out: Duration) -> Self {
         let url: StrOrString<'s> = url.into();
-        let url = UrlBuilder::new(ShortString::from_str(url.as_str()));
+        let url = UrlBuilder::new(ShortString::from_str(url.as_str()).unwrap());
         Self {
             headers: HashMap::new(),
             execute_timeout: Some(time_out),
@@ -61,7 +61,7 @@ impl FlUrl {
 
     pub fn new_without_timeout<'s>(url: impl Into<StrOrString<'s>>) -> Self {
         let url: StrOrString<'s> = url.into();
-        let url = UrlBuilder::new(ShortString::from_str(url.as_str()));
+        let url = UrlBuilder::new(ShortString::from_str(url.as_str()).unwrap());
         Self {
             url,
             headers: HashMap::new(),
