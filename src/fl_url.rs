@@ -130,8 +130,11 @@ impl FlUrl {
     ) -> Result<FlUrlResponse, FlUrlError> {
         #[cfg(feature = "support-unix-socket")]
         if self.url.scheme.is_unix_socket() {
-            let unix_socket_client = crate::UnixSocketClient::new(self.url);
-            return unix_socket_client.execute_request().await;
+            let owned = self.url.into_builder_owned();
+
+            let (response, url) = unix_sockets::execute_request(owned.into_string()).await?;
+
+            return Ok(FlUrlResponse::from_unix_response(response, url));
         }
 
         self.execute_http_or_https(method, body).await

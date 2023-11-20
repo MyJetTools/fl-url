@@ -6,7 +6,7 @@ edition = "2021"
 
 [features]
 default = []
-support-unix-socket = ["hyper-unix-connector"]
+support-unix-socket = ["unix-sockets"]
 
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -17,6 +17,8 @@ tokio = { version = "*", features = ["full"] }
 rust-extensions = { tag = "0.1.4", git = "https://github.com/MyJetTools/rust-extensions.git" }
 
 hyper-util = { version = "*", features = ["tokio", "client-legacy", "http1"] }
+
+unix-sockets = { path = "./unix-sockets", optional = true }
 
 http-body-util = { version = "*" }
 
@@ -29,7 +31,7 @@ serde = { version = "*", features = ["derive"] }
 serde_json = { version = "*" }
 tokio-rustls = { version = "*" }
 openssl = { version = "*" }
-hyper-unix-connector = { version = "*", optional = true }
+
 webpki-roots = "*"
 webpki = "*"
 tokio-native-tls = "*"

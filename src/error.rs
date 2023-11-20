@@ -9,6 +9,8 @@ pub enum FlUrlError {
     ConnectionIsDead,
     InvalidHttp1HandShake(String),
     CanNotEstablishConnection(String),
+    #[cfg(feature = "support-unix-socket")]
+    UnixSocketError(unix_sockets::FlUrlUnixSocketError),
 }
 
 impl From<hyper::Error> for FlUrlError {
@@ -32,5 +34,11 @@ impl From<std::io::Error> for FlUrlError {
 impl From<hyper::http::Error> for FlUrlError {
     fn from(src: hyper::http::Error) -> Self {
         Self::HttpError(src)
+    }
+}
+#[cfg(feature = "support-unix-socket")]
+impl From<unix_sockets::FlUrlUnixSocketError> for FlUrlError {
+    fn from(src: unix_sockets::FlUrlUnixSocketError) -> Self {
+        Self::UnixSocketError(src)
     }
 }

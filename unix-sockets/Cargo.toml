@@ -1,0 +1,10 @@
+[package]
+name = "unix-sockets"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+hyper-unix-connector = { version = "*" }
+hyper = { version = "0.14.27", features = ["full"] }

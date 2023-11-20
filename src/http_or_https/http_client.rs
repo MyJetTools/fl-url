@@ -20,11 +20,7 @@ impl HttpClient {
 
         let domain = src.get_domain();
 
-        println!("Domain: {}", domain);
-
         let is_https = src.scheme.is_https();
-
-        println!("IsHtts: {}", is_https);
 
         let host_port: StrOrString = if host_port.contains(":") {
             host_port.into()

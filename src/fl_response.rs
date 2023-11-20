@@ -19,6 +19,15 @@ impl FlUrlResponse {
         }
     }
 
+    #[cfg(feature = "support-unix-socket")]
+    pub fn from_unix_response(value: unix_sockets::FlUrlUnixResponse, url: String) -> Self {
+        FlUrlResponse {
+            url: UrlBuilderOwned::new(url),
+            status_code: value.status_code,
+            response: ResponseBody::UnixSocket(value),
+        }
+    }
+
     pub fn into_hyper_response(self) -> Response<Incoming> {
         self.response.into_hyper_response()
     }
