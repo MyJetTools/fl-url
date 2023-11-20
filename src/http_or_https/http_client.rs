@@ -125,7 +125,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_http_request() {
-        let url_builder = UrlBuilder::new("http://127.0.0.1:5123/".into());
+        let url_builder = UrlBuilder::new("http://google.com/".into());
 
         let fl_url_client = HttpClient::new(&url_builder, REQUEST_TIMEOUT)
             .await
@@ -173,8 +173,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_https_request() {
-        let url_builder =
-            UrlBuilder::new("https://trade-demo.yourfin.tech/swagger/index.html".into());
+        let url_builder = UrlBuilder::new("https://trade-demo.yourfin.tech".into());
 
         let fl_url_client = HttpClient::new(&url_builder, REQUEST_TIMEOUT)
             .await
