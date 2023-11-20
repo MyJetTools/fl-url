@@ -2,10 +2,11 @@ use openssl::{
     pkey::{PKey, Private},
     x509::X509,
 };
+use tokio_rustls::rustls::{Certificate, PrivateKey};
 
 pub struct ClientCertificate {
-    pub pkey: rustls::PrivateKey,
-    pub cert: rustls::Certificate,
+    pub pkey: PrivateKey,
+    pub cert: Certificate,
 }
 
 impl ClientCertificate {
@@ -24,8 +25,8 @@ impl ClientCertificate {
         let cert: X509 = pkcs12.cert.unwrap();
 
         Self {
-            pkey: rustls::PrivateKey(pkey.private_key_to_der().unwrap()),
-            cert: rustls::Certificate(cert.to_der().unwrap()),
+            pkey: PrivateKey(pkey.private_key_to_der().unwrap()),
+            cert: Certificate(cert.to_der().unwrap()),
         }
     }
 
