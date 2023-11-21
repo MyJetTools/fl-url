@@ -16,7 +16,7 @@ tokio = { version = "*", features = ["full"] }
 
 rust-extensions = { tag = "0.1.4", git = "https://github.com/MyJetTools/rust-extensions.git" }
 
-hyper-util = { version = "*", features = ["tokio", "client-legacy", "http1"] }
+hyper-util = { version = "*", features = ["tokio"] }
 
 unix-sockets = { path = "./unix-sockets", optional = true }
 
