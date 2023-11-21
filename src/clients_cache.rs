@@ -1,15 +1,11 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use tokio::sync::RwLock;
 
-use crate::FlUrlClient;
-
-pub trait FlUrlFactory {
-    fn create(&mut self) -> FlUrlClient;
-}
+use crate::{ClientCertificate, FlUrlError, HttpClient, UrlBuilder};
 
 pub struct ClientsCache {
-    pub clients: RwLock<HashMap<String, Arc<FlUrlClient>>>,
+    pub clients: RwLock<HashMap<String, Arc<HttpClient>>>,
 }
 
 impl ClientsCache {
@@ -21,28 +17,39 @@ impl ClientsCache {
 
     pub async fn get(
         &self,
-        schema_domain: &str,
-        factory: &mut impl FlUrlFactory,
-    ) -> Arc<FlUrlClient> {
+        url_builder: &UrlBuilder,
+        request_timeout: Duration,
+        client_certificate: Option<ClientCertificate>,
+    ) -> Result<Arc<HttpClient>, FlUrlError> {
+        let schema_and_domain = url_builder.get_scheme_and_host();
         {
             let read_access = self.clients.read().await;
-            if read_access.contains_key(schema_domain) {
-                return read_access.get(schema_domain).cloned().unwrap();
+            if read_access.contains_key(schema_and_domain.as_str()) {
+                return Ok(read_access
+                    .get(schema_and_domain.as_str())
+                    .cloned()
+                    .unwrap());
             }
         }
 
         let mut write_access = self.clients.write().await;
 
-        if write_access.contains_key(schema_domain) {
-            return write_access.get(schema_domain).cloned().unwrap();
+        if write_access.contains_key(schema_and_domain.as_str()) {
+            return Ok(write_access
+                .get(schema_and_domain.as_str())
+                .cloned()
+                .unwrap());
         }
 
-        let new_one = factory.create();
+        let new_one = HttpClient::new(url_builder, client_certificate, request_timeout).await?;
         let new_one = Arc::new(new_one);
 
-        write_access.insert(schema_domain.to_string(), new_one.clone());
+        write_access.insert(schema_and_domain.to_string(), new_one.clone());
 
-        write_access.get(schema_domain).cloned().unwrap()
+        Ok(write_access
+            .get(schema_and_domain.as_str())
+            .cloned()
+            .unwrap())
     }
 
     pub async fn remove(&self, schema_domain: &str) {

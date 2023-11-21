@@ -4,15 +4,15 @@ use rust_extensions::ShortString;
 use rust_extensions::StrOrString;
 
 use std::collections::HashMap;
-use std::str::FromStr;
 use std::time::Duration;
 
 use super::FlUrlResponse;
 use crate::ClientsCache;
 use crate::DropConnectionScenario;
-use crate::FlUrlClient;
+
 use crate::FlUrlError;
-use crate::FlUrlFactory;
+
+use crate::HttpClient;
 use crate::UrlBuilder;
 
 lazy_static::lazy_static! {
@@ -24,7 +24,7 @@ pub struct FlUrl {
     pub headers: HashMap<String, String>,
     pub client_cert: Option<crate::ClientCertificate>,
     pub accept_invalid_certificate: bool,
-    pub execute_timeout: Option<Duration>,
+    pub execute_timeout: Duration,
     pub do_not_reuse_connection: bool,
 
     pub drop_connection_scenario: Box<dyn DropConnectionScenario + Send + Sync + 'static>,
@@ -36,7 +36,7 @@ impl FlUrl {
         let url = UrlBuilder::new(ShortString::from_str(url.as_str()).unwrap());
         Self {
             headers: HashMap::new(),
-            execute_timeout: Some(Duration::from_secs(30)),
+            execute_timeout: Duration::from_secs(30),
             client_cert: None,
             url,
             accept_invalid_certificate: false,
@@ -45,32 +45,9 @@ impl FlUrl {
         }
     }
 
-    pub fn new_with_timeout<'s>(url: impl Into<StrOrString<'s>>, time_out: Duration) -> Self {
-        let url: StrOrString<'s> = url.into();
-        let url = UrlBuilder::new(ShortString::from_str(url.as_str()).unwrap());
-        Self {
-            headers: HashMap::new(),
-            execute_timeout: Some(time_out),
-            url,
-            client_cert: None,
-            do_not_reuse_connection: false,
-            accept_invalid_certificate: false,
-            drop_connection_scenario: Box::new(crate::DefaultDropConnectionScenario),
-        }
-    }
-
-    pub fn new_without_timeout<'s>(url: impl Into<StrOrString<'s>>) -> Self {
-        let url: StrOrString<'s> = url.into();
-        let url = UrlBuilder::new(ShortString::from_str(url.as_str()).unwrap());
-        Self {
-            url,
-            headers: HashMap::new(),
-            execute_timeout: None,
-            client_cert: None,
-            accept_invalid_certificate: false,
-            do_not_reuse_connection: false,
-            drop_connection_scenario: Box::new(crate::DefaultDropConnectionScenario),
-        }
+    pub fn set_timeout(mut self, timeout: Duration) -> Self {
+        self.execute_timeout = timeout;
+        self
     }
 
     pub fn override_drop_connection_scenario(
@@ -153,45 +130,35 @@ impl FlUrl {
     ) -> Result<FlUrlResponse, FlUrlError> {
         #[cfg(feature = "support-unix-socket")]
         if self.url.scheme.is_unix_socket() {
-            return self.execute_unix_socket().await;
+            let owned = self.url.into_builder_owned();
+
+            let (response, url) = unix_sockets::execute_request(owned.into_string()).await?;
+
+            return Ok(FlUrlResponse::from_unix_response(response, url));
         }
 
         self.execute_http_or_https(method, body).await
     }
 
     async fn execute_http_or_https(
-        mut self,
+        self,
         method: Method,
         body: Option<Vec<u8>>,
     ) -> Result<FlUrlResponse, FlUrlError> {
-        let url = self.url.into_builder_owned();
-
-        let mut req = hyper::Request::builder().method(method).uri(url.as_str());
-
-        if self.headers.len() > 0 {
-            let headers = req.headers_mut().unwrap();
-            for (key, value) in &self.headers {
-                let header_name = hyper::http::HeaderName::from_str(key).unwrap();
-                headers.insert(
-                    header_name,
-                    hyper::http::HeaderValue::from_str(value).unwrap(),
-                );
-            }
-        };
-
-        let body = req.body(hyper::Body::from(compile_body(body))).unwrap();
-
-        let scheme_and_host = url.get_scheme_and_host().to_lowercase();
+        let scheme_and_host = self.url.get_scheme_and_host();
 
         let result = if self.do_not_reuse_connection {
-            let client = self.create();
-            client.execute(url, body).await
+            let client = HttpClient::new(&self.url, self.client_cert, self.execute_timeout).await?;
+            client
+                .execute_request(&self.url, method, &self.headers, body, self.execute_timeout)
+                .await
         } else {
             let client = CLIENTS_CACHED
-                .get(scheme_and_host.as_str(), &mut self)
-                .await;
-
-            client.execute(url, body).await
+                .get(&self.url, self.execute_timeout, self.client_cert)
+                .await?;
+            client
+                .execute_request(&self.url, method, &self.headers, body, self.execute_timeout)
+                .await
         };
 
         match result {
@@ -204,31 +171,6 @@ impl FlUrl {
             Err(err) => {
                 CLIENTS_CACHED.remove(scheme_and_host.as_str()).await;
                 return Err(err);
-            }
-        }
-    }
-    #[cfg(feature = "support-unix-socket")]
-    async fn execute_unix_socket(self) -> Result<FlUrlResponse, FlUrlError> {
-        use hyper_unix_connector::UnixClient;
-        let client: hyper::Client<UnixClient, hyper::Body> =
-            hyper::Client::builder().build(UnixClient);
-
-        let url = self.url.into_builder_owned();
-
-        let addr: hyper::Uri = hyper_unix_connector::Uri::new(
-            self.url.get_scheme_and_host().as_str(),
-            self.url.get_path_and_query().as_str(),
-        )
-        .into();
-
-        let result = client.get(addr).await;
-
-        match result {
-            Ok(result) => {
-                return Ok(FlUrlResponse::new(url, result));
-            }
-            Err(err) => {
-                return Err(FlUrlError::HyperError(err));
             }
         }
     }
@@ -261,23 +203,5 @@ impl FlUrl {
 
     pub async fn delete(self) -> Result<FlUrlResponse, FlUrlError> {
         self.execute(Method::DELETE, None).await
-    }
-}
-
-impl FlUrlFactory for FlUrl {
-    fn create(&mut self) -> FlUrlClient {
-        match self.url.scheme {
-            crate::Scheme::Http => FlUrlClient::new_http(),
-            crate::Scheme::Https => FlUrlClient::new_https(self.client_cert.take()),
-            #[cfg(feature = "support-unix-socket")]
-            crate::Scheme::UnixSocket => panic!("Unix socket is not supported in this case"),
-        }
-    }
-}
-
-fn compile_body(body_payload: Option<Vec<u8>>) -> hyper::body::Body {
-    match body_payload {
-        Some(payload) => hyper::Body::from(payload),
-        None => hyper::Body::empty(),
     }
 }

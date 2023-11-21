@@ -1,12 +1,9 @@
-use std::time::Duration;
-
 use rust_extensions::StrOrString;
 
 use crate::{FlUrl, FlUrlError, FlUrlResponse};
 
 #[async_trait::async_trait]
 pub trait IntoFlUrl {
-    fn create_http_request_with_timeout(self, timeout: Duration) -> FlUrl;
     fn append_path_segment<'s>(self, path_segment: impl Into<StrOrString<'s>>) -> FlUrl;
     fn append_query_param<'n, 'v>(
         self,
@@ -35,10 +32,6 @@ pub trait IntoFlUrl {
 
 #[async_trait::async_trait]
 impl<'g> IntoFlUrl for &'g str {
-    fn create_http_request_with_timeout(self, timeout: Duration) -> FlUrl {
-        FlUrl::new_with_timeout(self, timeout)
-    }
-
     fn append_path_segment<'s>(self, path_segment: impl Into<StrOrString<'s>>) -> FlUrl {
         FlUrl::new(self).append_path_segment(path_segment)
     }
@@ -93,9 +86,6 @@ impl<'g> IntoFlUrl for &'g str {
 
 #[async_trait::async_trait]
 impl<'g> IntoFlUrl for &'g String {
-    fn create_http_request_with_timeout(self, timeout: Duration) -> FlUrl {
-        FlUrl::new_with_timeout(self, timeout)
-    }
     fn append_path_segment<'s>(self, path_segment: impl Into<StrOrString<'s>>) -> FlUrl {
         FlUrl::new(self).append_path_segment(path_segment)
     }
@@ -150,10 +140,6 @@ impl<'g> IntoFlUrl for &'g String {
 
 #[async_trait::async_trait]
 impl IntoFlUrl for String {
-    fn create_http_request_with_timeout(self, timeout: Duration) -> FlUrl {
-        FlUrl::new_with_timeout(self, timeout)
-    }
-
     fn append_path_segment<'s>(self, path_segment: impl Into<StrOrString<'s>>) -> FlUrl {
         FlUrl::new(self).append_path_segment(path_segment)
     }

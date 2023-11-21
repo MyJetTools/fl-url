@@ -50,9 +50,21 @@ impl UrlBuilder {
 
     pub fn get_host_port(&self) -> &str {
         match self.scheme_index {
-            Some(index) => &self.host_port.as_str()[index + 3..],
-            None => self.host_port.as_str(),
+            Some(index) => &self.host_port.as_str()[index + 3..]
+                .split('/')
+                .next()
+                .unwrap(),
+            None => self.host_port.as_str().split('/').next().unwrap(),
         }
+    }
+
+    pub fn get_domain(&self) -> &str {
+        let host_port = self.get_host_port();
+        if let Some(index) = host_port.find(":") {
+            return &host_port[0..index];
+        }
+
+        host_port.split('/').next().unwrap()
     }
 
     fn fill_schema_and_host(&self, result: &mut String) {
@@ -202,9 +214,12 @@ mod tests {
             "http://google.com",
             uri_builder.get_scheme_and_host().as_str()
         );
+        assert_eq!("google.com", uri_builder.get_domain());
+
         assert_eq!(true, uri_builder.get_scheme().is_http());
         assert_eq!("google.com", uri_builder.get_host_port());
         assert_eq!("/", uri_builder.get_path());
+
         assert_eq!("/", uri_builder.get_path_and_query());
     }
 
@@ -312,6 +327,24 @@ mod tests {
             "/?first=first_value&second=second_value",
             uri_builder.get_path_and_query()
         );
+    }
+
+    #[test]
+    pub fn test_get_domain_different_cases() {
+        let uri_builder = UrlBuilder::new("https://my-domain:5123".into());
+
+        assert_eq!("my-domain:5123", uri_builder.get_host_port());
+        assert_eq!("my-domain", uri_builder.get_domain());
+
+        let uri_builder = UrlBuilder::new("https://my-domain:5123/my-path".into());
+
+        assert_eq!("my-domain:5123", uri_builder.get_host_port());
+        assert_eq!("my-domain", uri_builder.get_domain());
+
+        let uri_builder = UrlBuilder::new("https://my-domain/my-path".into());
+
+        assert_eq!("my-domain", uri_builder.get_host_port());
+        assert_eq!("my-domain", uri_builder.get_domain());
     }
 
     #[test]
