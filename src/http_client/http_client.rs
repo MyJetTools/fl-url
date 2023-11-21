@@ -7,7 +7,7 @@ use hyper::{client::conn::http1::SendRequest, Method, Request, Uri};
 use rust_extensions::StrOrString;
 use tokio::sync::Mutex;
 
-use crate::{FlUrlError, FlUrlResponse, UrlBuilder};
+use crate::{ClientCertificate, FlUrlError, FlUrlResponse, UrlBuilder};
 
 pub struct HttpClient {
     connection: Mutex<Option<SendRequest<Full<Bytes>>>>,
@@ -15,7 +15,11 @@ pub struct HttpClient {
 }
 
 impl HttpClient {
-    pub async fn new(src: &UrlBuilder, request_timeout: Duration) -> Result<Self, FlUrlError> {
+    pub async fn new(
+        src: &UrlBuilder,
+        client_certificate: Option<ClientCertificate>,
+        request_timeout: Duration,
+    ) -> Result<Self, FlUrlError> {
         let host_port = src.get_host_port();
 
         let domain = src.get_domain();
@@ -33,7 +37,13 @@ impl HttpClient {
         };
 
         let connection = if is_https {
-            super::connect_to_tls_endpoint(host_port.as_str(), domain, request_timeout).await?
+            super::connect_to_tls_endpoint(
+                host_port.as_str(),
+                domain,
+                request_timeout,
+                client_certificate,
+            )
+            .await?
         } else {
             super::connect_to_http_endpoint(host_port.as_str(), request_timeout).await?
         };
@@ -127,7 +137,7 @@ mod tests {
     async fn test_http_request() {
         let url_builder = UrlBuilder::new("http://google.com/".into());
 
-        let fl_url_client = HttpClient::new(&url_builder, REQUEST_TIMEOUT)
+        let fl_url_client = HttpClient::new(&url_builder, None, REQUEST_TIMEOUT)
             .await
             .unwrap();
 
@@ -175,7 +185,7 @@ mod tests {
     async fn test_https_request() {
         let url_builder = UrlBuilder::new("https://trade-demo.yourfin.tech".into());
 
-        let fl_url_client = HttpClient::new(&url_builder, REQUEST_TIMEOUT)
+        let fl_url_client = HttpClient::new(&url_builder, None, REQUEST_TIMEOUT)
             .await
             .unwrap();
 

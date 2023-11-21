@@ -148,12 +148,14 @@ impl FlUrl {
         let scheme_and_host = self.url.get_scheme_and_host();
 
         let result = if self.do_not_reuse_connection {
-            let client = HttpClient::new(&self.url, self.execute_timeout).await?;
+            let client = HttpClient::new(&self.url, self.client_cert, self.execute_timeout).await?;
             client
                 .execute_request(&self.url, method, &self.headers, body, self.execute_timeout)
                 .await
         } else {
-            let client = CLIENTS_CACHED.get(&self.url, self.execute_timeout).await?;
+            let client = CLIENTS_CACHED
+                .get(&self.url, self.execute_timeout, self.client_cert)
+                .await?;
             client
                 .execute_request(&self.url, method, &self.headers, body, self.execute_timeout)
                 .await

@@ -9,6 +9,7 @@ pub enum FlUrlError {
     ConnectionIsDead,
     InvalidHttp1HandShake(String),
     CanNotEstablishConnection(String),
+    ClientCertificateError(tokio_rustls::rustls::Error),
     #[cfg(feature = "support-unix-socket")]
     UnixSocketError(unix_sockets::FlUrlUnixSocketError),
 }

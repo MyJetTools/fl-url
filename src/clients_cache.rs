@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use tokio::sync::RwLock;
 
-use crate::{FlUrlError, HttpClient, UrlBuilder};
+use crate::{ClientCertificate, FlUrlError, HttpClient, UrlBuilder};
 
 pub struct ClientsCache {
     pub clients: RwLock<HashMap<String, Arc<HttpClient>>>,
@@ -19,6 +19,7 @@ impl ClientsCache {
         &self,
         url_builder: &UrlBuilder,
         request_timeout: Duration,
+        client_certificate: Option<ClientCertificate>,
     ) -> Result<Arc<HttpClient>, FlUrlError> {
         let schema_and_domain = url_builder.get_scheme_and_host();
         {
@@ -40,7 +41,7 @@ impl ClientsCache {
                 .unwrap());
         }
 
-        let new_one = HttpClient::new(url_builder, request_timeout).await?;
+        let new_one = HttpClient::new(url_builder, client_certificate, request_timeout).await?;
         let new_one = Arc::new(new_one);
 
         write_access.insert(schema_and_domain.to_string(), new_one.clone());
