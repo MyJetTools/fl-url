@@ -33,7 +33,7 @@ pub async fn connect_to_tls_endpoint(
                 let config = rustls::ClientConfig::builder()
                     .with_safe_defaults()
                     .with_root_certificates(ROOT_CERT_STORE.clone())
-                    .with_no_client_auth(); // i guess this was previously the default?
+                    .with_no_client_auth();
                 let connector = TlsConnector::from(Arc::new(config));
 
                 let domain = rustls::ServerName::try_from(domain).unwrap();

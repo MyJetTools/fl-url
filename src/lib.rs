@@ -26,5 +26,5 @@ pub extern crate hyper;
 mod response_body;
 pub use response_body::*;
 
-mod http_or_https;
-pub use http_or_https::*;
+mod http_client;
+pub use http_client::*;
