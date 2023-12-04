@@ -11,7 +11,6 @@ use crate::{ClientCertificate, FlUrlError, FlUrlResponse, UrlBuilder};
 
 pub struct HttpClient {
     connection: Mutex<Option<SendRequest<Full<Bytes>>>>,
-    host: String,
 }
 
 impl HttpClient {
@@ -49,7 +48,6 @@ impl HttpClient {
         };
         let result = Self {
             connection: Mutex::new(Some(connection)),
-            host: domain.to_string(),
         };
 
         Ok(result)
@@ -74,8 +72,6 @@ impl HttpClient {
         let uri: Uri = url_builder_owner.as_str().parse().unwrap();
 
         let authority = uri.authority().unwrap().clone();
-
-        println!("Authority: {}", authority.as_str());
 
         let mut request = Request::builder().uri(uri).method(method);
 
