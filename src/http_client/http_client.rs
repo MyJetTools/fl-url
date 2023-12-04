@@ -75,6 +75,8 @@ impl HttpClient {
 
         let authority = uri.authority().unwrap().clone();
 
+        println!("Authority: {}", authority.as_str());
+
         let mut request = Request::builder().uri(uri).method(method);
 
         {
