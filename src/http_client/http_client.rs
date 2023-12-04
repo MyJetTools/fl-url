@@ -74,29 +74,28 @@ impl HttpClient {
         let uri: Uri = url_builder_owner.as_str().parse().unwrap();
 
         let mut request = Request::builder().uri(uri).method(method);
-        /*
-          {
-              let headers_to_add = request.headers_mut().unwrap();
 
+        {
+            let headers_to_add = request.headers_mut().unwrap();
 
-                          headers_to_add.insert(
-                              hyper::http::header::HOST,
-                              hyper::http::HeaderValue::from_str(self.host.as_str()).unwrap(),
-                          );
+            headers_to_add.insert(
+                hyper::http::header::HOST,
+                hyper::http::HeaderValue::from_str(self.host.as_str()).unwrap(),
+            );
 
-              if headers.len() > 0 {
-                  let headers_dest = request.headers_mut().unwrap();
+            if headers.len() > 0 {
+                let headers_dest = request.headers_mut().unwrap();
 
-                  for (key, value) in headers {
-                      let header_name = hyper::http::HeaderName::from_str(key).unwrap();
-                      headers_dest.insert(
-                          header_name,
-                          hyper::http::HeaderValue::from_str(value).unwrap(),
-                      );
-                  }
-              };
-          }
-        */
+                for (key, value) in headers {
+                    let header_name = hyper::http::HeaderName::from_str(key).unwrap();
+                    headers_dest.insert(
+                        header_name,
+                        hyper::http::HeaderValue::from_str(value).unwrap(),
+                    );
+                }
+            };
+        }
+
         let request = request.body(body)?;
 
         let mut access = self.connection.lock().await;
