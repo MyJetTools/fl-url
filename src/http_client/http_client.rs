@@ -78,11 +78,12 @@ impl HttpClient {
         {
             let headers_to_add = request.headers_mut().unwrap();
 
-            headers_to_add.insert(
-                hyper::http::header::HOST,
-                hyper::http::HeaderValue::from_str(self.host.as_str()).unwrap(),
-            );
-
+            /*
+                        headers_to_add.insert(
+                            hyper::http::header::HOST,
+                            hyper::http::HeaderValue::from_str(self.host.as_str()).unwrap(),
+                        );
+            */
             if headers.len() > 0 {
                 let headers_dest = request.headers_mut().unwrap();
 
