@@ -64,7 +64,7 @@ impl HttpClient {
         request_timeout: Duration,
     ) -> Result<FlUrlResponse, FlUrlError> {
         let body = if let Some(body) = body {
-            http_body_util::Full::new(hyper::body::Bytes::from(body.to_vec()))
+            http_body_util::Full::new(body.into())
         } else {
             http_body_util::Full::new(hyper::body::Bytes::from(vec![]))
         };
