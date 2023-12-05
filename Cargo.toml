@@ -29,7 +29,7 @@ bytes = "*"
 hyper-tls = { version = "*" }
 serde = { version = "*", features = ["derive"] }
 serde_json = { version = "*" }
-tokio-rustls = { version = "*" }
+tokio-rustls = { version = "0.24.1" }
 openssl = { version = "*" }
 
 webpki-roots = "*"
