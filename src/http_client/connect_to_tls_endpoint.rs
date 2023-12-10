@@ -23,7 +23,7 @@ pub async fn connect_to_tls_endpoint(
     let connect_result = tokio::time::timeout(request_timeout, connect).await;
 
     if connect_result.is_err() {
-        println!("Timeout while connecting to http://{}", host_port);
+        println!("Timeout while connecting to https://{}", host_port);
         return Err(FlUrlError::Timeout);
     }
     let connect_result = connect_result.unwrap();
@@ -60,7 +60,7 @@ pub async fn connect_to_tls_endpoint(
                     tokio::task::spawn(async move {
                         if let Err(err) = conn.await {
                             println!(
-                                "Http Connection to http://{} is failed: {:?}",
+                                "Https Connection to http:s//{} is failed: {:?}",
                                 host_port, err
                             );
                         }

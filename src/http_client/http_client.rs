@@ -85,7 +85,7 @@ impl HttpClient {
                         url_builder_owned.as_str(),
                         attempt_no
                     );
-                    tokio::time::sleep(Duration::from_secs(50)).await;
+                    tokio::time::sleep(Duration::from_millis(50)).await;
                     attempt_no += 1;
 
                     if attempt_no > 100 {
