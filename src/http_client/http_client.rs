@@ -7,7 +7,7 @@ use hyper::{client::conn::http1::SendRequest, Method, Request, Uri};
 use rust_extensions::StrOrString;
 use tokio::sync::Mutex;
 
-use crate::{ClientCertificate, FlUrlError, FlUrlResponse, UrlBuilder};
+use crate::{ClientCertificate, FlUrlError, FlUrlResponse, UrlBuilder, UrlBuilderOwned};
 
 pub struct HttpClient {
     connection: Mutex<Option<SendRequest<Full<Bytes>>>>,
@@ -61,15 +61,60 @@ impl HttpClient {
         body: Option<Vec<u8>>,
         request_timeout: Duration,
     ) -> Result<FlUrlResponse, FlUrlError> {
+        let mut attempt_no = 0;
+        let url_builder_owned = url_builder.into_builder_owned();
+        loop {
+            let result = self
+                .execute_int(
+                    &url_builder_owned,
+                    &method,
+                    headers,
+                    body.clone(),
+                    request_timeout,
+                )
+                .await;
+
+            if result.is_ok() {
+                return result;
+            }
+
+            if let Err(FlUrlError::HyperError(err)) = &result {
+                if err.is_canceled() {
+                    println!(
+                        "Connection is canceled for path {}. Attempt: {}",
+                        url_builder_owned.as_str(),
+                        attempt_no
+                    );
+                    tokio::time::sleep(Duration::from_secs(50)).await;
+                    attempt_no += 1;
+
+                    if attempt_no > 100 {
+                        return result;
+                    }
+
+                    continue;
+                }
+            }
+
+            return result;
+        }
+    }
+
+    async fn execute_int(
+        &self,
+        url_builder: &UrlBuilderOwned,
+        method: &Method,
+        headers: &HashMap<String, String>,
+        body: Option<Vec<u8>>,
+        request_timeout: Duration,
+    ) -> Result<FlUrlResponse, FlUrlError> {
         let body = if let Some(body) = body {
             http_body_util::Full::new(body.into())
         } else {
             http_body_util::Full::new(hyper::body::Bytes::from(vec![]))
         };
 
-        let url_builder_owner = url_builder.into_builder_owned();
-
-        let uri: Uri = url_builder_owner.as_str().parse().unwrap();
+        let uri: Uri = url_builder.as_str().parse().unwrap();
 
         let authority = uri.authority().unwrap().clone();
 
@@ -115,7 +160,7 @@ impl HttpClient {
 
         let result = result.unwrap()?;
 
-        Ok(FlUrlResponse::new(url_builder_owner.clone(), result))
+        Ok(FlUrlResponse::new(url_builder.clone(), result))
     }
 }
 

@@ -66,9 +66,6 @@ pub async fn connect_to_tls_endpoint(
                         }
                     });
 
-                    #[cfg(feature = "enable-tls-delay")]
-                    tokio::time::sleep(Duration::from_secs(1)).await;
-
                     return Ok(sender);
                 }
                 Err(err) => {

@@ -6,7 +6,6 @@ edition = "2021"
 
 [features]
 default = []
-enable-tls-delay = []
 support-unix-socket = ["unix-sockets"]
 
 
