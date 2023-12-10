@@ -79,12 +79,8 @@ impl HttpClient {
             }
 
             if let Err(FlUrlError::HyperError(err)) = &result {
+                // This error we get if TLS Handshake is not finished yet. We are retrying after 50ms 100 times which is 5 seconds.
                 if err.is_canceled() {
-                    println!(
-                        "Connection is canceled for path {}. Attempt: {}",
-                        url_builder_owned.as_str(),
-                        attempt_no
-                    );
                     tokio::time::sleep(Duration::from_millis(50)).await;
                     attempt_no += 1;
 
