@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use bytes::Bytes;
 use http_body_util::Full;
 use hyper::client::conn::http1::SendRequest;
