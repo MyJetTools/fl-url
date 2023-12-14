@@ -146,19 +146,22 @@ impl HttpClient {
 
         let request = request.body(body)?;
 
-        let mut access = self.connection.lock().await;
+        let request_future = {
+            let mut access = self.connection.lock().await;
 
-        if access.is_none() {
-            return Err(FlUrlError::ConnectionIsDead);
-        }
+            if access.is_none() {
+                return Err(FlUrlError::ConnectionIsDead);
+            }
 
-        let connection = access.as_mut().unwrap();
+            let connection = access.as_mut().unwrap();
 
-        let request_future = connection.send_request(request);
+            connection.send_request(request)
+        };
 
         let result = tokio::time::timeout(request_timeout, request_future).await;
 
         if result.is_err() {
+            let mut access = self.connection.lock().await;
             *access = None;
             return Err(FlUrlError::Timeout);
         }
