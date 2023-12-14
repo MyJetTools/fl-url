@@ -15,18 +15,9 @@ use super::cert_content::ROOT_CERT_STORE;
 pub async fn connect_to_tls_endpoint(
     host_port: &str,
     domain: &str,
-    request_timeout: Duration,
     client_certificate: Option<ClientCertificate>,
 ) -> Result<SendRequest<Full<Bytes>>, FlUrlError> {
-    let connect = TcpStream::connect(host_port);
-
-    let connect_result = tokio::time::timeout(request_timeout, connect).await;
-
-    if connect_result.is_err() {
-        println!("Timeout while connecting to https://{}", host_port);
-        return Err(FlUrlError::Timeout);
-    }
-    let connect_result = connect_result.unwrap();
+    let connect_result = TcpStream::connect(host_port).await;
 
     match connect_result {
         Ok(tcp_stream) => {

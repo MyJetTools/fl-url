@@ -36,15 +36,24 @@ impl HttpClient {
         };
 
         let connection = if is_https {
-            super::connect_to_tls_endpoint(
-                host_port.as_str(),
-                domain,
-                request_timeout,
-                client_certificate,
-            )
-            .await?
+            let connection_future =
+                super::connect_to_tls_endpoint(host_port.as_str(), domain, client_certificate);
+            let result = tokio::time::timeout(request_timeout, connection_future).await;
+
+            if result.is_err() {
+                return Err(FlUrlError::Timeout);
+            }
+
+            result.unwrap()?
         } else {
-            super::connect_to_http_endpoint(host_port.as_str(), request_timeout).await?
+            let connection_future = super::connect_to_http_endpoint(host_port.as_str());
+            let result = tokio::time::timeout(request_timeout, connection_future).await;
+
+            if result.is_err() {
+                return Err(FlUrlError::Timeout);
+            }
+
+            result.unwrap()?
         };
         let result = Self {
             connection: Mutex::new(Some(connection)),

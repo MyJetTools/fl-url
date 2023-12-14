@@ -10,18 +10,9 @@ use crate::FlUrlError;
 
 pub async fn connect_to_http_endpoint(
     host_port: &str,
-    request_timeout: Duration,
 ) -> Result<SendRequest<Full<Bytes>>, FlUrlError> {
     loop {
-        let connect = TcpStream::connect(host_port);
-
-        let connect_result = tokio::time::timeout(request_timeout, connect).await;
-
-        if connect_result.is_err() {
-            println!("Timeout while connecting to http://{}", host_port);
-            return Err(FlUrlError::Timeout);
-        }
-        let connect_result = connect_result.unwrap();
+        let connect_result = TcpStream::connect(host_port).await;
 
         match connect_result {
             Ok(tcp_stream) => {
