@@ -17,7 +17,6 @@ pub async fn connect_to_http_endpoint(
             let handshake_result = hyper::client::conn::http1::handshake(io).await;
             match handshake_result {
                 Ok((mut sender, conn)) => {
-                    // sender.ready().await?;
                     let host_port = host_port.to_owned();
                     tokio::task::spawn(async move {
                         if let Err(err) = conn.await {
@@ -30,6 +29,7 @@ pub async fn connect_to_http_endpoint(
                         //Here
                     });
 
+                    sender.ready().await?;
                     return Ok(sender);
                 }
                 Err(err) => {
