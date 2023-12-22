@@ -48,7 +48,7 @@ pub async fn connect_to_tls_endpoint(
 
             match handshake_result {
                 Ok((mut sender, conn)) => {
-                    sender.ready().await?;
+                    //     sender.ready().await?;
 
                     let host_port = host_port.to_owned();
                     tokio::task::spawn(async move {
