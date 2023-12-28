@@ -22,23 +22,13 @@ impl ClientsCache {
         client_certificate: Option<ClientCertificate>,
     ) -> Result<Arc<HttpClient>, FlUrlError> {
         let schema_and_domain = url_builder.get_scheme_and_host();
-        {
-            let read_access = self.clients.read().await;
-            if read_access.contains_key(schema_and_domain.as_str()) {
-                return Ok(read_access
-                    .get(schema_and_domain.as_str())
-                    .cloned()
-                    .unwrap());
-            }
-        }
 
         let mut write_access = self.clients.write().await;
 
-        if write_access.contains_key(schema_and_domain.as_str()) {
-            return Ok(write_access
-                .get(schema_and_domain.as_str())
-                .cloned()
-                .unwrap());
+        if let Some(existing_connection) =
+            get_existing_connection(&mut write_access, schema_and_domain.as_str())
+        {
+            return Ok(existing_connection);
         }
 
         let new_one = HttpClient::new(url_builder, client_certificate, request_timeout).await?;
@@ -56,4 +46,25 @@ impl ClientsCache {
         let mut write_access = self.clients.write().await;
         write_access.remove(schema_domain);
     }
+}
+
+fn get_existing_connection(
+    connections: &mut HashMap<String, Arc<HttpClient>>,
+    schema_and_domain: &str,
+) -> Option<Arc<HttpClient>> {
+    let mut has_connection_disconnected = false;
+
+    if let Some(connection) = connections.get(schema_and_domain) {
+        if connection.is_disconnected() {
+            has_connection_disconnected = true;
+        } else {
+            return Some(connection.clone());
+        }
+    }
+
+    if has_connection_disconnected {
+        connections.remove(schema_and_domain);
+    }
+
+    None
 }

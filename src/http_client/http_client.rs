@@ -1,19 +1,28 @@
-use std::{collections::HashMap, str::FromStr, time::Duration};
+use std::{collections::HashMap, str::FromStr, sync::atomic::AtomicBool, time::Duration};
 
 use bytes::Bytes;
 use http_body_util::Full;
 use hyper::{client::conn::http1::SendRequest, Method, Request, Uri};
 
-use rust_extensions::StrOrString;
+use rust_extensions::{date_time::DateTimeAsMicroseconds, StrOrString};
 use tokio::sync::Mutex;
 
 use crate::{ClientCertificate, FlUrlError, FlUrlResponse, UrlBuilder, UrlBuilderOwned};
 
+const DEAD_CONNECTION_DURATION: Duration = Duration::from_secs(20);
+
 pub struct HttpClient {
     connection: Mutex<Option<SendRequest<Full<Bytes>>>>,
+    pub created: DateTimeAsMicroseconds,
+    disconnected: AtomicBool,
 }
 
 impl HttpClient {
+    pub fn connection_can_be_disposed(&self) -> bool {
+        let now = DateTimeAsMicroseconds::now();
+        now.duration_since(self.created).as_positive_or_zero() > DEAD_CONNECTION_DURATION
+    }
+
     pub async fn new(
         src: &UrlBuilder,
         client_certificate: Option<ClientCertificate>,
@@ -57,6 +66,8 @@ impl HttpClient {
         };
         let result = Self {
             connection: Mutex::new(Some(connection)),
+            created: DateTimeAsMicroseconds::now(),
+            disconnected: AtomicBool::new(false),
         };
 
         Ok(result)
@@ -89,7 +100,13 @@ impl HttpClient {
 
             if let Err(FlUrlError::HyperError(err)) = &result {
                 // This error we get if TLS Handshake is not finished yet. We are retrying after 50ms 100 times which is 5 seconds.
+                // Sometime this error appears when we have this connection for the long time. I assume - this is because connection is already dead.
                 if err.is_canceled() {
+                    if self.connection_can_be_disposed() {
+                        self.disconnect().await;
+                        return result;
+                    }
+
                     tokio::time::sleep(Duration::from_millis(50)).await;
                     attempt_no += 1;
 
@@ -161,14 +178,24 @@ impl HttpClient {
         let result = tokio::time::timeout(request_timeout, request_future).await;
 
         if result.is_err() {
-            let mut access = self.connection.lock().await;
-            *access = None;
+            self.disconnect().await;
             return Err(FlUrlError::Timeout);
         }
 
         let result = result.unwrap()?;
 
         Ok(FlUrlResponse::new(url_builder.clone(), result))
+    }
+
+    async fn disconnect(&self) {
+        self.disconnected
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        let mut access = self.connection.lock().await;
+        *access = None;
+    }
+
+    pub fn is_disconnected(&self) -> bool {
+        self.disconnected.load(std::sync::atomic::Ordering::Relaxed)
     }
 }
 
