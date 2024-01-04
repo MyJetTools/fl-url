@@ -143,12 +143,10 @@ impl HttpClient {
         let mut request = Request::builder().uri(uri).method(method);
 
         {
-            /*
             request.headers_mut().unwrap().insert(
                 hyper::http::header::HOST,
                 hyper::http::HeaderValue::from_str(authority.as_str()).unwrap(),
             );
-             */
 
             if headers.len() > 0 {
                 for (key, value) in headers {
