@@ -155,7 +155,7 @@ impl HttpClient {
             };
         }
 
-        #[cfg(feature = "debug_requests")]
+        #[cfg(feature = "debug-request")]
         {
             println!("Request: {:?}", request);
         }

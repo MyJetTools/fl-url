@@ -7,7 +7,7 @@ edition = "2021"
 [features]
 default = []
 support-unix-socket = ["unix-sockets"]
-debug_request = []
+debug-request = []
 
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
