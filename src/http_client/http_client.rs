@@ -1,4 +1,4 @@
-use std::{str::FromStr, sync::atomic::AtomicBool, time::Duration};
+use std::{sync::atomic::AtomicBool, time::Duration};
 
 use bytes::Bytes;
 use http_body_util::Full;
@@ -77,7 +77,7 @@ impl HttpClient {
         &self,
         url_builder: &UrlBuilder,
         method: Method,
-        headers: &Vec<(String, String)>,
+        headers: &Vec<(StrOrString<'static>, String)>,
         body: Option<Vec<u8>>,
         request_timeout: Duration,
     ) -> Result<FlUrlResponse, FlUrlError> {
@@ -126,7 +126,7 @@ impl HttpClient {
         &self,
         url_builder: &UrlBuilderOwned,
         method: &Method,
-        headers: &Vec<(String, String)>,
+        headers: &Vec<(StrOrString<'static>, String)>,
         body: Option<Vec<u8>>,
         request_timeout: Duration,
     ) -> Result<FlUrlResponse, FlUrlError> {
@@ -150,9 +150,14 @@ impl HttpClient {
 
             if headers.len() > 0 {
                 for (key, value) in headers {
-                    request = request.header(key, value);
+                    request = request.header(key.as_str(), value);
                 }
             };
+        }
+
+        #[cfg(feature = "debug_requests")]
+        {
+            println!("Request: {:?}", request);
         }
 
         let request = request.body(body)?;

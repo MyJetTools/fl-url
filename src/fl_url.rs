@@ -20,7 +20,7 @@ lazy_static::lazy_static! {
 
 pub struct FlUrl {
     pub url: UrlBuilder,
-    pub headers: Vec<(String, String)>,
+    pub headers: Vec<(StrOrString<'static>, String)>,
     pub client_cert: Option<crate::ClientCertificate>,
     pub accept_invalid_certificate: bool,
     pub execute_timeout: Duration,
@@ -108,15 +108,15 @@ impl FlUrl {
         self
     }
 
-    pub fn with_header<'n, 'v>(
+    pub fn with_header<'v>(
         mut self,
-        name: impl Into<StrOrString<'n>>,
+        name: impl Into<StrOrString<'static>>,
         value: impl Into<StrOrString<'v>>,
     ) -> Self {
-        let name: StrOrString<'n> = name.into();
+        let name: StrOrString<'static> = name.into();
         let value: StrOrString<'v> = value.into();
 
-        self.headers.push((name.to_string(), value.to_string()));
+        self.headers.push((name, value.to_string()));
         self
     }
 
