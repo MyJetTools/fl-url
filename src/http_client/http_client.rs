@@ -1,4 +1,4 @@
-use std::{collections::HashMap, str::FromStr, sync::atomic::AtomicBool, time::Duration};
+use std::{str::FromStr, sync::atomic::AtomicBool, time::Duration};
 
 use bytes::Bytes;
 use http_body_util::Full;
@@ -77,7 +77,7 @@ impl HttpClient {
         &self,
         url_builder: &UrlBuilder,
         method: Method,
-        headers: &HashMap<String, String>,
+        headers: &Vec<(String, String)>,
         body: Option<Vec<u8>>,
         request_timeout: Duration,
     ) -> Result<FlUrlResponse, FlUrlError> {
@@ -126,7 +126,7 @@ impl HttpClient {
         &self,
         url_builder: &UrlBuilderOwned,
         method: &Method,
-        headers: &HashMap<String, String>,
+        headers: &Vec<(String, String)>,
         body: Option<Vec<u8>>,
         request_timeout: Duration,
     ) -> Result<FlUrlResponse, FlUrlError> {
@@ -201,7 +201,7 @@ impl HttpClient {
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, time::Duration};
+    use std::time::Duration;
 
     use hyper::Method;
     use rust_extensions::StopWatch;
@@ -224,13 +224,7 @@ mod tests {
         sw.start();
 
         let mut response = fl_url_client
-            .execute_request(
-                &url_builder,
-                Method::GET,
-                &HashMap::new(),
-                None,
-                REQUEST_TIMEOUT,
-            )
+            .execute_request(&url_builder, Method::GET, &vec![], None, REQUEST_TIMEOUT)
             .await
             .unwrap();
         println!("StatusCode: {}", response.get_status_code());
@@ -243,13 +237,7 @@ mod tests {
         sw.start();
 
         let mut response = fl_url_client
-            .execute_request(
-                &url_builder,
-                Method::GET,
-                &HashMap::new(),
-                None,
-                REQUEST_TIMEOUT,
-            )
+            .execute_request(&url_builder, Method::GET, &vec![], None, REQUEST_TIMEOUT)
             .await
             .unwrap();
         println!("StatusCode: {}", response.get_status_code());
@@ -272,13 +260,7 @@ mod tests {
         sw.start();
 
         let mut response = fl_url_client
-            .execute_request(
-                &url_builder,
-                Method::GET,
-                &HashMap::new(),
-                None,
-                REQUEST_TIMEOUT,
-            )
+            .execute_request(&url_builder, Method::GET, &vec![], None, REQUEST_TIMEOUT)
             .await
             .unwrap();
         println!("StatusCode: {}", response.get_status_code());
@@ -291,13 +273,7 @@ mod tests {
         sw.start();
 
         let mut response = fl_url_client
-            .execute_request(
-                &url_builder,
-                Method::GET,
-                &HashMap::new(),
-                None,
-                REQUEST_TIMEOUT,
-            )
+            .execute_request(&url_builder, Method::GET, &vec![], None, REQUEST_TIMEOUT)
             .await
             .unwrap();
         println!("StatusCode: {}", response.get_status_code());

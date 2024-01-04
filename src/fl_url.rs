@@ -3,7 +3,6 @@ use hyper::Method;
 use rust_extensions::ShortString;
 use rust_extensions::StrOrString;
 
-use std::collections::HashMap;
 use std::time::Duration;
 
 use super::FlUrlResponse;
@@ -21,7 +20,7 @@ lazy_static::lazy_static! {
 
 pub struct FlUrl {
     pub url: UrlBuilder,
-    pub headers: HashMap<String, String>,
+    pub headers: Vec<(String, String)>,
     pub client_cert: Option<crate::ClientCertificate>,
     pub accept_invalid_certificate: bool,
     pub execute_timeout: Duration,
@@ -34,8 +33,12 @@ impl FlUrl {
     pub fn new<'s>(url: impl Into<StrOrString<'s>>) -> Self {
         let url: StrOrString<'s> = url.into();
         let url = UrlBuilder::new(ShortString::from_str(url.as_str()).unwrap());
+        let mut headers = Vec::new();
+
+        headers.shrink_to(16);
+
         Self {
-            headers: HashMap::new(),
+            headers,
             execute_timeout: Duration::from_secs(30),
             client_cert: None,
             url,
@@ -113,7 +116,7 @@ impl FlUrl {
         let name: StrOrString<'n> = name.into();
         let value: StrOrString<'v> = value.into();
 
-        self.headers.insert(name.to_string(), value.to_string());
+        self.headers.push((name.to_string(), value.to_string()));
         self
     }
 
