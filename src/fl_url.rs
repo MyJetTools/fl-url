@@ -213,20 +213,3 @@ impl FlUrl {
         self.execute(Method::DELETE, None).await
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use crate::FlUrl;
-
-    #[tokio::test]
-    async fn test() {
-        let mut fl_url = FlUrl::new("http+unix://var/run/docker.sock/containers/services")
-            .get()
-            .await
-            .unwrap();
-
-        let result = fl_url.body_as_str().await.unwrap();
-
-        println!("{}", result);
-    }
-}
