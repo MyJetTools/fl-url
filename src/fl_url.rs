@@ -135,7 +135,12 @@ impl FlUrl {
         if self.url.scheme.is_unix_socket() {
             let owned = self.url.into_builder_owned();
 
-            let (response, url) = unix_sockets::execute_request(owned.into_string()).await?;
+            let url = owned.into_string();
+
+            let method_as_str = method.as_str();
+
+            let (response, url) =
+                unix_sockets::execute_request(url, method_as_str, &self.headers, body).await?;
 
             return Ok(FlUrlResponse::from_unix_response(response, url));
         }
@@ -206,5 +211,22 @@ impl FlUrl {
 
     pub async fn delete(self) -> Result<FlUrlResponse, FlUrlError> {
         self.execute(Method::DELETE, None).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::FlUrl;
+
+    #[tokio::test]
+    async fn test() {
+        let mut fl_url = FlUrl::new("http+unix://var/run/docker.sock/containers/services")
+            .get()
+            .await
+            .unwrap();
+
+        let result = fl_url.body_as_str().await.unwrap();
+
+        println!("{}", result);
     }
 }

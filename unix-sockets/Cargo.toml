@@ -8,3 +8,4 @@ edition = "2021"
 [dependencies]
 hyper-unix-connector = { version = "*" }
 hyper = { version = "0.14.27", features = ["full"] }
+rust-extensions = { tag = "0.1.4", git = "https://github.com/MyJetTools/rust-extensions.git" }
