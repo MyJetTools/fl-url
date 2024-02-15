@@ -1,8 +1,5 @@
-mod client_certificate;
 mod scheme;
 pub use scheme::*;
-
-pub use client_certificate::*;
 
 mod clients_cache;
 mod fl_drop_connection_scenario;

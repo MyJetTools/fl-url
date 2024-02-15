@@ -21,7 +21,7 @@ lazy_static::lazy_static! {
 pub struct FlUrl {
     pub url: UrlBuilder,
     pub headers: Vec<(StrOrString<'static>, String)>,
-    pub client_cert: Option<crate::ClientCertificate>,
+    pub client_cert: Option<my_tls::ClientCertificate>,
     pub accept_invalid_certificate: bool,
     pub execute_timeout: Duration,
     pub do_not_reuse_connection: bool,
@@ -66,10 +66,7 @@ impl FlUrl {
         self
     }
 
-    pub fn with_client_certificate(
-        mut self,
-        certificate: crate::client_certificate::ClientCertificate,
-    ) -> Self {
+    pub fn with_client_certificate(mut self, certificate: my_tls::ClientCertificate) -> Self {
         if self.client_cert.is_some() {
             panic!("Client certificate is already set");
         }

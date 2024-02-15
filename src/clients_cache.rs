@@ -2,7 +2,8 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use tokio::sync::RwLock;
 
-use crate::{ClientCertificate, FlUrlError, HttpClient, UrlBuilder};
+use crate::{FlUrlError, HttpClient, UrlBuilder};
+use my_tls::ClientCertificate;
 
 pub struct ClientsCache {
     pub clients: RwLock<HashMap<String, Arc<HttpClient>>>,

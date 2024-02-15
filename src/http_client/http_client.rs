@@ -7,7 +7,9 @@ use hyper::{client::conn::http1::SendRequest, Method, Request, Uri};
 use rust_extensions::{date_time::DateTimeAsMicroseconds, StrOrString};
 use tokio::sync::Mutex;
 
-use crate::{ClientCertificate, FlUrlError, FlUrlResponse, UrlBuilder, UrlBuilderOwned};
+use crate::{FlUrlError, FlUrlResponse, UrlBuilder, UrlBuilderOwned};
+
+use my_tls::ClientCertificate;
 
 const DEAD_CONNECTION_DURATION: Duration = Duration::from_secs(20);
 
