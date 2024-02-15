@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use hyper::{body::Incoming, HeaderMap, Response};
 
-use crate::FlUrlError;
+use crate::{FlUrlError, FlUrlReadingHeaderError};
 
 pub enum ResponseBody {
     Incoming(Option<Response<Incoming>>),
@@ -44,16 +44,45 @@ impl ResponseBody {
         }
     }
 
-    pub fn get_header(&self, header: &str) -> Option<&str> {
+    pub fn get_header(&self, header: &str) -> Result<Option<&str>, FlUrlReadingHeaderError> {
         match self {
-            Self::Incoming(response) => response
-                .as_ref()
-                .unwrap()
-                .headers()
-                .get(header)?
-                .to_str()
-                .unwrap()
-                .into(),
+            Self::Incoming(response) => {
+                let result = response.as_ref().unwrap().headers().get(header);
+
+                if result.is_none() {
+                    return Ok(None);
+                }
+
+                let value = result.unwrap().to_str()?;
+
+                return Ok(Some(value));
+            }
+            Self::Body { .. } => {
+                panic!("Body is already disposed");
+            }
+            #[cfg(feature = "support-unix-socket")]
+            Self::UnixSocket(unix_socket) => unix_socket.get_header(header),
+        }
+    }
+
+    pub fn get_header_case_insensitive(
+        &self,
+        header: &str,
+    ) -> Result<Option<&str>, FlUrlReadingHeaderError> {
+        match self {
+            Self::Incoming(response) => {
+                for (name, value) in response.as_ref().unwrap().headers().iter() {
+                    if rust_extensions::str_utils::compare_strings_case_insensitive(
+                        name.as_str(),
+                        header,
+                    ) {
+                        let value = value.to_str()?;
+                        return Ok(Some(value));
+                    }
+                }
+
+                return Ok(None);
+            }
             Self::Body { .. } => {
                 panic!("Body is already disposed");
             }

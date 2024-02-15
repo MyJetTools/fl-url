@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use hyper::{body::Incoming, Response};
 use serde::de::DeserializeOwned;
 
-use crate::{FlUrlError, ResponseBody, UrlBuilderOwned};
+use crate::{FlUrlError, FlUrlReadingHeaderError, ResponseBody, UrlBuilderOwned};
 pub struct FlUrlResponse {
     pub url: UrlBuilderOwned,
     status_code: u16,
@@ -32,8 +32,15 @@ impl FlUrlResponse {
         self.response.into_hyper_response()
     }
 
-    pub fn get_header(&self, name: &str) -> Option<&str> {
+    pub fn get_header(&self, name: &str) -> Result<Option<&str>, FlUrlReadingHeaderError> {
         self.response.get_header(name)
+    }
+
+    pub fn get_header_case_insensitive(
+        &self,
+        name: &str,
+    ) -> Result<Option<&str>, FlUrlReadingHeaderError> {
+        self.response.get_header_case_insensitive(name)
     }
 
     pub fn get_headers(&self) -> HashMap<&str, &str> {
@@ -64,7 +71,7 @@ impl FlUrlResponse {
 
     pub async fn body_as_str(&mut self) -> Result<&str, FlUrlError> {
         let bytes = self.response.convert_body_and_get_as_slice().await?;
-        Ok(std::str::from_utf8(bytes).unwrap())
+        Ok(std::str::from_utf8(bytes)?)
     }
 
     pub fn get_status_code(&self) -> u16 {

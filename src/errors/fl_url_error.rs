@@ -10,8 +10,15 @@ pub enum FlUrlError {
     InvalidHttp1HandShake(String),
     CanNotEstablishConnection(String),
     ClientCertificateError(tokio_rustls::rustls::Error),
+    CanNotConvertToUtf8(std::str::Utf8Error),
     #[cfg(feature = "support-unix-socket")]
     UnixSocketError(unix_sockets::FlUrlUnixSocketError),
+}
+
+impl From<std::str::Utf8Error> for FlUrlError {
+    fn from(src: std::str::Utf8Error) -> Self {
+        Self::CanNotConvertToUtf8(src)
+    }
 }
 
 impl From<hyper::Error> for FlUrlError {
