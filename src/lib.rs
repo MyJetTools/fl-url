@@ -25,3 +25,5 @@ mod http_client;
 pub use http_client::*;
 mod errors;
 pub use errors::*;
+
+pub extern crate my_tls;
