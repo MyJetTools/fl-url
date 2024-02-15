@@ -1,7 +1,7 @@
 mod unix_socket_client;
 use std::collections::HashMap;
 
-use hyper::HeaderMap;
+use hyper::{header::ToStrError, HeaderMap};
 pub use unix_socket_client::*;
 mod url_builder_owned;
 pub use url_builder_owned::*;
@@ -26,23 +26,45 @@ impl FlUrlUnixResponse {
         }
     }
 
-    pub fn get_header(&self, name: &str) -> Option<&str> {
-        let result = self.headers.get(name)?;
-        result.to_str().ok()
-    }
+    pub fn get_header(&self, name: &str) -> Result<Option<&str>, ToStrError> {
+        let result = self.headers.get(name);
 
-    pub fn copy_headers_to_hashmap<'s>(&'s self, result: &mut HashMap<&'s str, &'s str>) {
-        for (key, value) in &self.headers {
-            result.insert(key.as_str(), value.to_str().unwrap());
+        match result {
+            Some(result) => {
+                let result = result.to_str()?;
+                Ok(Some(result))
+            }
+            None => Ok(None),
         }
     }
 
-    pub fn copy_headers_to_hashmap_of_string(&self, result: &mut HashMap<String, String>) {
+    pub fn get_header_case_insensitive(&self, name: &str) -> Result<Option<&str>, ToStrError> {
+        for (header_name, value) in self.headers.iter() {
+            if rust_extensions::str_utils::compare_strings_case_insensitive(
+                name,
+                header_name.as_str(),
+            ) {
+                let result = value.to_str()?;
+                return Ok(Some(result));
+            }
+        }
+
+        Ok(None)
+    }
+
+    pub fn copy_headers_to_hashmap_of_string(&self, result: &mut HashMap<String, Option<String>>) {
         for (key, value) in &self.headers {
-            result.insert(
-                key.as_str().to_string(),
-                value.to_str().unwrap().to_string(),
-            );
+            if let Ok(value) = value.to_str() {
+                result.insert(key.to_string(), Some(value.to_string()));
+            }
+        }
+    }
+
+    pub fn copy_headers_to_hashmap<'s>(&'s self, result: &mut HashMap<&'s str, Option<&'s str>>) {
+        for (key, value) in &self.headers {
+            if let Ok(value) = value.to_str() {
+                result.insert(key.as_str(), Some(value));
+            }
         }
     }
 

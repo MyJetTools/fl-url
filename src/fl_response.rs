@@ -43,7 +43,7 @@ impl FlUrlResponse {
         self.response.get_header_case_insensitive(name)
     }
 
-    pub fn get_headers(&self) -> HashMap<&str, &str> {
+    pub fn get_headers(&self) -> HashMap<&str, Option<&str>> {
         let mut result = HashMap::new();
 
         self.response.copy_headers_to_hash_map(&mut result);
@@ -51,7 +51,7 @@ impl FlUrlResponse {
         result
     }
 
-    pub fn fill_headers_to_hashmap(&self, dest: &mut HashMap<String, String>) {
+    pub fn fill_headers_to_hashmap_of_string(&self, dest: &mut HashMap<String, Option<String>>) {
         self.response.copy_headers_to_hash_map_of_string(dest);
     }
 

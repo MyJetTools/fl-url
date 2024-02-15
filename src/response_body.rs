@@ -61,7 +61,15 @@ impl ResponseBody {
                 panic!("Body is already disposed");
             }
             #[cfg(feature = "support-unix-socket")]
-            Self::UnixSocket(unix_socket) => unix_socket.get_header(header),
+            Self::UnixSocket(unix_socket) => match unix_socket.get_header(header) {
+                Ok(result) => Ok(result),
+                Err(err) => Err(
+                    FlUrlReadingHeaderError::CanNotConvertUnixSocketHeaderToUtf8(format!(
+                        "{}",
+                        err
+                    )),
+                ),
+            },
         }
     }
 
@@ -87,37 +95,67 @@ impl ResponseBody {
                 panic!("Body is already disposed");
             }
             #[cfg(feature = "support-unix-socket")]
-            Self::UnixSocket(unix_socket) => unix_socket.get_header(header),
+            Self::UnixSocket(unix_socket) => {
+                match unix_socket.get_header_case_insensitive(header) {
+                    Ok(result) => {
+                        return Ok(result);
+                    }
+                    Err(err) => {
+                        return Err(
+                            FlUrlReadingHeaderError::CanNotConvertUnixSocketHeaderToUtf8(format!(
+                                "{}",
+                                err
+                            )),
+                        );
+                    }
+                }
+            }
         }
     }
 
-    pub fn copy_headers_to_hash_map<'s>(&'s self, hash_map: &mut HashMap<&'s str, &'s str>) {
+    pub fn copy_headers_to_hash_map<'s>(
+        &'s self,
+        hash_map: &mut HashMap<&'s str, Option<&'s str>>,
+    ) {
         match self {
             ResponseBody::Incoming(incoming) => {
                 if let Some(incoming) = incoming {
                     for (key, value) in incoming.headers() {
-                        hash_map.insert(key.as_str(), value.to_str().unwrap());
+                        if let Ok(value) = value.to_str() {
+                            hash_map.insert(key.as_str(), Some(value));
+                        }
                     }
                 }
             }
             ResponseBody::Body { headers, .. } => {
                 for (key, value) in headers {
-                    hash_map.insert(key.as_str(), value.to_str().unwrap());
+                    if let Ok(value) = value.to_str() {
+                        hash_map.insert(key.as_str(), Some(value));
+                    }
                 }
             }
             #[cfg(feature = "support-unix-socket")]
-            ResponseBody::UnixSocket(unix_socket) => unix_socket.copy_headers_to_hashmap(hash_map),
+            ResponseBody::UnixSocket(unix_socket) => {
+                unix_socket.copy_headers_to_hashmap(hash_map);
+            }
         }
     }
 
-    pub fn copy_headers_to_hash_map_of_string(&self, hash_map: &mut HashMap<String, String>) {
+    pub fn copy_headers_to_hash_map_of_string(
+        &self,
+        hash_map: &mut HashMap<String, Option<String>>,
+    ) {
         match self {
             ResponseBody::Incoming(incoming) => {
                 if let Some(incoming) = incoming {
                     for (key, value) in incoming.headers() {
                         hash_map.insert(
                             key.as_str().to_string(),
-                            value.to_str().unwrap().to_string(),
+                            if let Ok(value) = value.to_str() {
+                                Some(value.to_string())
+                            } else {
+                                None
+                            },
                         );
                     }
                 }
@@ -126,7 +164,11 @@ impl ResponseBody {
                 for (key, value) in headers {
                     hash_map.insert(
                         key.as_str().to_string(),
-                        value.to_str().unwrap().to_string(),
+                        if let Ok(value) = value.to_str() {
+                            Some(value.to_string())
+                        } else {
+                            None
+                        },
                     );
                 }
             }
