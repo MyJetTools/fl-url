@@ -11,6 +11,7 @@ use crate::DropConnectionScenario;
 
 use crate::FlUrlError;
 
+use crate::FlUrlHeaders;
 use crate::HttpClient;
 use crate::UrlBuilder;
 
@@ -20,7 +21,7 @@ lazy_static::lazy_static! {
 
 pub struct FlUrl {
     pub url: UrlBuilder,
-    pub headers: Vec<(StrOrString<'static>, String)>,
+    pub headers: FlUrlHeaders,
     pub client_cert: Option<my_tls::ClientCertificate>,
     pub accept_invalid_certificate: bool,
     pub execute_timeout: Duration,
@@ -33,12 +34,9 @@ impl FlUrl {
     pub fn new<'s>(url: impl Into<StrOrString<'s>>) -> Self {
         let url: StrOrString<'s> = url.into();
         let url = UrlBuilder::new(ShortString::from_str(url.as_str()).unwrap());
-        let mut headers = Vec::new();
-
-        headers.shrink_to(16);
 
         Self {
-            headers,
+            headers: FlUrlHeaders::new(),
             execute_timeout: Duration::from_secs(30),
             client_cert: None,
             url,
@@ -113,7 +111,7 @@ impl FlUrl {
         let name: StrOrString<'static> = name.into();
         let value: StrOrString<'v> = value.into();
 
-        self.headers.push((name, value.to_string()));
+        self.headers.add(name, value.to_string());
         self
     }
 
@@ -194,7 +192,10 @@ impl FlUrl {
 
     pub async fn post_json(self, json: impl serde::Serialize) -> Result<FlUrlResponse, FlUrlError> {
         let body = serde_json::to_vec(&json).unwrap();
-        self.execute(Method::POST, Some(body)).await
+
+        self.with_header("Content-Type", "application/json")
+            .execute(Method::POST, Some(body))
+            .await
     }
 
     pub async fn put(self, body: Option<Vec<u8>>) -> Result<FlUrlResponse, FlUrlError> {
@@ -203,7 +204,9 @@ impl FlUrl {
 
     pub async fn put_json(self, json: impl serde::Serialize) -> Result<FlUrlResponse, FlUrlError> {
         let body = serde_json::to_vec(&json).unwrap();
-        self.execute(Method::PUT, Some(body)).await
+        self.with_header("Content-Type", "application/json")
+            .execute(Method::PUT, Some(body))
+            .await
     }
 
     pub async fn delete(self) -> Result<FlUrlResponse, FlUrlError> {

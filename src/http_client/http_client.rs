@@ -7,7 +7,7 @@ use hyper::{client::conn::http1::SendRequest, Method, Request, Uri};
 use rust_extensions::{date_time::DateTimeAsMicroseconds, StrOrString};
 use tokio::sync::Mutex;
 
-use crate::{FlUrlError, FlUrlResponse, UrlBuilder, UrlBuilderOwned};
+use crate::{FlUrlError, FlUrlHeaders, FlUrlResponse, UrlBuilder, UrlBuilderOwned};
 
 use my_tls::ClientCertificate;
 
@@ -79,7 +79,7 @@ impl HttpClient {
         &self,
         url_builder: &UrlBuilder,
         method: Method,
-        headers: &Vec<(StrOrString<'static>, String)>,
+        headers: &FlUrlHeaders,
         body: Option<Vec<u8>>,
         request_timeout: Duration,
     ) -> Result<FlUrlResponse, FlUrlError> {
@@ -90,7 +90,7 @@ impl HttpClient {
                 .execute_int(
                     &url_builder_owned,
                     &method,
-                    headers,
+                    &headers,
                     body.clone(),
                     request_timeout,
                 )
@@ -128,7 +128,7 @@ impl HttpClient {
         &self,
         url_builder: &UrlBuilderOwned,
         method: &Method,
-        headers: &Vec<(StrOrString<'static>, String)>,
+        headers: &FlUrlHeaders,
         body: Option<Vec<u8>>,
         request_timeout: Duration,
     ) -> Result<FlUrlResponse, FlUrlError> {
@@ -151,8 +151,8 @@ impl HttpClient {
             );
 
             if headers.len() > 0 {
-                for (key, value) in headers {
-                    request = request.header(key.as_str(), value);
+                for header in headers.iter() {
+                    request = request.header(header.name.as_str(), header.value.to_string());
                 }
             };
         }
@@ -208,7 +208,7 @@ mod tests {
     use rust_extensions::StopWatch;
 
     use super::HttpClient;
-    use crate::UrlBuilder;
+    use crate::{FlUrlHeaders, UrlBuilder};
 
     static REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -225,7 +225,13 @@ mod tests {
         sw.start();
 
         let mut response = fl_url_client
-            .execute_request(&url_builder, Method::GET, &vec![], None, REQUEST_TIMEOUT)
+            .execute_request(
+                &url_builder,
+                Method::GET,
+                &FlUrlHeaders::new(),
+                None,
+                REQUEST_TIMEOUT,
+            )
             .await
             .unwrap();
         println!("StatusCode: {}", response.get_status_code());
@@ -238,7 +244,13 @@ mod tests {
         sw.start();
 
         let mut response = fl_url_client
-            .execute_request(&url_builder, Method::GET, &vec![], None, REQUEST_TIMEOUT)
+            .execute_request(
+                &url_builder,
+                Method::GET,
+                &FlUrlHeaders::new(),
+                None,
+                REQUEST_TIMEOUT,
+            )
             .await
             .unwrap();
         println!("StatusCode: {}", response.get_status_code());
@@ -261,7 +273,13 @@ mod tests {
         sw.start();
 
         let mut response = fl_url_client
-            .execute_request(&url_builder, Method::GET, &vec![], None, REQUEST_TIMEOUT)
+            .execute_request(
+                &url_builder,
+                Method::GET,
+                &FlUrlHeaders::new(),
+                None,
+                REQUEST_TIMEOUT,
+            )
             .await
             .unwrap();
         println!("StatusCode: {}", response.get_status_code());
@@ -274,7 +292,13 @@ mod tests {
         sw.start();
 
         let mut response = fl_url_client
-            .execute_request(&url_builder, Method::GET, &vec![], None, REQUEST_TIMEOUT)
+            .execute_request(
+                &url_builder,
+                Method::GET,
+                &FlUrlHeaders::new(),
+                None,
+                REQUEST_TIMEOUT,
+            )
             .await
             .unwrap();
         println!("StatusCode: {}", response.get_status_code());
