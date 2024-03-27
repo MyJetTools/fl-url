@@ -34,7 +34,7 @@ pub fn decode_from_url_string(src: &str) -> String {
             if escape_pos == 0 {
                 escape0 = c as u8;
                 escape_pos += 1;
-            } else if escape_pos == 0 {
+            } else if escape_pos == 1 {
                 escape_pos += 1;
                 let c = decode_url_escape(escape0, c as u8);
                 result.push(c);
@@ -177,4 +177,20 @@ lazy_static! {
     .iter()
     .copied()
     .collect();
+}
+
+#[cfg(test)]
+mod tests {
+
+    #[test]
+    fn test_from_real_life() {
+        let src = "4%2F0AeaYSHA_pv6LYFSy9QdDASiSdr4X53iOaoo9ZJotKi536ELdyaLNqbsaQ0sjsTE9yuhhdQ";
+
+        let result = super::decode_from_url_string(src);
+
+        assert_eq!(
+            result,
+            "4/0AeaYSHA_pv6LYFSy9QdDASiSdr4X53iOaoo9ZJotKi536ELdyaLNqbsaQ0sjsTE9yuhhdQ"
+        );
+    }
 }
