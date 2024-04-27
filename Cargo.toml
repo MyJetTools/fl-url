@@ -1,12 +1,13 @@
 [package]
 name = "flurl"
-version = "0.5.1"
+version = "0.5.2"
 authors = ["Andrey <amigin@gmail.com>"]
 edition = "2021"
 
 [features]
 default = []
 support-unix-socket = ["unix-sockets"]
+with-ssh = ["my-ssh"]
 debug-request = []
 
 
@@ -33,6 +34,8 @@ serde = { version = "*", features = ["derive"] }
 serde_json = { version = "*" }
 tokio-rustls = { version = "0.25.*" }
 openssl = { version = "*" }
+
+my-ssh = { tag = "0.1.0", git = "https://github.com/MyJetTools/my-ssh.git", optional = true }
 
 webpki-roots = "*"
 webpki = "*"

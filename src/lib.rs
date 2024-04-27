@@ -29,3 +29,8 @@ pub use errors::*;
 pub extern crate my_tls;
 mod fl_url_headers;
 pub use fl_url_headers::*;
+
+#[cfg(feature = "with-ssh")]
+mod ssh_target;
+#[cfg(feature = "with-ssh")]
+pub extern crate my_ssh;

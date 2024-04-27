@@ -26,6 +26,8 @@ pub struct FlUrl {
     pub accept_invalid_certificate: bool,
     pub execute_timeout: Duration,
     pub do_not_reuse_connection: bool,
+    #[cfg(feature = "with-ssh")]
+    ssh_target: Option<crate::ssh_target::SshTarget>,
 
     pub drop_connection_scenario: Box<dyn DropConnectionScenario + Send + Sync + 'static>,
 }
@@ -43,7 +45,19 @@ impl FlUrl {
             accept_invalid_certificate: false,
             do_not_reuse_connection: false,
             drop_connection_scenario: Box::new(crate::DefaultDropConnectionScenario),
+            #[cfg(feature = "with-ssh")]
+            ssh_target: None,
         }
+    }
+
+    #[cfg(feature = "with-ssh")]
+    pub fn set_ssh_credentials(mut self, ssh_credentials: my_ssh::SshCredentials) -> Self {
+        use crate::ssh_target::SshTarget;
+
+        self.ssh_target = Some(SshTarget {
+            credentials: std::sync::Arc::new(ssh_credentials),
+        });
+        self
     }
 
     pub fn set_timeout(mut self, timeout: Duration) -> Self {
@@ -148,10 +162,28 @@ impl FlUrl {
         method: Method,
         body: Option<Vec<u8>>,
     ) -> Result<FlUrlResponse, FlUrlError> {
+        #[cfg(feature = "with-ssh")]
+        if self.ssh_target.is_some() {
+            let http_client =
+                HttpClient::new(&self.url, None, self.execute_timeout, &self.ssh_target).await?;
+
+            let result = http_client
+                .execute_request(&self.url, method, &self.headers, body, self.execute_timeout)
+                .await;
+            return result;
+        }
+
         let scheme_and_host = self.url.get_scheme_and_host();
 
         let result = if self.do_not_reuse_connection {
-            let client = HttpClient::new(&self.url, self.client_cert, self.execute_timeout).await?;
+            let client = HttpClient::new(
+                &self.url,
+                self.client_cert,
+                self.execute_timeout,
+                #[cfg(feature = "with-ssh")]
+                &None,
+            )
+            .await?;
             client
                 .execute_request(&self.url, method, &self.headers, body, self.execute_timeout)
                 .await

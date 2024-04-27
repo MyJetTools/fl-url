@@ -17,6 +17,9 @@ pub struct HttpClient {
     connection: Mutex<Option<SendRequest<Full<Bytes>>>>,
     pub created: DateTimeAsMicroseconds,
     disconnected: AtomicBool,
+
+    #[cfg(feature = "with-ssh")]
+    _ssh_session: Option<std::sync::Arc<my_ssh::SshSession>>,
 }
 
 impl HttpClient {
@@ -25,11 +28,59 @@ impl HttpClient {
         now.duration_since(self.created).as_positive_or_zero() > DEAD_CONNECTION_DURATION
     }
 
+    #[cfg(feature = "with-ssh")]
+    pub fn from_ssh_session(
+        connection: SendRequest<Full<Bytes>>,
+        ssh_session: std::sync::Arc<my_ssh::SshSession>,
+    ) -> Self {
+        Self {
+            connection: Mutex::new(Some(connection)),
+            created: DateTimeAsMicroseconds::now(),
+            disconnected: AtomicBool::new(false),
+            _ssh_session: Some(ssh_session),
+        }
+    }
+
     pub async fn new(
         src: &UrlBuilder,
         client_certificate: Option<ClientCertificate>,
         request_timeout: Duration,
+        #[cfg(feature = "with-ssh")] ssh_target: &Option<crate::ssh_target::SshTarget>,
     ) -> Result<Self, FlUrlError> {
+        #[cfg(feature = "with-ssh")]
+        if let Some(ssh_target) = ssh_target {
+            let host_port = src.get_host_port();
+
+            let (host, port) = match host_port.find(':') {
+                Some(index) => {
+                    let host = &host_port[0..index];
+                    let port = &host_port[index + 1..];
+
+                    (host, port.parse::<u16>().unwrap())
+                }
+                None => (host_port, 80),
+            };
+
+            let (ssh_session, connection) =
+                super::connect_to_http_over_ssh::connect_to_http_over_ssh(
+                    ssh_target,
+                    host,
+                    port,
+                    request_timeout,
+                )
+                .await?;
+
+            let result = Self {
+                connection: Mutex::new(Some(connection)),
+                created: DateTimeAsMicroseconds::now(),
+                disconnected: AtomicBool::new(false),
+                #[cfg(feature = "with-ssh")]
+                _ssh_session: Some(ssh_session),
+            };
+
+            return Ok(result);
+        }
+
         let host_port = src.get_host_port();
 
         let domain = src.get_domain();
@@ -70,6 +121,8 @@ impl HttpClient {
             connection: Mutex::new(Some(connection)),
             created: DateTimeAsMicroseconds::now(),
             disconnected: AtomicBool::new(false),
+            #[cfg(feature = "with-ssh")]
+            _ssh_session: None,
         };
 
         Ok(result)
@@ -216,9 +269,15 @@ mod tests {
     async fn test_http_request() {
         let url_builder = UrlBuilder::new("http://google.com/".into());
 
-        let fl_url_client = HttpClient::new(&url_builder, None, REQUEST_TIMEOUT)
-            .await
-            .unwrap();
+        let fl_url_client = HttpClient::new(
+            &url_builder,
+            None,
+            REQUEST_TIMEOUT,
+            #[cfg(feature = "with-ssh")]
+            &None,
+        )
+        .await
+        .unwrap();
 
         let mut sw: StopWatch = StopWatch::new();
 
@@ -264,9 +323,15 @@ mod tests {
     async fn test_https_request() {
         let url_builder = UrlBuilder::new("https://trade-demo.yourfin.tech".into());
 
-        let fl_url_client = HttpClient::new(&url_builder, None, REQUEST_TIMEOUT)
-            .await
-            .unwrap();
+        let fl_url_client = HttpClient::new(
+            &url_builder,
+            None,
+            REQUEST_TIMEOUT,
+            #[cfg(feature = "with-ssh")]
+            &None,
+        )
+        .await
+        .unwrap();
 
         let mut sw: StopWatch = StopWatch::new();
 

@@ -13,6 +13,16 @@ pub enum FlUrlError {
     CanNotConvertToUtf8(std::str::Utf8Error),
     #[cfg(feature = "support-unix-socket")]
     UnixSocketError(unix_sockets::FlUrlUnixSocketError),
+
+    #[cfg(feature = "with-ssh")]
+    SshSessionError(my_ssh::SshSessionError),
+}
+
+#[cfg(feature = "with-ssh")]
+impl From<my_ssh::SshSessionError> for FlUrlError {
+    fn from(src: my_ssh::SshSessionError) -> Self {
+        Self::SshSessionError(src)
+    }
 }
 
 impl From<std::str::Utf8Error> for FlUrlError {
