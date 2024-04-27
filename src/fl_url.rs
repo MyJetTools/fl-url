@@ -148,8 +148,13 @@ impl FlUrl {
 
             let method_as_str = method.as_str();
 
-            let (response, url) =
-                unix_sockets::execute_request(url, method_as_str, &self.headers, body).await?;
+            let (response, url) = unix_sockets::execute_request(
+                url,
+                method_as_str,
+                self.headers.iter().map(|itm| (&itm.name, &itm.value)),
+                body,
+            )
+            .await?;
 
             return Ok(FlUrlResponse::from_unix_response(response, url));
         }

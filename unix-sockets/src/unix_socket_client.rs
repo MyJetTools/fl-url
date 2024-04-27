@@ -47,7 +47,7 @@ pub async fn execute_get_request(
 pub async fn execute_request(
     url: String,
     method: &str,
-    headers: &Vec<(StrOrString<'static>, String)>,
+    headers: impl Iterator<Item = (&StrOrString<'static>, &String)>,
     body: Option<Vec<u8>>,
 ) -> Result<(FlUrlUnixResponse, String), FlUrlUnixSocketError> {
     let url_builder_owned = url_builder_owned::UrlBuilderOwnedLegacy::new(url);
