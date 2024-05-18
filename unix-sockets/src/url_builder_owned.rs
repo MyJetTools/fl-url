@@ -17,7 +17,13 @@ impl UrlBuilderOwnedLegacy {
     }
 
     pub fn get_scheme_and_host(&self) -> &str {
-        let index = self.value.find("://").unwrap();
+        let index = self.value.find("://");
+
+        if index.is_none() {
+            panic!("Invalid UnxSocket URL: {}", self.value)
+        }
+
+        let index = index.unwrap();
 
         let as_bytes = self.value.as_bytes();
 
