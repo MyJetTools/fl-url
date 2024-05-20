@@ -142,15 +142,23 @@ impl FlUrl {
     ) -> Result<FlUrlResponse, FlUrlError> {
         #[cfg(feature = "support-unix-socket")]
         if self.url.scheme.is_unix_socket() {
-            let owned = self.url.into_builder_owned();
+            let scheme_and_host = self.url.get_scheme_and_host();
 
-            let url = owned.into_string();
+            let path_and_query = self.url.get_path_and_query();
 
-            let method_as_str = method.as_str();
+            println!(
+                "Executing unix socket request scheme_and_host: {}",
+                scheme_and_host.as_str()
+            );
 
+            println!(
+                "Executing unix socket request path_and_query: {}",
+                path_and_query.as_str()
+            );
             let (response, url) = unix_sockets::execute_request(
-                url,
-                method_as_str,
+                scheme_and_host.as_str(),
+                path_and_query.as_str(),
+                method.as_str(),
                 self.headers.iter().map(|itm| (&itm.name, &itm.value)),
                 body,
             )

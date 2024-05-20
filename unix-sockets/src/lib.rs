@@ -3,8 +3,10 @@ use std::collections::HashMap;
 
 use hyper::{header::ToStrError, HeaderMap};
 pub use unix_socket_client::*;
-mod url_builder_owned;
-pub use url_builder_owned::*;
+//mod url_builder_owned;
+//pub use url_builder_owned::*;
+
+//Invalid UnxSocket URL: ./var/run/docker.sock/containers/json?all=true
 
 #[derive(Debug)]
 pub enum FlUrlUnixSocketError {

@@ -1,20 +1,17 @@
 use hyper::{Method, Request};
 use rust_extensions::StrOrString;
 
-use crate::{url_builder_owned, FlUrlUnixResponse, FlUrlUnixSocketError};
+use crate::{FlUrlUnixResponse, FlUrlUnixSocketError};
 
 pub async fn execute_get_request(
-    url: String,
+    scheme_and_host: &str,
+    path_and_query: &str,
 ) -> Result<(FlUrlUnixResponse, String), FlUrlUnixSocketError> {
-    let url_builder_owned = url_builder_owned::UrlBuilderOwnedLegacy::new(url.into());
+    //  let url_builder_owned = url_builder_owned::UrlBuilderOwnedLegacy::new(url.into());
     use hyper_unix_connector::UnixClient;
     let client: hyper::Client<UnixClient, hyper::Body> = hyper::Client::builder().build(UnixClient);
 
-    let addr: hyper::Uri = hyper_unix_connector::Uri::new(
-        url_builder_owned.get_scheme_and_host(),
-        url_builder_owned.get_path_and_query(),
-    )
-    .into();
+    let addr: hyper::Uri = hyper_unix_connector::Uri::new(scheme_and_host, path_and_query).into();
 
     let result = client.get(addr).await;
 
@@ -35,7 +32,7 @@ pub async fn execute_get_request(
 
             return Ok((
                 FlUrlUnixResponse::new(status_code, headers, result),
-                url_builder_owned.into_string(),
+                format!("{}{}", scheme_and_host, path_and_query),
             ));
         }
         Err(err) => {
@@ -45,20 +42,16 @@ pub async fn execute_get_request(
 }
 
 pub async fn execute_request(
-    url: String,
+    scheme_and_host: &str,
+    path_and_query: &str,
     method: &str,
     headers: impl Iterator<Item = (&StrOrString<'static>, &String)>,
     body: Option<Vec<u8>>,
 ) -> Result<(FlUrlUnixResponse, String), FlUrlUnixSocketError> {
-    let url_builder_owned = url_builder_owned::UrlBuilderOwnedLegacy::new(url);
     use hyper_unix_connector::UnixClient;
     let client: hyper::Client<UnixClient, hyper::Body> = hyper::Client::builder().build(UnixClient);
 
-    let addr: hyper::Uri = hyper_unix_connector::Uri::new(
-        url_builder_owned.get_scheme_and_host(),
-        url_builder_owned.get_path_and_query(),
-    )
-    .into();
+    let addr: hyper::Uri = hyper_unix_connector::Uri::new(scheme_and_host, path_and_query).into();
 
     let body = if let Some(body) = body {
         hyper::Body::from(body)
@@ -94,7 +87,7 @@ pub async fn execute_request(
 
             return Ok((
                 FlUrlUnixResponse::new(status_code, headers, result),
-                url_builder_owned.into_string(),
+                format!("{}{}", scheme_and_host, path_and_query),
             ));
         }
         Err(err) => {
