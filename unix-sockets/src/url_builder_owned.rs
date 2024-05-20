@@ -1,3 +1,5 @@
+use std::ops::Index;
+
 #[derive(Debug, Clone)]
 pub struct UrlBuilderOwnedLegacy {
     value: String,
@@ -37,7 +39,13 @@ impl UrlBuilderOwnedLegacy {
     }
 
     pub fn get_host_port(&self) -> &str {
-        let index = self.value.find("://").unwrap();
+        let index = self.value.find("://");
+
+        if index.is_none() {
+            return self.value.as_str();
+        }
+
+        let index = index.unwrap();
 
         let as_bytes = self.value.as_bytes();
 
