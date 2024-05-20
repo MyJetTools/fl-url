@@ -146,15 +146,6 @@ impl FlUrl {
 
             let path_and_query = self.url.get_path_and_query();
 
-            println!(
-                "Executing unix socket request scheme_and_host: {}",
-                scheme_and_host.as_str()
-            );
-
-            println!(
-                "Executing unix socket request path_and_query: {}",
-                path_and_query.as_str()
-            );
             let (response, url) = unix_sockets::execute_request(
                 scheme_and_host.as_str(),
                 path_and_query.as_str(),
