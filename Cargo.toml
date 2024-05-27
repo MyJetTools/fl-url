@@ -16,7 +16,7 @@ debug-request = []
 hyper = { version = "*", features = ["full"] }
 tokio = { version = "*", features = ["full"] }
 
-my-tls = { tag = "0.1.0", git = "https://github.com/MyJetTools/my-tls.git" }
+my-tls = { tag = "0.1.1", git = "https://github.com/MyJetTools/my-tls.git" }
 
 rust-extensions = { tag = "0.1.4", git = "https://github.com/MyJetTools/rust-extensions.git" }
 
@@ -32,7 +32,7 @@ bytes = "*"
 
 serde = { version = "*", features = ["derive"] }
 serde_json = { version = "*" }
-tokio-rustls = { version = "0.25.*" }
+tokio-rustls = { version = "0.26.*", features = ["tls12"] }
 openssl = { version = "*" }
 
 my-ssh = { tag = "0.1.0", git = "https://github.com/MyJetTools/my-ssh.git", optional = true }

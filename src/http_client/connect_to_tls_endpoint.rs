@@ -6,6 +6,7 @@ use hyper::client::conn::http1::SendRequest;
 use hyper_util::rt::TokioIo;
 use tokio::net::TcpStream;
 
+use tokio_rustls::rustls::client::ResolvesClientCert;
 use tokio_rustls::rustls::pki_types;
 use tokio_rustls::{rustls, TlsConnector};
 
@@ -24,15 +25,20 @@ pub async fn connect_to_tls_endpoint(
 
     match connect_result {
         Ok(tcp_stream) => {
-            let config_builder =
-                rustls::ClientConfig::builder().with_root_certificates(ROOT_CERT_STORE.clone());
+            let config_builder = tokio_rustls::rustls::ClientConfig::builder()
+                .with_root_certificates(ROOT_CERT_STORE.clone());
 
             let client_config = if let Some(client_cert) = client_certificate {
+                let certified_key = client_cert.get_certified_key();
                 let result = config_builder
                     .with_client_auth_cert(client_cert.cert_chain, client_cert.private_key);
 
                 match result {
-                    Ok(config) => config,
+                    Ok(mut config) => {
+                        config.client_auth_cert_resolver =
+                            Arc::new(MyClientCertResolver(Arc::new(certified_key)));
+                        config
+                    }
                     Err(err) => return Err(FlUrlError::ClientCertificateError(err)),
                 }
             } else {
@@ -73,5 +79,22 @@ pub async fn connect_to_tls_endpoint(
         Err(err) => {
             return Err(FlUrlError::CanNotEstablishConnection(format!("{}", err)));
         }
+    }
+}
+
+#[derive(Debug)]
+pub struct MyClientCertResolver(Arc<rustls::sign::CertifiedKey>);
+
+impl ResolvesClientCert for MyClientCertResolver {
+    fn resolve(
+        &self,
+        _root_hint_subjects: &[&[u8]],
+        _sigschemes: &[rustls::SignatureScheme],
+    ) -> Option<Arc<rustls::sign::CertifiedKey>> {
+        Some(self.0.clone())
+    }
+
+    fn has_certs(&self) -> bool {
+        true
     }
 }
