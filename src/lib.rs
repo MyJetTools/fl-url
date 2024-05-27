@@ -1,4 +1,6 @@
 mod scheme;
+use std::sync::Arc;
+
 pub use scheme::*;
 
 mod clients_cache;
@@ -34,3 +36,7 @@ pub use fl_url_headers::*;
 mod ssh_target;
 #[cfg(feature = "with-ssh")]
 pub extern crate my_ssh;
+
+lazy_static::lazy_static! {
+    static ref CLIENTS_CACHED: Arc<ClientsCache> =  Arc::new(ClientsCache::new());
+}

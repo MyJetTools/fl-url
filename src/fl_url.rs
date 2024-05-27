@@ -3,6 +3,7 @@ use hyper::Method;
 use rust_extensions::ShortString;
 use rust_extensions::StrOrString;
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use super::FlUrlResponse;
@@ -15,10 +16,6 @@ use crate::FlUrlHeaders;
 use crate::HttpClient;
 use crate::UrlBuilder;
 
-lazy_static::lazy_static! {
-    static ref CLIENTS_CACHED: ClientsCache = ClientsCache::new();
-}
-
 pub struct FlUrl {
     pub url: UrlBuilder,
     pub headers: FlUrlHeaders,
@@ -26,6 +23,7 @@ pub struct FlUrl {
     pub accept_invalid_certificate: bool,
     pub execute_timeout: Duration,
     pub do_not_reuse_connection: bool,
+    pub clients_cache: Option<Arc<ClientsCache>>,
     #[cfg(feature = "with-ssh")]
     ssh_target: Option<crate::ssh_target::SshTarget>,
 
@@ -45,9 +43,15 @@ impl FlUrl {
             accept_invalid_certificate: false,
             do_not_reuse_connection: false,
             drop_connection_scenario: Box::new(crate::DefaultDropConnectionScenario),
+            clients_cache: None,
             #[cfg(feature = "with-ssh")]
             ssh_target: None,
         }
+    }
+
+    pub fn with_clients_cache(mut self, clients_cache: Arc<ClientsCache>) -> Self {
+        self.clients_cache = Some(clients_cache);
+        self
     }
 
     #[cfg(feature = "with-ssh")]
@@ -161,6 +165,13 @@ impl FlUrl {
         self.execute_http_or_https(method, body).await
     }
 
+    fn get_clients_cache(&self) -> Arc<ClientsCache> {
+        match self.clients_cache.as_ref() {
+            Some(cache) => cache.clone(),
+            None => crate::CLIENTS_CACHED.clone(),
+        }
+    }
+
     async fn execute_http_or_https(
         self,
         method: Method,
@@ -179,6 +190,8 @@ impl FlUrl {
 
         let scheme_and_host = self.url.get_scheme_and_host();
 
+        let clients_cache = self.get_clients_cache();
+
         let result = if self.do_not_reuse_connection {
             let client = HttpClient::new(
                 &self.url,
@@ -192,7 +205,7 @@ impl FlUrl {
                 .execute_request(&self.url, method, &self.headers, body, self.execute_timeout)
                 .await
         } else {
-            let client = CLIENTS_CACHED
+            let client = clients_cache
                 .get(&self.url, self.execute_timeout, self.client_cert)
                 .await?;
             client
@@ -203,12 +216,12 @@ impl FlUrl {
         match result {
             Ok(result) => {
                 if self.drop_connection_scenario.should_we_drop_it(&result) {
-                    CLIENTS_CACHED.remove(scheme_and_host.as_str()).await;
+                    clients_cache.remove(scheme_and_host.as_str()).await;
                 }
                 return Ok(result);
             }
             Err(err) => {
-                CLIENTS_CACHED.remove(scheme_and_host.as_str()).await;
+                clients_cache.remove(scheme_and_host.as_str()).await;
                 return Err(err);
             }
         }
