@@ -7,8 +7,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use super::FlUrlResponse;
-use crate::ClientsCache;
 use crate::DropConnectionScenario;
+use crate::HttpClientsCache;
 
 use crate::FlUrlError;
 
@@ -23,7 +23,7 @@ pub struct FlUrl {
     pub accept_invalid_certificate: bool,
     pub execute_timeout: Duration,
     pub do_not_reuse_connection: bool,
-    pub clients_cache: Option<Arc<ClientsCache>>,
+    pub clients_cache: Option<Arc<HttpClientsCache>>,
     #[cfg(feature = "with-ssh")]
     ssh_target: Option<crate::ssh_target::SshTarget>,
 
@@ -49,7 +49,7 @@ impl FlUrl {
         }
     }
 
-    pub fn with_clients_cache(mut self, clients_cache: Arc<ClientsCache>) -> Self {
+    pub fn with_clients_cache(mut self, clients_cache: Arc<HttpClientsCache>) -> Self {
         self.clients_cache = Some(clients_cache);
         self
     }
@@ -165,7 +165,7 @@ impl FlUrl {
         self.execute_http_or_https(method, body).await
     }
 
-    fn get_clients_cache(&self) -> Arc<ClientsCache> {
+    fn get_clients_cache(&self) -> Arc<HttpClientsCache> {
         match self.clients_cache.as_ref() {
             Some(cache) => cache.clone(),
             None => crate::CLIENTS_CACHED.clone(),

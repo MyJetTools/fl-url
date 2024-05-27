@@ -5,11 +5,11 @@ use tokio::sync::RwLock;
 use crate::{FlUrlError, HttpClient, UrlBuilder};
 use my_tls::ClientCertificate;
 
-pub struct ClientsCache {
+pub struct HttpClientsCache {
     pub clients: RwLock<HashMap<String, Arc<HttpClient>>>,
 }
 
-impl ClientsCache {
+impl HttpClientsCache {
     pub fn new() -> Self {
         Self {
             clients: RwLock::new(HashMap::new()),
