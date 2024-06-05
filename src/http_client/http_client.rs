@@ -4,7 +4,7 @@ use bytes::Bytes;
 use http_body_util::Full;
 use hyper::{client::conn::http1::SendRequest, Method, Request, Uri};
 
-use rust_extensions::{date_time::DateTimeAsMicroseconds, StrOrString};
+use rust_extensions::{date_time::DateTimeAsMicroseconds, MaybeShortString, StrOrString};
 use tokio::sync::Mutex;
 
 use crate::{FlUrlError, FlUrlHeaders, FlUrlResponse, UrlBuilder, UrlBuilderOwned};
@@ -193,15 +193,17 @@ impl HttpClient {
 
         let uri: Uri = url_builder.as_str().parse().unwrap();
 
-        let authority = uri.authority().unwrap().clone();
+        let authority = MaybeShortString::from_str(uri.authority().unwrap().as_str());
 
         let mut request = Request::builder().uri(uri).method(method);
 
         {
-            request.headers_mut().unwrap().insert(
-                hyper::http::header::HOST,
-                hyper::http::HeaderValue::from_str(authority.as_str()).unwrap(),
-            );
+            if !headers.has_host_header {
+                request.headers_mut().unwrap().insert(
+                    hyper::http::header::HOST,
+                    hyper::http::HeaderValue::from_str(authority.as_str()).unwrap(),
+                );
+            }
 
             if headers.len() > 0 {
                 for header in headers.iter() {

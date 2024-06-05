@@ -7,12 +7,14 @@ pub struct FlUrlHeader {
 
 pub struct FlUrlHeaders {
     headers: Vec<FlUrlHeader>,
+    pub has_host_header: bool,
 }
 
 impl FlUrlHeaders {
     pub fn new() -> Self {
         Self {
             headers: Vec::new(),
+            has_host_header: false,
         }
     }
 
@@ -23,6 +25,10 @@ impl FlUrlHeaders {
     }
 
     pub fn add(&mut self, name: StrOrString<'static>, value: String) {
+        if rust_extensions::str_utils::compare_strings_case_insensitive(name.as_str(), "host") {
+            self.has_host_header = true;
+        }
+
         match self.find_index(name.as_str()) {
             Some(index) => self.headers[index].value = value,
             None => {
