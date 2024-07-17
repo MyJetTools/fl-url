@@ -190,9 +190,7 @@ impl FlUrl {
 
         let scheme_and_host = self.url.get_scheme_and_host();
 
-        let clients_cache = self.get_clients_cache();
-
-        let result = if self.do_not_reuse_connection {
+        if self.do_not_reuse_connection {
             let client = HttpClient::new(
                 &self.url,
                 self.client_cert,
@@ -205,24 +203,27 @@ impl FlUrl {
                 .execute_request(&self.url, method, &self.headers, body, self.execute_timeout)
                 .await
         } else {
+            let clients_cache = self.get_clients_cache();
+
             let client = clients_cache
                 .get(&self.url, self.execute_timeout, self.client_cert)
                 .await?;
-            client
-                .execute_request(&self.url, method, &self.headers, body, self.execute_timeout)
-                .await
-        };
 
-        match result {
-            Ok(result) => {
-                if self.drop_connection_scenario.should_we_drop_it(&result) {
-                    clients_cache.remove(scheme_and_host.as_str()).await;
+            let result = client
+                .execute_request(&self.url, method, &self.headers, body, self.execute_timeout)
+                .await;
+
+            match result {
+                Ok(result) => {
+                    if self.drop_connection_scenario.should_we_drop_it(&result) {
+                        clients_cache.remove(scheme_and_host.as_str()).await;
+                    }
+                    return Ok(result);
                 }
-                return Ok(result);
-            }
-            Err(err) => {
-                clients_cache.remove(scheme_and_host.as_str()).await;
-                return Err(err);
+                Err(err) => {
+                    clients_cache.remove(scheme_and_host.as_str()).await;
+                    return Err(err);
+                }
             }
         }
     }
