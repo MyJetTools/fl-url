@@ -10,6 +10,7 @@ pub struct UrlBuilder {
     raw_ending: Option<String>,
     pub host_port: ShortString,
     has_last_slash: bool,
+    pub tls_domain: Option<String>,
 }
 
 impl UrlBuilder {
@@ -26,6 +27,7 @@ impl UrlBuilder {
             raw_ending: None,
             host_port,
             has_last_slash,
+            tls_domain: None,
         }
     }
 
@@ -59,6 +61,10 @@ impl UrlBuilder {
     }
 
     pub fn get_domain(&self) -> &str {
+        if let Some(tls_domain) = self.tls_domain.as_ref() {
+            return tls_domain.as_str();
+        }
+
         let host_port = self.get_host_port();
         if let Some(index) = host_port.find(":") {
             return &host_port[0..index];

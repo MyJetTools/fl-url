@@ -68,6 +68,11 @@ impl FlUrl {
         self.execute_timeout = timeout;
         self
     }
+    pub fn set_tls_domain(mut self, domain: impl Into<StrOrString<'static>>) -> Self {
+        let domain = domain.into();
+        self.url.tls_domain = Some(domain.to_string());
+        self
+    }
 
     pub fn override_drop_connection_scenario(
         mut self,
