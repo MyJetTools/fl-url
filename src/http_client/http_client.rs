@@ -1,7 +1,4 @@
-use std::{
-    sync::{atomic::AtomicBool, Arc},
-    time::Duration,
-};
+use std::{sync::atomic::AtomicBool, time::Duration};
 
 use bytes::Bytes;
 use http_body_util::Full;
@@ -48,9 +45,11 @@ impl HttpClient {
         src: &UrlBuilder,
         client_certificate: Option<ClientCertificate>,
         request_timeout: Duration,
-        #[cfg(feature = "with-ssh")] ssh_credentials: Option<&Arc<my_ssh::SshCredentials>>,
+        #[cfg(feature = "with-ssh")] ssh_credentials: Option<
+            &std::sync::Arc<my_ssh::SshCredentials>,
+        >,
         #[cfg(feature = "with-ssh")] ssh_sessions_cache: Option<
-            &Arc<crate::ssh::FlUrlSshSessionsCache>,
+            &std::sync::Arc<crate::ssh::FlUrlSshSessionsCache>,
         >,
     ) -> Result<Self, FlUrlError> {
         #[cfg(feature = "with-ssh")]

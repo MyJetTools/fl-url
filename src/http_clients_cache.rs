@@ -38,6 +38,7 @@ impl HttpClientsCache {
             request_timeout,
             #[cfg(feature = "with-ssh")]
             None,
+            #[cfg(feature = "with-ssh")]
             None,
         )
         .await?;
