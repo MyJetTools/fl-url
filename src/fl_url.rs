@@ -204,6 +204,14 @@ impl FlUrl {
             let result = http_client
                 .execute_request(&self.url, method, &self.headers, body, self.execute_timeout)
                 .await;
+
+            if result.is_err() {
+                if let Some(session_cache) = &self.ssh_target.session_cache {
+                    if let Some(ssh_credentials) = &self.ssh_target.credentials {
+                        session_cache.remove(ssh_credentials).await;
+                    }
+                }
+            }
             return result;
         }
 
