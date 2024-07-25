@@ -17,6 +17,15 @@ pub enum FlUrlError {
     #[cfg(feature = "with-ssh")]
     SshSessionError(my_ssh::SshSessionError),
 }
+#[cfg(feature = "with-ssh")]
+impl FlUrlError {
+    pub fn is_ssh_session_error(&self) -> bool {
+        match self {
+            FlUrlError::SshSessionError(_) => true,
+            _ => false,
+        }
+    }
+}
 
 #[cfg(feature = "with-ssh")]
 impl From<my_ssh::SshSessionError> for FlUrlError {

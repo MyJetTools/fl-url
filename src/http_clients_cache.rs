@@ -38,6 +38,7 @@ impl HttpClientsCache {
             request_timeout,
             #[cfg(feature = "with-ssh")]
             None,
+            None,
         )
         .await?;
         let new_one = Arc::new(new_one);

@@ -5,31 +5,31 @@ use http_body_util::Full;
 use hyper_util::rt::TokioIo;
 use my_ssh::SshSession;
 
-use crate::{ssh::SshTarget, FlUrlError};
+use crate::FlUrlError;
 
 use hyper::client::conn::http1::SendRequest;
 
 const BUFFER_SIZE: usize = 512 * 1024;
 
 pub async fn connect_to_http_over_ssh(
-    ssh_target: &SshTarget,
+    ssh_credentials: &Arc<my_ssh::SshCredentials>,
+    ssh_session_cache: Option<&Arc<crate::ssh::FlUrlSshSessionsCache>>,
     remote_host: &str,
     remote_port: u16,
     time_out: Duration,
 ) -> Result<(Arc<SshSession>, SendRequest<Full<Bytes>>), FlUrlError> {
-    let ssh_session = if let Some(ssh_cache) = ssh_target.session_cache.as_ref() {
-        let credentials = ssh_target.credentials.as_ref().unwrap();
-        match ssh_cache.get(credentials).await {
+    let ssh_session = if let Some(ssh_cache) = ssh_session_cache {
+        match ssh_cache.get(ssh_credentials).await {
             Some(session) => session,
             None => {
-                println!("Creating new SSH session for {:?}", credentials);
-                let session = Arc::new(SshSession::new(credentials.clone()));
+                println!("Creating new SSH session for {:?}", ssh_credentials);
+                let session = Arc::new(SshSession::new(ssh_credentials.clone()));
                 ssh_cache.insert(&session).await;
                 session
             }
         }
     } else {
-        Arc::new(SshSession::new(ssh_target.credentials.clone().unwrap()))
+        Arc::new(SshSession::new(ssh_credentials.clone()))
     };
 
     let (host, port) = ssh_session.get_ssh_credentials().get_host_port();

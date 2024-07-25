@@ -192,12 +192,13 @@ impl FlUrl {
         body: Option<Vec<u8>>,
     ) -> Result<FlUrlResponse, FlUrlError> {
         #[cfg(feature = "with-ssh")]
-        if self.ssh_target.credentials.is_some() {
+        if let Some(ssh_credentials) = &self.ssh_target.credentials {
             let http_client = HttpClient::new(
                 &self.url,
                 None,
                 self.execute_timeout,
-                Some(&self.ssh_target),
+                Some(ssh_credentials),
+                self.ssh_target.session_cache.as_ref(),
             )
             .await?;
 
@@ -223,6 +224,7 @@ impl FlUrl {
                 self.client_cert,
                 self.execute_timeout,
                 #[cfg(feature = "with-ssh")]
+                None,
                 None,
             )
             .await?;

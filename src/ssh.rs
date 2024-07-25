@@ -45,5 +45,7 @@ impl FlUrlSshSessionsCache {
     pub async fn remove(&self, ssh_credentials: &Arc<SshCredentials>) {
         let mut sessions = self.sessions.lock().await;
         sessions.retain(|session| !session.get_ssh_credentials().are_same(ssh_credentials));
+
+        println!("Removed Session. Sessions in cache: {}", sessions.len());
     }
 }

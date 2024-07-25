@@ -1,4 +1,7 @@
-use std::{sync::atomic::AtomicBool, time::Duration};
+use std::{
+    sync::{atomic::AtomicBool, Arc},
+    time::Duration,
+};
 
 use bytes::Bytes;
 use http_body_util::Full;
@@ -45,10 +48,13 @@ impl HttpClient {
         src: &UrlBuilder,
         client_certificate: Option<ClientCertificate>,
         request_timeout: Duration,
-        #[cfg(feature = "with-ssh")] ssh_target: Option<&crate::ssh::SshTarget>,
+        #[cfg(feature = "with-ssh")] ssh_credentials: Option<&Arc<my_ssh::SshCredentials>>,
+        #[cfg(feature = "with-ssh")] ssh_sessions_cache: Option<
+            &Arc<crate::ssh::FlUrlSshSessionsCache>,
+        >,
     ) -> Result<Self, FlUrlError> {
         #[cfg(feature = "with-ssh")]
-        if let Some(ssh_target) = ssh_target {
+        if let Some(ssh_credentials) = ssh_credentials {
             let host_port = src.get_host_port();
 
             let (host, port) = match host_port.find(':') {
@@ -63,7 +69,8 @@ impl HttpClient {
 
             let (ssh_session, connection) =
                 super::connect_to_http_over_ssh::connect_to_http_over_ssh(
-                    ssh_target,
+                    ssh_credentials,
+                    ssh_sessions_cache,
                     host,
                     port,
                     request_timeout,
@@ -154,8 +161,6 @@ impl HttpClient {
             }
 
             if let Err(FlUrlError::HyperError(err)) = &result {
-                // This error we get if TLS Handshake is not finished yet. We are retrying after 50ms 100 times which is 5 seconds.
-                // Sometime this error appears when we have this connection for the long time. I assume - this is because connection is already dead.
                 if err.is_canceled() {
                     if self.connection_can_be_disposed() {
                         self.disconnect().await;
@@ -277,6 +282,8 @@ mod tests {
             REQUEST_TIMEOUT,
             #[cfg(feature = "with-ssh")]
             None,
+            #[cfg(feature = "with-ssh")]
+            None,
         )
         .await
         .unwrap();
@@ -329,6 +336,8 @@ mod tests {
             &url_builder,
             None,
             REQUEST_TIMEOUT,
+            #[cfg(feature = "with-ssh")]
+            None,
             #[cfg(feature = "with-ssh")]
             None,
         )
