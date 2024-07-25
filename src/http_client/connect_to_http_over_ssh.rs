@@ -13,24 +13,13 @@ const BUFFER_SIZE: usize = 512 * 1024;
 
 pub async fn connect_to_http_over_ssh(
     ssh_credentials: &Arc<my_ssh::SshCredentials>,
-    ssh_session_cache: Option<&Arc<crate::ssh::FlUrlSshSessionsCache>>,
+    ssh_sessions_pool: Option<&Arc<my_ssh::SshSessionsPool>>,
     remote_host: &str,
     remote_port: u16,
     time_out: Duration,
 ) -> Result<(Arc<SshSession>, SendRequest<Full<Bytes>>), FlUrlError> {
-    let ssh_session = if let Some(ssh_cache) = ssh_session_cache {
-        match ssh_cache.get(ssh_credentials).await {
-            Some(session) => session,
-            None => {
-                println!(
-                    "Creating new SSH session for {}",
-                    ssh_credentials.to_string()
-                );
-                let session = Arc::new(SshSession::new(ssh_credentials.clone()));
-                ssh_cache.insert(&session).await;
-                session
-            }
-        }
+    let ssh_session = if let Some(ssh_sessions_pool) = ssh_sessions_pool {
+        ssh_sessions_pool.get_or_create(ssh_credentials).await
     } else {
         Arc::new(SshSession::new(ssh_credentials.clone()))
     };

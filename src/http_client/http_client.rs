@@ -48,8 +48,8 @@ impl HttpClient {
         #[cfg(feature = "with-ssh")] ssh_credentials: Option<
             &std::sync::Arc<my_ssh::SshCredentials>,
         >,
-        #[cfg(feature = "with-ssh")] ssh_sessions_cache: Option<
-            &std::sync::Arc<crate::ssh::FlUrlSshSessionsCache>,
+        #[cfg(feature = "with-ssh")] ssh_sessions_pool: Option<
+            &std::sync::Arc<my_ssh::SshSessionsPool>,
         >,
     ) -> Result<Self, FlUrlError> {
         #[cfg(feature = "with-ssh")]
@@ -69,7 +69,7 @@ impl HttpClient {
             let (ssh_session, connection) =
                 super::connect_to_http_over_ssh::connect_to_http_over_ssh(
                     ssh_credentials,
-                    ssh_sessions_cache,
+                    ssh_sessions_pool,
                     host,
                     port,
                     request_timeout,

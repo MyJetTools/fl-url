@@ -47,7 +47,7 @@ impl FlUrl {
             #[cfg(feature = "with-ssh")]
             ssh_target: crate::ssh::SshTarget {
                 credentials: None,
-                session_cache: None,
+                sessions_pool: None,
             },
         }
     }
@@ -64,12 +64,8 @@ impl FlUrl {
     }
 
     #[cfg(feature = "with-ssh")]
-    pub fn set_ssh_sessions_cache(
-        mut self,
-        ssh_credentials: Arc<super::ssh::FlUrlSshSessionsCache>,
-    ) -> Self {
-        self.ssh_target.session_cache = Some(ssh_credentials);
-
+    pub fn set_ssh_sessions_pool(mut self, ssh_credentials: Arc<my_ssh::SshSessionsPool>) -> Self {
+        self.ssh_target.sessions_pool = Some(ssh_credentials);
         self
     }
 
@@ -198,7 +194,7 @@ impl FlUrl {
                 None,
                 self.execute_timeout,
                 Some(ssh_credentials),
-                self.ssh_target.session_cache.as_ref(),
+                self.ssh_target.sessions_pool.as_ref(),
             )
             .await?;
 
@@ -208,7 +204,7 @@ impl FlUrl {
 
             if result.is_err() {
                 println!("Http through ssh failed. Removing session from cache");
-                if let Some(session_cache) = &self.ssh_target.session_cache {
+                if let Some(session_cache) = &self.ssh_target.sessions_pool {
                     if let Some(ssh_credentials) = &self.ssh_target.credentials {
                         session_cache.remove(ssh_credentials).await;
                     }
