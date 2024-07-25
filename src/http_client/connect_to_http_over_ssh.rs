@@ -22,6 +22,7 @@ pub async fn connect_to_http_over_ssh(
         match ssh_cache.get(credentials).await {
             Some(session) => session,
             None => {
+                println!("Creating new SSH session for {:?}", credentials);
                 let session = Arc::new(SshSession::new(credentials.clone()));
                 ssh_cache.insert(&session).await;
                 session
