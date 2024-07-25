@@ -38,5 +38,7 @@ impl FlUrlSshSessionsCache {
                 .are_same(ssh_session.get_ssh_credentials())
         });
         sessions.push(ssh_session.clone());
+
+        println!("Inserted Session. Sessions in cache: {}", sessions.len());
     }
 }
