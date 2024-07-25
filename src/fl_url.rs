@@ -25,7 +25,7 @@ pub struct FlUrl {
     pub do_not_reuse_connection: bool,
     pub clients_cache: Option<Arc<HttpClientsCache>>,
     #[cfg(feature = "with-ssh")]
-    ssh_target: Option<crate::ssh_target::SshTarget>,
+    ssh_target: crate::ssh::SshTarget,
 
     pub drop_connection_scenario: Box<dyn DropConnectionScenario + Send + Sync + 'static>,
 }
@@ -45,7 +45,10 @@ impl FlUrl {
             drop_connection_scenario: Box::new(crate::DefaultDropConnectionScenario),
             clients_cache: None,
             #[cfg(feature = "with-ssh")]
-            ssh_target: None,
+            ssh_target: crate::ssh::SshTarget {
+                credentials: None,
+                session_cache: None,
+            },
         }
     }
 
@@ -55,12 +58,18 @@ impl FlUrl {
     }
 
     #[cfg(feature = "with-ssh")]
-    pub fn set_ssh_credentials(mut self, ssh_credentials: my_ssh::SshCredentials) -> Self {
-        use crate::ssh_target::SshTarget;
+    pub fn set_ssh_credentials(mut self, ssh_credentials: Arc<my_ssh::SshCredentials>) -> Self {
+        self.ssh_target.credentials = Some(ssh_credentials);
+        self
+    }
 
-        self.ssh_target = Some(SshTarget {
-            credentials: std::sync::Arc::new(ssh_credentials),
-        });
+    #[cfg(feature = "with-ssh")]
+    pub fn set_ssh_sessions_cache(
+        mut self,
+        ssh_credentials: Arc<super::ssh::FlUrlSshSessionsCache>,
+    ) -> Self {
+        self.ssh_target.session_cache = Some(ssh_credentials);
+
         self
     }
 
@@ -183,9 +192,14 @@ impl FlUrl {
         body: Option<Vec<u8>>,
     ) -> Result<FlUrlResponse, FlUrlError> {
         #[cfg(feature = "with-ssh")]
-        if self.ssh_target.is_some() {
-            let http_client =
-                HttpClient::new(&self.url, None, self.execute_timeout, &self.ssh_target).await?;
+        if self.ssh_target.credentials.is_some() {
+            let http_client = HttpClient::new(
+                &self.url,
+                None,
+                self.execute_timeout,
+                Some(&self.ssh_target),
+            )
+            .await?;
 
             let result = http_client
                 .execute_request(&self.url, method, &self.headers, body, self.execute_timeout)
@@ -201,7 +215,7 @@ impl FlUrl {
                 self.client_cert,
                 self.execute_timeout,
                 #[cfg(feature = "with-ssh")]
-                &None,
+                None,
             )
             .await?;
             client

@@ -5,7 +5,7 @@ use http_body_util::Full;
 use hyper_util::rt::TokioIo;
 use my_ssh::SshSession;
 
-use crate::{ssh_target::SshTarget, FlUrlError};
+use crate::{ssh::SshTarget, FlUrlError};
 
 use hyper::client::conn::http1::SendRequest;
 
@@ -17,9 +17,21 @@ pub async fn connect_to_http_over_ssh(
     remote_port: u16,
     time_out: Duration,
 ) -> Result<(Arc<SshSession>, SendRequest<Full<Bytes>>), FlUrlError> {
-    let ssh_session = Arc::new(SshSession::new(ssh_target.credentials.clone()));
+    let ssh_session = if let Some(ssh_cache) = ssh_target.session_cache.as_ref() {
+        let credentials = ssh_target.credentials.as_ref().unwrap();
+        match ssh_cache.get(credentials).await {
+            Some(session) => session,
+            None => {
+                let session = Arc::new(SshSession::new(credentials.clone()));
+                ssh_cache.insert(&session).await;
+                session
+            }
+        }
+    } else {
+        Arc::new(SshSession::new(ssh_target.credentials.clone().unwrap()))
+    };
 
-    let (host, port) = ssh_target.credentials.get_host_port();
+    let (host, port) = ssh_session.get_ssh_credentials().get_host_port();
     let ssh_channel = ssh_session
         .connect_to_remote_host(remote_host, remote_port, time_out)
         .await?;

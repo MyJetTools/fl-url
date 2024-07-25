@@ -45,7 +45,7 @@ impl HttpClient {
         src: &UrlBuilder,
         client_certificate: Option<ClientCertificate>,
         request_timeout: Duration,
-        #[cfg(feature = "with-ssh")] ssh_target: &Option<crate::ssh_target::SshTarget>,
+        #[cfg(feature = "with-ssh")] ssh_target: Option<&crate::ssh::SshTarget>,
     ) -> Result<Self, FlUrlError> {
         #[cfg(feature = "with-ssh")]
         if let Some(ssh_target) = ssh_target {
@@ -276,7 +276,7 @@ mod tests {
             None,
             REQUEST_TIMEOUT,
             #[cfg(feature = "with-ssh")]
-            &None,
+            None,
         )
         .await
         .unwrap();
@@ -330,7 +330,7 @@ mod tests {
             None,
             REQUEST_TIMEOUT,
             #[cfg(feature = "with-ssh")]
-            &None,
+            None,
         )
         .await
         .unwrap();
