@@ -207,6 +207,7 @@ impl FlUrl {
                 .await;
 
             if result.is_err() {
+                println!("Http through ssh failed. Removing session from cache");
                 if let Some(session_cache) = &self.ssh_target.session_cache {
                     if let Some(ssh_credentials) = &self.ssh_target.credentials {
                         session_cache.remove(ssh_credentials).await;
