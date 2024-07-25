@@ -33,7 +33,7 @@ impl FlUrlSshSessionsCache {
         let mut sessions = self.sessions.lock().await;
 
         sessions.retain(|session| {
-            session
+            !session
                 .get_ssh_credentials()
                 .are_same(ssh_session.get_ssh_credentials())
         });
