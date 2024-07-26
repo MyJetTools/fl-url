@@ -32,16 +32,7 @@ impl HttpClientsCache {
             return Ok(existing_connection);
         }
 
-        let new_one = HttpClient::new(
-            url_builder,
-            client_certificate,
-            request_timeout,
-            #[cfg(feature = "with-ssh")]
-            None,
-            #[cfg(feature = "with-ssh")]
-            None,
-        )
-        .await?;
+        let new_one = HttpClient::new(url_builder, client_certificate, request_timeout).await?;
         let new_one = Arc::new(new_one);
 
         write_access.insert(schema_and_domain.to_string(), new_one.clone());

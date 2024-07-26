@@ -1,12 +1,11 @@
 [package]
 name = "flurl"
-version = "0.5.2"
+version = "0.5.3"
 authors = ["Andrey <amigin@gmail.com>"]
 edition = "2021"
 
 [features]
-default = []
-support-unix-socket = ["unix-sockets"]
+default = ["with-ssh"]
 with-ssh = ["my-ssh"]
 debug-request = []
 
@@ -21,8 +20,6 @@ my-tls = { tag = "0.1.1", git = "https://github.com/MyJetTools/my-tls.git" }
 rust-extensions = { tag = "0.1.4", git = "https://github.com/MyJetTools/rust-extensions.git" }
 
 hyper-util = { version = "*", features = ["tokio"] }
-
-unix-sockets = { path = "./unix-sockets", optional = true }
 
 http-body-util = { version = "*" }
 

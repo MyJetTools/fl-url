@@ -94,7 +94,6 @@ impl UrlBuilder {
     }
 
     pub fn get_scheme_and_host(&self) -> ShortString {
-        #[cfg(feature = "support-unix-socket")]
         if self.scheme.is_unix_socket() {
             let mut result = ShortString::new_empty();
             result.push_str(self.scheme.scheme_as_str());
@@ -381,9 +380,8 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "support-unix-socket")]
     pub fn test_unix_path_and_query() {
-        let mut uri_builder = UrlBuilder::new("http+unix://google.com".into());
+        let mut uri_builder = UrlBuilder::new("http+unix://var/run/test".into());
         uri_builder.append_path_segment("first");
         uri_builder.append_path_segment("second");
 
@@ -391,13 +389,16 @@ mod tests {
         uri_builder.append_query_param("second".to_string(), Some("second_value".to_string()));
 
         assert_eq!(
-            "./google.com/first/second?first=first_value&second=second_value",
+            "/var/run/first/second?first=first_value&second=second_value",
             uri_builder.to_string()
         );
-        assert_eq!("./google.com", uri_builder.get_scheme_and_host().as_str());
+        assert_eq!(
+            "/var/run/first/",
+            uri_builder.get_scheme_and_host().as_str()
+        );
 
         assert_eq!(true, uri_builder.get_scheme().is_unix_socket());
-        assert_eq!("google.com", uri_builder.get_host_port());
+        assert_eq!("/var/run", uri_builder.get_host_port());
         assert_eq!("/first/second", uri_builder.get_path());
         assert_eq!(
             "/first/second?first=first_value&second=second_value",

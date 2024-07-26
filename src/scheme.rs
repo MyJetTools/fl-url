@@ -2,7 +2,6 @@
 pub enum Scheme {
     Http,
     Https,
-    #[cfg(feature = "support-unix-socket")]
     UnixSocket,
 }
 
@@ -46,7 +45,6 @@ impl Scheme {
             }
         }
 
-        #[cfg(feature = "support-unix-socket")]
         if scheme == "http+unix" {
             return (Scheme::UnixSocket, Some(index));
         }
@@ -72,7 +70,6 @@ impl Scheme {
         }
     }
 
-    #[cfg(feature = "support-unix-socket")]
     pub fn is_unix_socket(&self) -> bool {
         match self {
             Scheme::UnixSocket => true,
@@ -83,8 +80,7 @@ impl Scheme {
         match self {
             Scheme::Http => "http://",
             Scheme::Https => "https://",
-            #[cfg(feature = "support-unix-socket")]
-            Scheme::UnixSocket => "./",
+            Scheme::UnixSocket => "/",
         }
     }
 }

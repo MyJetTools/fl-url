@@ -10,8 +10,6 @@ pub enum ResponseBody {
         headers: HeaderMap,
         body: Option<Vec<u8>>,
     },
-    #[cfg(feature = "support-unix-socket")]
-    UnixSocket(unix_sockets::FlUrlUnixResponse),
 }
 
 impl ResponseBody {
@@ -20,10 +18,6 @@ impl ResponseBody {
             Self::Incoming(response) => response.as_ref().unwrap(),
             Self::Body { .. } => {
                 panic!("Body is already disposed");
-            }
-            #[cfg(feature = "support-unix-socket")]
-            Self::UnixSocket(_) => {
-                panic!("Can not get hyper response from UnixSocket response");
             }
         }
     }
@@ -36,10 +30,6 @@ impl ResponseBody {
             }
             Self::Body { .. } => {
                 panic!("Body is already disposed");
-            }
-            #[cfg(feature = "support-unix-socket")]
-            Self::UnixSocket(_) => {
-                panic!("Can not get hyper response from UnixSocket response");
             }
         }
     }
@@ -60,16 +50,6 @@ impl ResponseBody {
             Self::Body { .. } => {
                 panic!("Body is already disposed");
             }
-            #[cfg(feature = "support-unix-socket")]
-            Self::UnixSocket(unix_socket) => match unix_socket.get_header(header) {
-                Ok(result) => Ok(result),
-                Err(err) => Err(
-                    FlUrlReadingHeaderError::CanNotConvertUnixSocketHeaderToUtf8(format!(
-                        "{}",
-                        err
-                    )),
-                ),
-            },
         }
     }
 
@@ -94,22 +74,6 @@ impl ResponseBody {
             Self::Body { .. } => {
                 panic!("Body is already disposed");
             }
-            #[cfg(feature = "support-unix-socket")]
-            Self::UnixSocket(unix_socket) => {
-                match unix_socket.get_header_case_insensitive(header) {
-                    Ok(result) => {
-                        return Ok(result);
-                    }
-                    Err(err) => {
-                        return Err(
-                            FlUrlReadingHeaderError::CanNotConvertUnixSocketHeaderToUtf8(format!(
-                                "{}",
-                                err
-                            )),
-                        );
-                    }
-                }
-            }
         }
     }
 
@@ -133,10 +97,6 @@ impl ResponseBody {
                         hash_map.insert(key.as_str(), Some(value));
                     }
                 }
-            }
-            #[cfg(feature = "support-unix-socket")]
-            ResponseBody::UnixSocket(unix_socket) => {
-                unix_socket.copy_headers_to_hashmap(hash_map);
             }
         }
     }
@@ -172,10 +132,6 @@ impl ResponseBody {
                     );
                 }
             }
-            #[cfg(feature = "support-unix-socket")]
-            ResponseBody::UnixSocket(unix_socket) => {
-                unix_socket.copy_headers_to_hashmap_of_string(hash_map)
-            }
         }
     }
 
@@ -193,8 +149,6 @@ impl ResponseBody {
                 }
             }
             Self::Body { .. } => {}
-            #[cfg(feature = "support-unix-socket")]
-            ResponseBody::UnixSocket(_) => {}
         }
 
         Ok(())
@@ -211,8 +165,6 @@ impl ResponseBody {
                 Some(body) => Ok(body.as_slice()),
                 None => panic!("Body is already disposed"),
             },
-            #[cfg(feature = "support-unix-socket")]
-            ResponseBody::UnixSocket(unix_socket) => Ok(unix_socket.body_as_slice()),
         }
     }
 
@@ -227,8 +179,6 @@ impl ResponseBody {
                 Some(body) => Ok(body),
                 None => panic!("Body is already disposed"),
             },
-            #[cfg(feature = "support-unix-socket")]
-            ResponseBody::UnixSocket(unix_socket) => Ok(unix_socket.take_body()),
         }
     }
 }

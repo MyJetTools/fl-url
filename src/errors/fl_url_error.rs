@@ -11,8 +11,6 @@ pub enum FlUrlError {
     CanNotEstablishConnection(String),
     ClientCertificateError(tokio_rustls::rustls::Error),
     CanNotConvertToUtf8(std::str::Utf8Error),
-    #[cfg(feature = "support-unix-socket")]
-    UnixSocketError(unix_sockets::FlUrlUnixSocketError),
 
     #[cfg(feature = "with-ssh")]
     SshSessionError(my_ssh::SshSessionError),
@@ -61,11 +59,5 @@ impl From<std::io::Error> for FlUrlError {
 impl From<hyper::http::Error> for FlUrlError {
     fn from(src: hyper::http::Error) -> Self {
         Self::HttpError(src)
-    }
-}
-#[cfg(feature = "support-unix-socket")]
-impl From<unix_sockets::FlUrlUnixSocketError> for FlUrlError {
-    fn from(src: unix_sockets::FlUrlUnixSocketError) -> Self {
-        Self::UnixSocketError(src)
     }
 }

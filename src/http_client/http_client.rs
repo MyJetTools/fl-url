@@ -41,50 +41,72 @@ impl HttpClient {
         }
     }
 
+    #[cfg(feature = "with-ssh")]
+    pub async fn new_ssh(
+        src: &UrlBuilder,
+        request_timeout: Duration,
+        ssh_credentials: &std::sync::Arc<my_ssh::SshCredentials>,
+        ssh_sessions_pool: Option<&std::sync::Arc<my_ssh::SshSessionsPool>>,
+    ) -> Result<Self, FlUrlError> {
+        let host_port = src.get_host_port();
+
+        let (host, port) = match host_port.find(':') {
+            Some(index) => {
+                let host = &host_port[0..index];
+                let port = &host_port[index + 1..];
+
+                (host, port.parse::<u16>().unwrap())
+            }
+            None => (host_port, 80),
+        };
+
+        let (ssh_session, connection) = super::connect_to_http_over_ssh::connect_to_http_over_ssh(
+            ssh_credentials,
+            ssh_sessions_pool,
+            host,
+            port,
+            request_timeout,
+        )
+        .await?;
+
+        let result = Self {
+            connection: Mutex::new(Some(connection)),
+            created: DateTimeAsMicroseconds::now(),
+            disconnected: AtomicBool::new(false),
+            #[cfg(feature = "with-ssh")]
+            _ssh_session: Some(ssh_session),
+        };
+
+        return Ok(result);
+    }
+
     pub async fn new(
         src: &UrlBuilder,
         client_certificate: Option<ClientCertificate>,
         request_timeout: Duration,
-        #[cfg(feature = "with-ssh")] ssh_credentials: Option<
-            &std::sync::Arc<my_ssh::SshCredentials>,
-        >,
-        #[cfg(feature = "with-ssh")] ssh_sessions_pool: Option<
-            &std::sync::Arc<my_ssh::SshSessionsPool>,
-        >,
     ) -> Result<Self, FlUrlError> {
-        #[cfg(feature = "with-ssh")]
-        if let Some(ssh_credentials) = ssh_credentials {
-            let host_port = src.get_host_port();
+        if src.scheme.is_unix_socket() {
+            let scheme_and_host = src.get_scheme_and_host();
+            let connection_future =
+                super::connect_to_http_unix_socket_endpoint(scheme_and_host.as_str());
+            let result = tokio::time::timeout(request_timeout, connection_future).await;
 
-            let (host, port) = match host_port.find(':') {
-                Some(index) => {
-                    let host = &host_port[0..index];
-                    let port = &host_port[index + 1..];
+            match result {
+                Ok(result) => {
+                    let send_request = result?;
 
-                    (host, port.parse::<u16>().unwrap())
+                    return Ok(Self {
+                        connection: Mutex::new(Some(send_request)),
+                        created: DateTimeAsMicroseconds::now(),
+                        disconnected: AtomicBool::new(false),
+                        #[cfg(feature = "with-ssh")]
+                        _ssh_session: None,
+                    });
                 }
-                None => (host_port, 80),
-            };
-
-            let (ssh_session, connection) =
-                super::connect_to_http_over_ssh::connect_to_http_over_ssh(
-                    ssh_credentials,
-                    ssh_sessions_pool,
-                    host,
-                    port,
-                    request_timeout,
-                )
-                .await?;
-
-            let result = Self {
-                connection: Mutex::new(Some(connection)),
-                created: DateTimeAsMicroseconds::now(),
-                disconnected: AtomicBool::new(false),
-                #[cfg(feature = "with-ssh")]
-                _ssh_session: Some(ssh_session),
-            };
-
-            return Ok(result);
+                Err(_) => {
+                    return Err(FlUrlError::Timeout);
+                }
+            }
         }
 
         let host_port = src.get_host_port();
@@ -275,17 +297,9 @@ mod tests {
     async fn test_http_request() {
         let url_builder = UrlBuilder::new("http://google.com/".into());
 
-        let fl_url_client = HttpClient::new(
-            &url_builder,
-            None,
-            REQUEST_TIMEOUT,
-            #[cfg(feature = "with-ssh")]
-            None,
-            #[cfg(feature = "with-ssh")]
-            None,
-        )
-        .await
-        .unwrap();
+        let fl_url_client = HttpClient::new(&url_builder, None, REQUEST_TIMEOUT)
+            .await
+            .unwrap();
 
         let mut sw: StopWatch = StopWatch::new();
 
@@ -331,17 +345,9 @@ mod tests {
     async fn test_https_request() {
         let url_builder = UrlBuilder::new("https://trade-demo.yourfin.tech".into());
 
-        let fl_url_client = HttpClient::new(
-            &url_builder,
-            None,
-            REQUEST_TIMEOUT,
-            #[cfg(feature = "with-ssh")]
-            None,
-            #[cfg(feature = "with-ssh")]
-            None,
-        )
-        .await
-        .unwrap();
+        let fl_url_client = HttpClient::new(&url_builder, None, REQUEST_TIMEOUT)
+            .await
+            .unwrap();
 
         let mut sw: StopWatch = StopWatch::new();
 

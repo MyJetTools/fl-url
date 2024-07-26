@@ -154,104 +154,78 @@ impl FlUrl {
         method: Method,
         body: Option<Vec<u8>>,
     ) -> Result<FlUrlResponse, FlUrlError> {
-        #[cfg(feature = "support-unix-socket")]
-        if self.url.scheme.is_unix_socket() {
-            let scheme_and_host = self.url.get_scheme_and_host();
-
-            let path_and_query = self.url.get_path_and_query();
-
-            let (response, url) = unix_sockets::execute_request(
-                scheme_and_host.as_str(),
-                path_and_query.as_str(),
-                method.as_str(),
-                self.headers.iter().map(|itm| (&itm.name, &itm.value)),
-                body,
-            )
-            .await?;
-
-            return Ok(FlUrlResponse::from_unix_response(response, url));
+        #[cfg(feature = "with-ssh")]
+        if let Some(ssh_credentials) = &self.ssh_target.credentials {
+            return self.execute_with_ssh(method, body, ssh_credentials).await;
         }
 
-        self.execute_http_or_https(method, body).await
+        let scheme_and_host = self.url.get_scheme_and_host();
+
+        if self.do_not_reuse_connection {
+            let client = HttpClient::new(&self.url, self.client_cert, self.execute_timeout).await?;
+            return client
+                .execute_request(&self.url, method, &self.headers, body, self.execute_timeout)
+                .await;
+        }
+
+        let clients_cache = self.get_clients_cache();
+
+        let client = clients_cache
+            .get(&self.url, self.execute_timeout, self.client_cert)
+            .await?;
+
+        let result = client
+            .execute_request(&self.url, method, &self.headers, body, self.execute_timeout)
+            .await;
+
+        match result {
+            Ok(result) => {
+                if self.drop_connection_scenario.should_we_drop_it(&result) {
+                    clients_cache.remove(scheme_and_host.as_str()).await;
+                }
+                return Ok(result);
+            }
+            Err(err) => {
+                clients_cache.remove(scheme_and_host.as_str()).await;
+                return Err(err);
+            }
+        }
+    }
+
+    #[cfg(feature = "with-ssh")]
+    async fn execute_with_ssh(
+        &self,
+        method: Method,
+        body: Option<Vec<u8>>,
+        ssh_credentials: &Arc<my_ssh::SshCredentials>,
+    ) -> Result<FlUrlResponse, FlUrlError> {
+        let http_client = HttpClient::new_ssh(
+            &self.url,
+            self.execute_timeout,
+            ssh_credentials,
+            self.ssh_target.sessions_pool.as_ref(),
+        )
+        .await?;
+
+        let result = http_client
+            .execute_request(&self.url, method, &self.headers, body, self.execute_timeout)
+            .await;
+
+        if result.is_err() {
+            println!("Http through ssh failed. Removing session from cache");
+            if let Some(session_cache) = &self.ssh_target.sessions_pool {
+                if let Some(ssh_credentials) = &self.ssh_target.credentials {
+                    session_cache.remove(ssh_credentials).await;
+                }
+            }
+        }
+        return result;
     }
 
     fn get_clients_cache(&self) -> Arc<HttpClientsCache> {
         match self.clients_cache.as_ref() {
             Some(cache) => cache.clone(),
             None => crate::CLIENTS_CACHED.clone(),
-        }
-    }
-
-    async fn execute_http_or_https(
-        self,
-        method: Method,
-        body: Option<Vec<u8>>,
-    ) -> Result<FlUrlResponse, FlUrlError> {
-        #[cfg(feature = "with-ssh")]
-        if let Some(ssh_credentials) = &self.ssh_target.credentials {
-            let http_client = HttpClient::new(
-                &self.url,
-                None,
-                self.execute_timeout,
-                Some(ssh_credentials),
-                self.ssh_target.sessions_pool.as_ref(),
-            )
-            .await?;
-
-            let result = http_client
-                .execute_request(&self.url, method, &self.headers, body, self.execute_timeout)
-                .await;
-
-            if result.is_err() {
-                println!("Http through ssh failed. Removing session from cache");
-                if let Some(session_cache) = &self.ssh_target.sessions_pool {
-                    if let Some(ssh_credentials) = &self.ssh_target.credentials {
-                        session_cache.remove(ssh_credentials).await;
-                    }
-                }
-            }
-            return result;
-        }
-
-        let scheme_and_host = self.url.get_scheme_and_host();
-
-        if self.do_not_reuse_connection {
-            let client = HttpClient::new(
-                &self.url,
-                self.client_cert,
-                self.execute_timeout,
-                #[cfg(feature = "with-ssh")]
-                None,
-                #[cfg(feature = "with-ssh")]
-                None,
-            )
-            .await?;
-            client
-                .execute_request(&self.url, method, &self.headers, body, self.execute_timeout)
-                .await
-        } else {
-            let clients_cache = self.get_clients_cache();
-
-            let client = clients_cache
-                .get(&self.url, self.execute_timeout, self.client_cert)
-                .await?;
-
-            let result = client
-                .execute_request(&self.url, method, &self.headers, body, self.execute_timeout)
-                .await;
-
-            match result {
-                Ok(result) => {
-                    if self.drop_connection_scenario.should_we_drop_it(&result) {
-                        clients_cache.remove(scheme_and_host.as_str()).await;
-                    }
-                    return Ok(result);
-                }
-                Err(err) => {
-                    clients_cache.remove(scheme_and_host.as_str()).await;
-                    return Err(err);
-                }
-            }
         }
     }
 
