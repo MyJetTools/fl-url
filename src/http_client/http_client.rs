@@ -85,6 +85,7 @@ impl HttpClient {
         client_certificate: Option<ClientCertificate>,
         request_timeout: Duration,
     ) -> Result<Self, FlUrlError> {
+        #[cfg(feature = "unix-socket")]
         if src.scheme.is_unix_socket() {
             let host_port = src.get_host_port();
             let connection_future = super::connect_to_http_unix_socket_endpoint(host_port);

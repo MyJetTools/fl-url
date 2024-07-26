@@ -2,6 +2,7 @@
 pub enum Scheme {
     Http,
     Https,
+    #[cfg(feature = "unix-socket")]
     UnixSocket,
 }
 
@@ -25,8 +26,13 @@ impl Scheme {
             return (Scheme::Https, Some(index));
         }
 
+        #[cfg(feature = "unix-socket")]
         if rust_extensions::str_utils::compare_strings_case_insensitive("http+unix", scheme) {
             return (Scheme::UnixSocket, Some(index));
+        }
+        #[cfg(not(feature = "unix-socket"))]
+        if rust_extensions::str_utils::compare_strings_case_insensitive("http+unix", scheme) {
+            panic!("Please enable feature unix-socket to use http+unix scheme");
         }
 
         panic!("Unknown scheme: {}", scheme);
@@ -50,6 +56,7 @@ impl Scheme {
         }
     }
 
+    #[cfg(feature = "unix-socket")]
     pub fn is_unix_socket(&self) -> bool {
         match self {
             Scheme::UnixSocket => true,
@@ -60,6 +67,7 @@ impl Scheme {
         match self {
             Scheme::Http => "http://",
             Scheme::Https => "https://",
+            #[cfg(feature = "unix-socket")]
             Scheme::UnixSocket => "http+unix:/",
         }
     }

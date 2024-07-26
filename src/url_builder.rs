@@ -51,6 +51,7 @@ impl UrlBuilder {
     }
 
     pub fn get_host_port(&self) -> &str {
+        #[cfg(feature = "unix-socket")]
         if self.scheme.is_unix_socket() {
             match self.scheme_index {
                 Some(index) => return &self.host_port.as_str()[index + 2..],
@@ -84,11 +85,14 @@ impl UrlBuilder {
         result.push_str(self.scheme.scheme_as_str());
 
         if let Some(index) = self.scheme_index {
+            #[cfg(feature = "unix-socket")]
             if self.scheme.is_unix_socket() {
                 result.push_str(&self.host_port.as_str()[index + 2..]);
             } else {
                 result.push_str(&self.host_port.as_str()[index + 3..]);
             }
+
+            result.push_str(&self.host_port.as_str()[index + 3..]);
         } else {
             result.push_str(self.host_port.as_str());
         }
@@ -105,6 +109,7 @@ impl UrlBuilder {
     }
 
     pub fn get_scheme_and_host(&self) -> ShortString {
+        #[cfg(feature = "unix-socket")]
         if self.scheme.is_unix_socket() {
             return self.host_port.clone();
         }
@@ -384,6 +389,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "unix-socket")]
     pub fn test_unix_path_and_query() {
         let mut uri_builder = UrlBuilder::new("http+unix://var/run/test".into());
         uri_builder.append_path_segment("first");
@@ -413,6 +419,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "unix-socket")]
     pub fn test_unix_from_home_path() {
         let mut uri_builder = UrlBuilder::new("http+unix:/~/var/run/test".into());
         uri_builder.append_path_segment("first");
