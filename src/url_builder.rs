@@ -51,6 +51,13 @@ impl UrlBuilder {
     }
 
     pub fn get_host_port(&self) -> &str {
+        if self.scheme.is_unix_socket() {
+            match self.scheme_index {
+                Some(index) => return &self.host_port.as_str()[index + 2..],
+                None => return self.host_port.as_str(),
+            }
+        }
+
         match self.scheme_index {
             Some(index) => &self.host_port.as_str()[index + 3..]
                 .split('/')
@@ -77,7 +84,11 @@ impl UrlBuilder {
         result.push_str(self.scheme.scheme_as_str());
 
         if let Some(index) = self.scheme_index {
-            result.push_str(&self.host_port.as_str()[index + 3..]);
+            if self.scheme.is_unix_socket() {
+                result.push_str(&self.host_port.as_str()[index + 2..]);
+            } else {
+                result.push_str(&self.host_port.as_str()[index + 3..]);
+            }
         } else {
             result.push_str(self.host_port.as_str());
         }
@@ -95,14 +106,7 @@ impl UrlBuilder {
 
     pub fn get_scheme_and_host(&self) -> ShortString {
         if self.scheme.is_unix_socket() {
-            let mut result = ShortString::new_empty();
-            result.push_str(self.scheme.scheme_as_str());
-            if let Some(index) = self.scheme_index {
-                result.push_str(&self.host_port.as_str()[index + 3..]);
-            } else {
-                result.push_str(self.host_port.as_str());
-            }
-            return result;
+            return self.host_port.clone();
         }
 
         if self.scheme_index.is_some() {
@@ -388,17 +392,48 @@ mod tests {
         uri_builder.append_query_param("first".to_string(), Some("first_value".to_string()));
         uri_builder.append_query_param("second".to_string(), Some("second_value".to_string()));
 
+        assert_eq!(true, uri_builder.get_scheme().is_unix_socket());
+
         assert_eq!(
-            "/var/run/first/second?first=first_value&second=second_value",
+            "http+unix://var/run/test/first/second?first=first_value&second=second_value",
             uri_builder.to_string()
         );
         assert_eq!(
-            "/var/run/first/",
+            "http+unix://var/run/test",
             uri_builder.get_scheme_and_host().as_str()
         );
 
+        assert_eq!("/var/run/test", uri_builder.get_host_port());
+
+        assert_eq!("/first/second", uri_builder.get_path());
+        assert_eq!(
+            "/first/second?first=first_value&second=second_value",
+            uri_builder.get_path_and_query()
+        );
+    }
+
+    #[test]
+    pub fn test_unix_from_home_path() {
+        let mut uri_builder = UrlBuilder::new("http+unix:/~/var/run/test".into());
+        uri_builder.append_path_segment("first");
+        uri_builder.append_path_segment("second");
+
+        uri_builder.append_query_param("first".to_string(), Some("first_value".to_string()));
+        uri_builder.append_query_param("second".to_string(), Some("second_value".to_string()));
+
         assert_eq!(true, uri_builder.get_scheme().is_unix_socket());
-        assert_eq!("/var/run", uri_builder.get_host_port());
+
+        assert_eq!(
+            "http+unix:/~/var/run/test/first/second?first=first_value&second=second_value",
+            uri_builder.to_string()
+        );
+        assert_eq!(
+            "http+unix:/~/var/run/test",
+            uri_builder.get_scheme_and_host().as_str()
+        );
+
+        assert_eq!("~/var/run/test", uri_builder.get_host_port());
+
         assert_eq!("/first/second", uri_builder.get_path());
         assert_eq!(
             "/first/second?first=first_value&second=second_value",

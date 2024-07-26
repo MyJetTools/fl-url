@@ -86,9 +86,8 @@ impl HttpClient {
         request_timeout: Duration,
     ) -> Result<Self, FlUrlError> {
         if src.scheme.is_unix_socket() {
-            let scheme_and_host = src.get_scheme_and_host();
-            let connection_future =
-                super::connect_to_http_unix_socket_endpoint(scheme_and_host.as_str());
+            let host_port = src.get_host_port();
+            let connection_future = super::connect_to_http_unix_socket_endpoint(host_port);
             let result = tokio::time::timeout(request_timeout, connection_future).await;
 
             match result {

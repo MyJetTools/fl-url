@@ -7,7 +7,7 @@ pub enum Scheme {
 
 impl Scheme {
     pub fn from_url(src: &str) -> (Self, Option<usize>) {
-        let index = src.find("://");
+        let index = src.find(":/");
 
         if index.is_none() {
             return (Scheme::get_default(), index);
@@ -17,35 +17,15 @@ impl Scheme {
 
         let scheme = &src[..index];
 
-        if scheme.len() == 4 {
-            if scheme == "http" {
-                return (Scheme::Http, Some(index));
-            }
-
-            if scheme == "HTTP" {
-                return (Scheme::Http, Some(index));
-            }
-
-            if scheme.to_lowercase() == "http" {
-                return (Scheme::Http, Some(index));
-            }
+        if rust_extensions::str_utils::compare_strings_case_insensitive("http", scheme) {
+            return (Scheme::Http, Some(index));
         }
 
-        if scheme.len() == 5 {
-            if scheme == "https" {
-                return (Scheme::Https, Some(index));
-            }
-
-            if scheme == "HTTPS" {
-                return (Scheme::Https, Some(index));
-            }
-
-            if scheme.to_lowercase() == "https" {
-                return (Scheme::Https, Some(index));
-            }
+        if rust_extensions::str_utils::compare_strings_case_insensitive("https", scheme) {
+            return (Scheme::Https, Some(index));
         }
 
-        if scheme == "http+unix" {
+        if rust_extensions::str_utils::compare_strings_case_insensitive("http+unix", scheme) {
             return (Scheme::UnixSocket, Some(index));
         }
 
@@ -80,7 +60,7 @@ impl Scheme {
         match self {
             Scheme::Http => "http://",
             Scheme::Https => "https://",
-            Scheme::UnixSocket => "/",
+            Scheme::UnixSocket => "http+unix:/",
         }
     }
 }

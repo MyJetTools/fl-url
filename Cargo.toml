@@ -5,7 +5,7 @@ authors = ["Andrey <amigin@gmail.com>"]
 edition = "2021"
 
 [features]
-default = ["with-ssh"]
+default = []
 with-ssh = ["my-ssh"]
 debug-request = []
 
