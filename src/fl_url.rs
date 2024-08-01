@@ -33,6 +33,7 @@ pub struct FlUrl {
 impl FlUrl {
     pub fn new<'s>(url: impl Into<StrOrString<'s>>) -> Self {
         let url: StrOrString<'s> = url.into();
+
         let url = UrlBuilder::new(ShortString::from_str(url.as_str()).unwrap());
 
         Self {
@@ -50,6 +51,26 @@ impl FlUrl {
                 sessions_pool: None,
             },
         }
+    }
+
+    /// Url can be: "http://localhost:8080" or "ssh://user:password@host:port->http://localhost:8080"
+    #[cfg(feature = "with-ssh")]
+    pub async fn new_with_maybe_ssh<'s>(
+        url: impl Into<StrOrString<'s>>,
+        ssh_credentials: Option<
+            &std::collections::HashMap<String, my_ssh::SshCredentialsSettingsModel>,
+        >,
+    ) -> Self {
+        let url = url.into();
+        let over_ssh_config =
+            my_ssh::OverSshConnectionSettings::parse(url.as_str(), ssh_credentials).await;
+
+        if over_ssh_config.ssh_credentials.is_none() {
+            return Self::new(url);
+        }
+
+        Self::new(over_ssh_config.remote_resource_string)
+            .set_ssh_credentials(Arc::new(over_ssh_config.ssh_credentials.unwrap()))
     }
 
     pub fn with_clients_cache(mut self, clients_cache: Arc<HttpClientsCache>) -> Self {
@@ -155,8 +176,10 @@ impl FlUrl {
         body: Option<Vec<u8>>,
     ) -> Result<FlUrlResponse, FlUrlError> {
         #[cfg(feature = "with-ssh")]
-        if let Some(ssh_credentials) = &self.ssh_target.credentials {
-            return self.execute_with_ssh(method, body, ssh_credentials).await;
+        {
+            if let Some(ssh_credentials) = &self.ssh_target.credentials {
+                return self.execute_with_ssh(method, body, ssh_credentials).await;
+            }
         }
 
         let scheme_and_host = self.url.get_scheme_and_host();
