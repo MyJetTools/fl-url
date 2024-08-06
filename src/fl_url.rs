@@ -229,14 +229,23 @@ impl FlUrl {
         body: Option<Vec<u8>>,
         ssh_credentials: &Arc<my_ssh::SshCredentials>,
     ) -> Result<FlUrlResponse, FlUrlError> {
-        let http_client = HttpClient::new_ssh(
-            &self.url,
-            self.execute_timeout,
-            ssh_credentials,
-            self.ssh_target.sessions_pool.as_ref(),
-            self.ssh_target.http_buffer_size,
-        )
-        .await?;
+        let http_client = if self.do_not_reuse_connection {
+            Arc::new(
+                HttpClient::new_ssh(
+                    &self.url,
+                    self.execute_timeout,
+                    ssh_credentials,
+                    self.ssh_target.sessions_pool.as_ref(),
+                    self.ssh_target.http_buffer_size,
+                )
+                .await?,
+            )
+        } else {
+            let clients_cache = self.get_clients_cache();
+            clients_cache
+                .get(&self.url, self.execute_timeout, None)
+                .await?
+        };
 
         let result = http_client
             .execute_request(&self.url, method, &self.headers, body, self.execute_timeout)
