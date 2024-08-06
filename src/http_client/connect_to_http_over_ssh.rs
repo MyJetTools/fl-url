@@ -23,6 +23,11 @@ pub async fn connect_to_http_over_ssh(
         Arc::new(SshSession::new(ssh_credentials.clone()))
     };
 
+    println!(
+        "Connecting to remote host: {}:{} over SSH",
+        remote_host, remote_port
+    );
+
     let (host, port) = ssh_session.get_ssh_credentials().get_host_port();
     let ssh_channel = ssh_session
         .connect_to_remote_host(remote_host, remote_port, time_out)
