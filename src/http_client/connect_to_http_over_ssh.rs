@@ -24,7 +24,7 @@ pub async fn connect_to_http_over_ssh(
     };
 
     println!(
-        "Connecting to remote host: {}:{} over SSH",
+        "Connecting to remote http host: {}:{} over SSH",
         remote_host, remote_port
     );
 
