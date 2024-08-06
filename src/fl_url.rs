@@ -49,6 +49,7 @@ impl FlUrl {
             ssh_target: crate::ssh::SshTarget {
                 credentials: None,
                 sessions_pool: None,
+                http_buffer_size: 512 * 1024,
             },
         }
     }
@@ -87,6 +88,12 @@ impl FlUrl {
     #[cfg(feature = "with-ssh")]
     pub fn set_ssh_sessions_pool(mut self, ssh_credentials: Arc<my_ssh::SshSessionsPool>) -> Self {
         self.ssh_target.sessions_pool = Some(ssh_credentials);
+        self
+    }
+
+    #[cfg(feature = "with-ssh")]
+    pub fn set_http_buffer_size(mut self, buffer_size: usize) -> Self {
+        self.ssh_target.http_buffer_size = buffer_size;
         self
     }
 
@@ -227,6 +234,7 @@ impl FlUrl {
             self.execute_timeout,
             ssh_credentials,
             self.ssh_target.sessions_pool.as_ref(),
+            self.ssh_target.http_buffer_size,
         )
         .await?;
 

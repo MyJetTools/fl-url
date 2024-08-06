@@ -47,6 +47,7 @@ impl HttpClient {
         request_timeout: Duration,
         ssh_credentials: &std::sync::Arc<my_ssh::SshCredentials>,
         ssh_sessions_pool: Option<&std::sync::Arc<my_ssh::SshSessionsPool>>,
+        http_buffer_size: usize,
     ) -> Result<Self, FlUrlError> {
         let host_port = src.get_host_port();
 
@@ -66,6 +67,7 @@ impl HttpClient {
             host,
             port,
             request_timeout,
+            http_buffer_size,
         )
         .await?;
 

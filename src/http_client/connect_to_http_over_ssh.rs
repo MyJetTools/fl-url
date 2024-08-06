@@ -9,14 +9,13 @@ use crate::FlUrlError;
 
 use hyper::client::conn::http1::SendRequest;
 
-const BUFFER_SIZE: usize = 512 * 1024;
-
 pub async fn connect_to_http_over_ssh(
     ssh_credentials: &Arc<my_ssh::SshCredentials>,
     ssh_sessions_pool: Option<&Arc<my_ssh::SshSessionsPool>>,
     remote_host: &str,
     remote_port: u16,
     time_out: Duration,
+    buffer_size: usize,
 ) -> Result<(Arc<SshSession>, SendRequest<Full<Bytes>>), FlUrlError> {
     let ssh_session = if let Some(ssh_sessions_pool) = ssh_sessions_pool {
         ssh_sessions_pool.get_or_create(ssh_credentials).await
@@ -30,8 +29,8 @@ pub async fn connect_to_http_over_ssh(
         .await?;
 
     let buf_writer = tokio::io::BufWriter::with_capacity(
-        BUFFER_SIZE,
-        tokio::io::BufReader::with_capacity(BUFFER_SIZE, ssh_channel),
+        buffer_size,
+        tokio::io::BufReader::with_capacity(buffer_size, ssh_channel),
     );
 
     let io = TokioIo::new(buf_writer);
