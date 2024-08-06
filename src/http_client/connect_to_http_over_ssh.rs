@@ -19,8 +19,16 @@ pub async fn connect_to_http_over_ssh(
     buffer_size: usize,
 ) -> Result<(Arc<SshSession>, SendRequest<Full<Bytes>>), FlUrlError> {
     let ssh_session = if let Some(ssh_sessions_pool) = ssh_sessions_pool {
+        println!(
+            "Trying to reuse new remote http host: {}:{} over SSH",
+            remote_host, remote_port
+        );
         ssh_sessions_pool.get_or_create(ssh_credentials).await
     } else {
+        println!(
+            "Establishing new remote http host: {}:{} over SSH",
+            remote_host, remote_port
+        );
         Arc::new(SshSession::new(ssh_credentials.clone()))
     };
 
