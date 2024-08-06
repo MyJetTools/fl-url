@@ -48,7 +48,7 @@ pub async fn connect_to_http_over_ssh(
     let now = DateTimeAsMicroseconds::now();
     println!(
         "Http handshake took: {:?}",
-        now.duration_since(now).as_positive_or_zero()
+        now.duration_since(started).as_positive_or_zero()
     );
 
     let proxy_pass_uri = format!("{}:{}", host, port);
@@ -69,7 +69,7 @@ pub async fn connect_to_http_over_ssh(
     let now = DateTimeAsMicroseconds::now();
     println!(
         "Http connection be ready took: {:?}",
-        now.duration_since(now).as_positive_or_zero()
+        now.duration_since(started).as_positive_or_zero()
     );
     Ok((ssh_session, sender))
 }
