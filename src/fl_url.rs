@@ -272,6 +272,10 @@ impl FlUrl {
         self.execute(Method::POST, body).await
     }
 
+    pub async fn patch(self, body: Option<Vec<u8>>) -> Result<FlUrlResponse, FlUrlError> {
+        self.execute(Method::PATCH, body).await
+    }
+
     pub async fn post_json(self, json: impl serde::Serialize) -> Result<FlUrlResponse, FlUrlError> {
         let body = serde_json::to_vec(&json).unwrap();
 
