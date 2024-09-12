@@ -19,7 +19,7 @@ use my_tls::ROOT_CERT_STORE;
 pub async fn connect_to_tls_endpoint(
     host_port: &str,
     domain: &str,
-    client_certificate: Option<ClientCertificate>,
+    client_certificate: &Option<ClientCertificate>,
 ) -> Result<SendRequest<Full<Bytes>>, FlUrlError> {
     let connect_result = TcpStream::connect(host_port).await;
 
@@ -30,8 +30,11 @@ pub async fn connect_to_tls_endpoint(
 
             let client_config = if let Some(client_cert) = client_certificate {
                 let certified_key = client_cert.get_certified_key();
-                let result = config_builder
-                    .with_client_auth_cert(client_cert.cert_chain, client_cert.private_key);
+
+                let result = config_builder.with_client_auth_cert(
+                    client_cert.cert_chain.clone(),
+                    client_cert.private_key.clone_key(),
+                );
 
                 match result {
                     Ok(mut config) => {

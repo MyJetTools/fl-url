@@ -1,5 +1,6 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
+use rust_extensions::date_time::DateTimeAsMicroseconds;
 use tokio::sync::RwLock;
 
 use crate::{FlUrlError, HttpClient, UrlBuilder};
@@ -16,11 +17,12 @@ impl HttpClientsCache {
         }
     }
 
-    pub async fn get(
+    pub async fn get_and_reuse(
         &self,
         url_builder: &UrlBuilder,
         request_timeout: Duration,
-        client_certificate: Option<ClientCertificate>,
+        client_certificate: &Option<ClientCertificate>,
+        not_used_timeout: Duration,
     ) -> Result<Arc<HttpClient>, FlUrlError> {
         let schema_and_domain = url_builder.get_scheme_and_host();
 
@@ -29,7 +31,19 @@ impl HttpClientsCache {
         if let Some(existing_connection) =
             get_existing_connection(&mut write_access, schema_and_domain.as_str())
         {
-            return Ok(existing_connection);
+            let now = DateTimeAsMicroseconds::now();
+
+            if existing_connection
+                .last_accessed
+                .as_date_time()
+                .duration_since(now)
+                .as_positive_or_zero()
+                < not_used_timeout
+            {
+                existing_connection.last_accessed.update(now);
+                return Ok(existing_connection);
+            }
+            write_access.remove(schema_and_domain.as_str());
         }
 
         let new_one = HttpClient::new(url_builder, client_certificate, request_timeout).await?;

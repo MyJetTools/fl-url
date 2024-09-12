@@ -22,12 +22,16 @@ pub struct FlUrl {
     pub client_cert: Option<my_tls::ClientCertificate>,
     pub accept_invalid_certificate: bool,
     pub execute_timeout: Duration,
+    // If we are trying to reuse connection, but it was not used for this time, we will drop it
+    pub not_used_connection_timeout: Duration,
     pub do_not_reuse_connection: bool,
     pub clients_cache: Option<Arc<HttpClientsCache>>,
     #[cfg(feature = "with-ssh")]
     ssh_target: crate::ssh::SshTarget,
 
     pub drop_connection_scenario: Box<dyn DropConnectionScenario + Send + Sync + 'static>,
+    max_retries: usize,
+    retry_delay: Duration,
 }
 
 impl FlUrl {
@@ -45,6 +49,9 @@ impl FlUrl {
             do_not_reuse_connection: false,
             drop_connection_scenario: Box::new(crate::DefaultDropConnectionScenario),
             clients_cache: None,
+            not_used_connection_timeout: Duration::from_secs(30),
+            max_retries: 0,
+            retry_delay: Duration::from_secs(3),
             #[cfg(feature = "with-ssh")]
             ssh_target: crate::ssh::SshTarget {
                 credentials: None,
@@ -74,8 +81,19 @@ impl FlUrl {
             .set_ssh_credentials(Arc::new(over_ssh_config.ssh_credentials.unwrap()))
     }
 
+    pub fn set_not_used_connection_timeout(mut self, timeout: Duration) -> Self {
+        self.not_used_connection_timeout = timeout;
+        self
+    }
+
     pub fn with_clients_cache(mut self, clients_cache: Arc<HttpClientsCache>) -> Self {
         self.clients_cache = Some(clients_cache);
+        self
+    }
+
+    pub fn with_retries(mut self, max_retries: usize, retry_delay: Duration) -> Self {
+        self.max_retries = max_retries;
+        self.retry_delay = retry_delay;
         self
     }
 
@@ -188,8 +206,47 @@ impl FlUrl {
             .await
     }
 
-    async fn execute(
+    async fn execute_json_with_retries(
         self,
+        method: Method,
+        json: &impl serde::Serialize,
+    ) -> Result<FlUrlResponse, FlUrlError> {
+        let body = serde_json::to_vec(json).unwrap();
+
+        if self.max_retries > 0 {
+            return self
+                .with_header("Content-Type", "application/json")
+                .execute_with_retires(method, Some(body))
+                .await;
+        }
+        self.with_header("Content-Type", "application/json")
+            .execute(method, Some(body))
+            .await
+    }
+
+    async fn execute_with_retires(
+        &self,
+        method: Method,
+        body: Option<Vec<u8>>,
+    ) -> Result<FlUrlResponse, FlUrlError> {
+        let mut no = 0;
+        loop {
+            match self.execute(method.clone(), body.clone()).await {
+                Ok(response) => return Ok(response),
+                Err(e) => {
+                    if no >= self.max_retries {
+                        return Err(e);
+                    }
+                    tokio::time::sleep(self.retry_delay).await;
+                }
+            }
+
+            no += 1;
+        }
+    }
+
+    async fn execute(
+        &self,
         method: Method,
         body: Option<Vec<u8>>,
     ) -> Result<FlUrlResponse, FlUrlError> {
@@ -203,7 +260,8 @@ impl FlUrl {
         let scheme_and_host = self.url.get_scheme_and_host();
 
         if self.do_not_reuse_connection {
-            let client = HttpClient::new(&self.url, self.client_cert, self.execute_timeout).await?;
+            let client =
+                HttpClient::new(&self.url, &self.client_cert, self.execute_timeout).await?;
             return client
                 .execute_request(&self.url, method, &self.headers, body, self.execute_timeout)
                 .await;
@@ -212,7 +270,12 @@ impl FlUrl {
         let clients_cache = self.get_clients_cache();
 
         let client = clients_cache
-            .get(&self.url, self.execute_timeout, self.client_cert)
+            .get_and_reuse(
+                &self.url,
+                self.execute_timeout,
+                &self.client_cert,
+                self.not_used_connection_timeout,
+            )
             .await?;
 
         let result = client
@@ -264,7 +327,7 @@ impl FlUrl {
         return result;
     }
 
-    fn get_clients_cache(&self) -> Arc<HttpClientsCache> {
+    pub(crate) fn get_clients_cache(&self) -> Arc<HttpClientsCache> {
         match self.clients_cache.as_ref() {
             Some(cache) => cache.clone(),
             None => crate::CLIENTS_CACHED.clone(),
@@ -272,14 +335,23 @@ impl FlUrl {
     }
 
     pub async fn get(self) -> Result<FlUrlResponse, FlUrlError> {
+        if self.max_retries > 0 {
+            return self.execute_with_retires(Method::GET, None).await;
+        }
         self.execute(Method::GET, None).await
     }
 
     pub async fn head(self) -> Result<FlUrlResponse, FlUrlError> {
+        if self.max_retries > 0 {
+            return self.execute_with_retires(Method::HEAD, None).await;
+        }
         self.execute(Method::HEAD, None).await
     }
 
     pub async fn post(self, body: Option<Vec<u8>>) -> Result<FlUrlResponse, FlUrlError> {
+        if self.max_retries > 0 {
+            return self.execute_with_retires(Method::POST, body).await;
+        }
         self.execute(Method::POST, body).await
     }
 
@@ -287,10 +359,16 @@ impl FlUrl {
         self,
         json: &impl serde::Serialize,
     ) -> Result<FlUrlResponse, FlUrlError> {
+        if self.max_retries > 0 {
+            return self.execute_json_with_retries(Method::POST, json).await;
+        }
         self.execute_json(Method::POST, json).await
     }
 
     pub async fn patch(self, body: Option<Vec<u8>>) -> Result<FlUrlResponse, FlUrlError> {
+        if self.max_retries > 0 {
+            return self.execute_with_retires(Method::PATCH, body).await;
+        }
         self.execute(Method::PATCH, body).await
     }
 
@@ -298,18 +376,30 @@ impl FlUrl {
         self,
         json: &impl serde::Serialize,
     ) -> Result<FlUrlResponse, FlUrlError> {
+        if self.max_retries > 0 {
+            return self.execute_json_with_retries(Method::PATCH, json).await;
+        }
         self.execute_json(Method::PATCH, json).await
     }
 
     pub async fn put(self, body: Option<Vec<u8>>) -> Result<FlUrlResponse, FlUrlError> {
+        if self.max_retries > 0 {
+            return self.execute_with_retires(Method::PUT, body).await;
+        }
         self.execute(Method::PUT, body).await
     }
 
     pub async fn put_json(self, json: &impl serde::Serialize) -> Result<FlUrlResponse, FlUrlError> {
+        if self.max_retries > 0 {
+            return self.execute_json_with_retries(Method::PUT, json).await;
+        }
         self.execute_json(Method::PUT, json).await
     }
 
     pub async fn delete(self) -> Result<FlUrlResponse, FlUrlError> {
+        if self.max_retries > 0 {
+            return self.execute_with_retires(Method::DELETE, None).await;
+        }
         self.execute(Method::DELETE, None).await
     }
 }

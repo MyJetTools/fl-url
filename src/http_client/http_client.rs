@@ -4,7 +4,10 @@ use bytes::Bytes;
 use http_body_util::Full;
 use hyper::{client::conn::http1::SendRequest, Method, Request, Uri};
 
-use rust_extensions::{date_time::DateTimeAsMicroseconds, MaybeShortString, StrOrString};
+use rust_extensions::{
+    date_time::{AtomicDateTimeAsMicroseconds, DateTimeAsMicroseconds},
+    MaybeShortString, StrOrString,
+};
 use tokio::sync::Mutex;
 
 use crate::{FlUrlError, FlUrlHeaders, FlUrlResponse, UrlBuilder, UrlBuilderOwned};
@@ -17,6 +20,7 @@ pub struct HttpClient {
     connection: Mutex<Option<SendRequest<Full<Bytes>>>>,
     pub created: DateTimeAsMicroseconds,
     disconnected: AtomicBool,
+    pub last_accessed: AtomicDateTimeAsMicroseconds,
 
     #[cfg(feature = "with-ssh")]
     _ssh_session: Option<std::sync::Arc<my_ssh::SshSession>>,
@@ -38,6 +42,7 @@ impl HttpClient {
             created: DateTimeAsMicroseconds::now(),
             disconnected: AtomicBool::new(false),
             _ssh_session: Some(ssh_session),
+            last_accessed: AtomicDateTimeAsMicroseconds::now(),
         }
     }
 
@@ -75,6 +80,7 @@ impl HttpClient {
             connection: Mutex::new(Some(connection)),
             created: DateTimeAsMicroseconds::now(),
             disconnected: AtomicBool::new(false),
+            last_accessed: AtomicDateTimeAsMicroseconds::now(),
             #[cfg(feature = "with-ssh")]
             _ssh_session: Some(ssh_session),
         };
@@ -84,7 +90,7 @@ impl HttpClient {
 
     pub async fn new(
         src: &UrlBuilder,
-        client_certificate: Option<ClientCertificate>,
+        client_certificate: &Option<ClientCertificate>,
         request_timeout: Duration,
     ) -> Result<Self, FlUrlError> {
         #[cfg(feature = "unix-socket")]
@@ -101,6 +107,7 @@ impl HttpClient {
                         connection: Mutex::new(Some(send_request)),
                         created: DateTimeAsMicroseconds::now(),
                         disconnected: AtomicBool::new(false),
+                        last_accessed: AtomicDateTimeAsMicroseconds::now(),
                         #[cfg(feature = "with-ssh")]
                         _ssh_session: None,
                     });
@@ -151,6 +158,7 @@ impl HttpClient {
             connection: Mutex::new(Some(connection)),
             created: DateTimeAsMicroseconds::now(),
             disconnected: AtomicBool::new(false),
+            last_accessed: AtomicDateTimeAsMicroseconds::now(),
             #[cfg(feature = "with-ssh")]
             _ssh_session: None,
         };
@@ -299,7 +307,7 @@ mod tests {
     async fn test_http_request() {
         let url_builder = UrlBuilder::new("http://google.com/".into());
 
-        let fl_url_client = HttpClient::new(&url_builder, None, REQUEST_TIMEOUT)
+        let fl_url_client = HttpClient::new(&url_builder, &None, REQUEST_TIMEOUT)
             .await
             .unwrap();
 
@@ -347,7 +355,7 @@ mod tests {
     async fn test_https_request() {
         let url_builder = UrlBuilder::new("https://trade-demo.yourfin.tech".into());
 
-        let fl_url_client = HttpClient::new(&url_builder, None, REQUEST_TIMEOUT)
+        let fl_url_client = HttpClient::new(&url_builder, &None, REQUEST_TIMEOUT)
             .await
             .unwrap();
 
