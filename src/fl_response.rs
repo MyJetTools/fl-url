@@ -1,13 +1,23 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Debug};
 
 use hyper::{body::Incoming, Response};
 use serde::de::DeserializeOwned;
 
 use crate::{FlUrlError, FlUrlReadingHeaderError, ResponseBody, UrlBuilderOwned};
+
 pub struct FlUrlResponse {
     pub url: UrlBuilderOwned,
     status_code: u16,
     response: ResponseBody,
+}
+
+impl Debug for FlUrlResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FlUrlResponse")
+            .field("url", &self.url)
+            .field("status_code", &self.status_code)
+            .finish()
+    }
 }
 
 impl FlUrlResponse {
