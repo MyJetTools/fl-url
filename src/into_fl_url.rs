@@ -22,9 +22,9 @@ pub trait IntoFlUrl {
     async fn get(self) -> Result<FlUrlResponse, FlUrlError>;
     async fn post(self, body: Option<Vec<u8>>) -> Result<FlUrlResponse, FlUrlError>;
     async fn put(self, body: Option<Vec<u8>>) -> Result<FlUrlResponse, FlUrlError>;
-    async fn post_json(
+    async fn post_json<'s, T: serde::Serialize + Send + Sync + 'static>(
         self,
-        json: impl serde::Serialize + Send + Sync + 'static,
+        json: &'s T,
     ) -> Result<FlUrlResponse, FlUrlError>;
     async fn delete(self) -> Result<FlUrlResponse, FlUrlError>;
     async fn head(self) -> Result<FlUrlResponse, FlUrlError>;
@@ -68,9 +68,9 @@ impl<'g> IntoFlUrl for &'g str {
         FlUrl::new(self).post(body).await
     }
 
-    async fn post_json(
+    async fn post_json<'s, T: serde::Serialize + Send + Sync + 'static>(
         self,
-        json: impl serde::Serialize + Send + Sync + 'static,
+        json: &'s T,
     ) -> Result<FlUrlResponse, FlUrlError> {
         FlUrl::new(self).post_json(json).await
     }
@@ -122,9 +122,9 @@ impl<'g> IntoFlUrl for &'g String {
         FlUrl::new(self).post(body).await
     }
 
-    async fn post_json(
+    async fn post_json<'s, T: serde::Serialize + Send + Sync + 'static>(
         self,
-        json: impl serde::Serialize + Send + Sync + 'static,
+        json: &'s T,
     ) -> Result<FlUrlResponse, FlUrlError> {
         FlUrl::new(self).post_json(json).await
     }
@@ -176,9 +176,9 @@ impl IntoFlUrl for String {
         FlUrl::new(self).post(body).await
     }
 
-    async fn post_json(
+    async fn post_json<'s, T: serde::Serialize + Send + Sync + 'static>(
         self,
-        json: impl serde::Serialize + Send + Sync + 'static,
+        json: &'s T,
     ) -> Result<FlUrlResponse, FlUrlError> {
         FlUrl::new(self).post_json(json).await
     }

@@ -180,9 +180,9 @@ impl FlUrl {
     async fn execute_json(
         self,
         method: Method,
-        json: impl serde::Serialize,
+        json: &impl serde::Serialize,
     ) -> Result<FlUrlResponse, FlUrlError> {
-        let body = serde_json::to_vec(&json).unwrap();
+        let body = serde_json::to_vec(json).unwrap();
         self.with_header("Content-Type", "application/json")
             .execute(method, Some(body))
             .await
@@ -283,7 +283,10 @@ impl FlUrl {
         self.execute(Method::POST, body).await
     }
 
-    pub async fn post_json(self, json: impl serde::Serialize) -> Result<FlUrlResponse, FlUrlError> {
+    pub async fn post_json(
+        self,
+        json: &impl serde::Serialize,
+    ) -> Result<FlUrlResponse, FlUrlError> {
         self.execute_json(Method::POST, json).await
     }
 
@@ -293,7 +296,7 @@ impl FlUrl {
 
     pub async fn patch_json(
         self,
-        json: impl serde::Serialize,
+        json: &impl serde::Serialize,
     ) -> Result<FlUrlResponse, FlUrlError> {
         self.execute_json(Method::PATCH, json).await
     }
@@ -302,7 +305,7 @@ impl FlUrl {
         self.execute(Method::PUT, body).await
     }
 
-    pub async fn put_json(self, json: impl serde::Serialize) -> Result<FlUrlResponse, FlUrlError> {
+    pub async fn put_json(self, json: &impl serde::Serialize) -> Result<FlUrlResponse, FlUrlError> {
         self.execute_json(Method::PUT, json).await
     }
 
