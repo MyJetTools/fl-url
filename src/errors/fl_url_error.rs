@@ -15,6 +15,16 @@ pub enum FlUrlError {
     #[cfg(feature = "with-ssh")]
     SshSessionError(my_ssh::SshSessionError),
 }
+
+impl FlUrlError {
+    pub fn is_hyper_canceled(&self) -> bool {
+        match self {
+            FlUrlError::HyperError(e) => e.is_canceled(),
+            _ => false,
+        }
+    }
+}
+
 #[cfg(feature = "with-ssh")]
 impl FlUrlError {
     pub fn is_ssh_session_error(&self) -> bool {

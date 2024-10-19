@@ -267,6 +267,11 @@ impl FlUrl {
                 .await;
         }
 
+        return self
+            .execute_with_cancel_retry(scheme_and_host, method, body)
+            .await;
+
+        /*
         let clients_cache = self.get_clients_cache();
 
         let client = clients_cache
@@ -293,6 +298,61 @@ impl FlUrl {
                 clients_cache.remove(scheme_and_host.as_str()).await;
                 return Err(err);
             }
+        }
+        */
+    }
+
+    async fn execute_with_cancel_retry(
+        &self,
+        scheme_and_host: ShortString,
+        method: Method,
+        body: Option<Vec<u8>>,
+    ) -> Result<FlUrlResponse, FlUrlError> {
+        let clients_cache = self.get_clients_cache();
+
+        let mut had_retry = false;
+
+        loop {
+            let client = clients_cache
+                .get_and_reuse(
+                    &self.url,
+                    self.execute_timeout,
+                    &self.client_cert,
+                    self.not_used_connection_timeout,
+                )
+                .await?;
+
+            let result = client
+                .execute_request(
+                    &self.url,
+                    method.clone(),
+                    &self.headers,
+                    body.clone(),
+                    self.execute_timeout,
+                )
+                .await;
+
+            match result {
+                Ok(result) => {
+                    if self.drop_connection_scenario.should_we_drop_it(&result) {
+                        clients_cache.remove(scheme_and_host.as_str()).await;
+                    }
+                    return Ok(result);
+                }
+                Err(err) => {
+                    clients_cache.remove(scheme_and_host.as_str()).await;
+
+                    if !err.is_hyper_canceled() {
+                        return Err(err);
+                    }
+
+                    if had_retry {
+                        return Err(err);
+                    }
+                }
+            }
+
+            had_retry = true;
         }
     }
 
