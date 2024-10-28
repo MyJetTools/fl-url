@@ -1,6 +1,6 @@
 [package]
 name = "flurl"
-version = "0.5.3"
+version = "0.5.4"
 authors = ["Andrey <amigin@gmail.com>"]
 edition = "2021"
 
@@ -30,7 +30,6 @@ bytes = "*"
 
 serde = { version = "*", features = ["derive"] }
 serde_json = { version = "*" }
-tokio-rustls = { version = "0.26.*", features = ["tls12"] }
 openssl = { version = "*" }
 
 my-ssh = { tag = "0.1.1", git = "https://github.com/MyJetTools/my-ssh.git", optional = true }

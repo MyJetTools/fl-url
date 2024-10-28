@@ -9,7 +9,7 @@ pub enum FlUrlError {
     ConnectionIsDead,
     InvalidHttp1HandShake(String),
     CanNotEstablishConnection(String),
-    ClientCertificateError(tokio_rustls::rustls::Error),
+    RustTlsError(my_tls::tokio_rustls::rustls::Error),
     CanNotConvertToUtf8(std::str::Utf8Error),
 
     #[cfg(feature = "with-ssh")]
@@ -22,6 +22,12 @@ impl FlUrlError {
             FlUrlError::HyperError(e) => e.is_canceled(),
             _ => false,
         }
+    }
+}
+
+impl From<my_tls::tokio_rustls::rustls::Error> for FlUrlError {
+    fn from(value: my_tls::tokio_rustls::rustls::Error) -> Self {
+        Self::RustTlsError(value)
     }
 }
 
