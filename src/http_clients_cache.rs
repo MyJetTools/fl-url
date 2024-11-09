@@ -123,7 +123,7 @@ impl HttpClientsCache {
         &self,
         url_builder: &UrlBuilder,
         ssh_credentials: &Arc<my_ssh::SshCredentials>,
-    ) -> Result<Arc<MyHttpClient<SshAsyncChannel, SshHttpConnector>>, FlUrlError> {
+    ) -> Result<Arc<MyHttpClient<my_ssh::SshAsyncChannel, SshHttpConnector>>, FlUrlError> {
         let remote_endpoint = url_builder.get_remote_endpoint();
 
         let mut write_access = self.inner.write().await;

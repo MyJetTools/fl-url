@@ -1,12 +1,8 @@
 mod http_connector;
 pub use http_connector::*;
 
-#[cfg(feature = "unix-socket")]
-mod connect_to_unix_socket;
 #[cfg(feature = "with-ssh")]
 mod ssh_connector;
-#[cfg(feature = "unix-socket")]
-pub use connect_to_unix_socket::*;
 
 #[cfg(feature = "with-ssh")]
 pub use ssh_connector::*;
