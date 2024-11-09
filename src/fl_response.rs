@@ -1,35 +1,40 @@
 use std::{collections::HashMap, fmt::Debug};
 
-use hyper::{body::Incoming, Response};
+use hyper::StatusCode;
 use serde::de::DeserializeOwned;
 
-use crate::{FlUrlError, FlUrlReadingHeaderError, ResponseBody, UrlBuilderOwned};
+use crate::{FlUrlError, FlUrlReadingHeaderError, ResponseBody, UrlBuilder};
 
 pub struct FlUrlResponse {
-    pub url: UrlBuilderOwned,
-    status_code: u16,
+    pub url: UrlBuilder,
+    status_code: StatusCode,
     response: ResponseBody,
 }
 
 impl Debug for FlUrlResponse {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FlUrlResponse")
-            .field("url", &self.url)
+            .field("url", &self.url.as_str())
             .field("status_code", &self.status_code)
             .finish()
     }
 }
 
 impl FlUrlResponse {
-    pub fn new(url: UrlBuilderOwned, response: Response<Incoming>) -> Self {
+    pub fn from_http1_response<
+        TStream: tokio::io::AsyncRead + tokio::io::AsyncWrite + Send + Sync + 'static,
+    >(
+        url: UrlBuilder,
+        response: my_http_client::http1::MyHttpResponse<TStream>,
+    ) -> Self {
         Self {
-            status_code: response.status().as_u16(),
-            response: ResponseBody::Incoming(response.into()),
+            status_code: response.status(),
+            response: ResponseBody::Hyper(Some(response.into_response())),
             url,
         }
     }
 
-    pub fn into_hyper_response(self) -> Response<Incoming> {
+    pub fn into_hyper_response(self) -> my_http_client::HyperResponse {
         self.response.into_hyper_response()
     }
 
@@ -76,6 +81,6 @@ impl FlUrlResponse {
     }
 
     pub fn get_status_code(&self) -> u16 {
-        self.status_code
+        self.status_code.as_u16()
     }
 }

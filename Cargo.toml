@@ -24,6 +24,8 @@ hyper-util = { version = "*", features = ["tokio"] }
 
 http-body-util = { version = "*" }
 
+my-http-client = { tag = "0.1.0", git = "https://github.com/MyJetTools/my-http-client.git" }
+
 lazy_static = "*"
 async-trait = "*"
 bytes = "*"
@@ -36,5 +38,4 @@ my-ssh = { tag = "0.1.1", git = "https://github.com/MyJetTools/my-ssh.git", opti
 
 webpki-roots = "*"
 webpki = "*"
-tower-service = "*"
 pem = "*"

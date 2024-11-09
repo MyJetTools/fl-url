@@ -1,19 +1,20 @@
+use bytes::Bytes;
+use http_body_util::Full;
+
 use hyper::Method;
 
-use rust_extensions::ShortString;
+use my_http_client::http1::MyHttpClient;
 use rust_extensions::StrOrString;
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use super::FlUrlResponse;
-use crate::DropConnectionScenario;
 use crate::HttpClientsCache;
 
 use crate::FlUrlError;
 
 use crate::FlUrlHeaders;
-use crate::HttpClient;
 use crate::UrlBuilder;
 
 pub struct FlUrl {
@@ -24,12 +25,13 @@ pub struct FlUrl {
     pub execute_timeout: Duration,
     // If we are trying to reuse connection, but it was not used for this time, we will drop it
     pub not_used_connection_timeout: Duration,
+    pub request_timeout: Duration,
     pub do_not_reuse_connection: bool,
     pub clients_cache: Option<Arc<HttpClientsCache>>,
+    pub tls_server_name: Option<String>,
     #[cfg(feature = "with-ssh")]
     ssh_target: crate::ssh::SshTarget,
 
-    pub drop_connection_scenario: Box<dyn DropConnectionScenario + Send + Sync + 'static>,
     max_retries: usize,
     retry_delay: Duration,
 }
@@ -38,7 +40,28 @@ impl FlUrl {
     pub fn new<'s>(url: impl Into<StrOrString<'s>>) -> Self {
         let url: StrOrString<'s> = url.into();
 
-        let url = UrlBuilder::new(ShortString::from_str(url.as_str()).unwrap());
+        #[cfg(feature = "with-ssh")]
+        let (url, credentials) = {
+            let endpoint =
+                rust_extensions::remote_endpoint::RemoteEndpointHostString::try_parse(url.as_str())
+                    .unwrap();
+
+            match endpoint {
+                rust_extensions::remote_endpoint::RemoteEndpointHostString::Direct(
+                    _remote_endpoint,
+                ) => (UrlBuilder::new(url.as_str()), None),
+                rust_extensions::remote_endpoint::RemoteEndpointHostString::ViaSsh {
+                    ssh_remote_host,
+                    remote_host_behind_ssh,
+                } => (
+                    UrlBuilder::new(remote_host_behind_ssh.as_str()),
+                    Some(Arc::new(crate::ssh::to_ssh_credentials(&ssh_remote_host))),
+                ),
+            }
+        };
+
+        #[cfg(not(feature = "with-ssh"))]
+        let url = UrlBuilder::new(url.as_str());
 
         Self {
             headers: FlUrlHeaders::new(),
@@ -47,14 +70,15 @@ impl FlUrl {
             url,
             accept_invalid_certificate: false,
             do_not_reuse_connection: false,
-            drop_connection_scenario: Box::new(crate::DefaultDropConnectionScenario),
             clients_cache: None,
             not_used_connection_timeout: Duration::from_secs(30),
             max_retries: 0,
             retry_delay: Duration::from_secs(3),
+            request_timeout: Duration::from_secs(10),
+            tls_server_name: None,
             #[cfg(feature = "with-ssh")]
             ssh_target: crate::ssh::SshTarget {
-                credentials: None,
+                credentials,
                 sessions_pool: None,
                 http_buffer_size: 512 * 1024,
             },
@@ -97,6 +121,11 @@ impl FlUrl {
         self
     }
 
+    pub fn set_tls_server_name(mut self, domain: String) -> Self {
+        self.tls_server_name = Some(domain);
+        self
+    }
+
     #[cfg(feature = "with-ssh")]
     pub fn set_ssh_credentials(mut self, ssh_credentials: Arc<my_ssh::SshCredentials>) -> Self {
         self.ssh_target.credentials = Some(ssh_credentials);
@@ -117,19 +146,6 @@ impl FlUrl {
 
     pub fn set_timeout(mut self, timeout: Duration) -> Self {
         self.execute_timeout = timeout;
-        self
-    }
-    pub fn set_tls_domain(mut self, domain: impl Into<StrOrString<'static>>) -> Self {
-        let domain = domain.into();
-        self.url.tls_domain = Some(domain.to_string());
-        self
-    }
-
-    pub fn override_drop_connection_scenario(
-        mut self,
-        drop_connection_scenario: impl DropConnectionScenario + Send + Sync + 'static,
-    ) -> Self {
-        self.drop_connection_scenario = Box::new(drop_connection_scenario);
         self
     }
 
@@ -165,15 +181,16 @@ impl FlUrl {
         param_name: impl Into<StrOrString<'n>>,
         value: Option<impl Into<StrOrString<'v>>>,
     ) -> Self {
-        let param_name = param_name.into().to_string();
+        let param_name = param_name.into();
 
-        let value: Option<String> = if let Some(value) = value {
-            Some(value.into().to_string())
+        if let Some(value) = value {
+            let value = value.into();
+            self.url
+                .append_query_param(param_name.as_str(), Some(value.as_str()));
         } else {
-            None
+            self.url.append_query_param(param_name.as_str(), None);
         };
 
-        self.url.append_query_param(param_name, value);
         self
     }
 
@@ -191,200 +208,120 @@ impl FlUrl {
 
     pub fn append_raw_ending_to_url<'r>(mut self, raw: impl Into<StrOrString<'r>>) -> Self {
         let raw: StrOrString<'r> = raw.into();
-        self.url.append_raw_ending(raw.to_string());
+        self.url.append_raw_ending(raw.as_str());
         self
     }
 
-    async fn execute_json(
-        self,
-        method: Method,
-        json: &impl serde::Serialize,
-    ) -> Result<FlUrlResponse, FlUrlError> {
-        let body = serde_json::to_vec(json).unwrap();
-        self.with_header("Content-Type", "application/json")
-            .execute(method, Some(body))
-            .await
-    }
-
-    async fn execute_json_with_retries(
-        self,
-        method: Method,
-        json: &impl serde::Serialize,
-    ) -> Result<FlUrlResponse, FlUrlError> {
-        let body = serde_json::to_vec(json).unwrap();
-
-        if self.max_retries > 0 {
-            return self
-                .with_header("Content-Type", "application/json")
-                .execute_with_retires(method, Some(body))
-                .await;
-        }
-        self.with_header("Content-Type", "application/json")
-            .execute(method, Some(body))
-            .await
-    }
-
-    async fn execute_with_retires(
-        &self,
-        method: Method,
-        body: Option<Vec<u8>>,
-    ) -> Result<FlUrlResponse, FlUrlError> {
-        let mut no = 0;
-        loop {
-            match self.execute(method.clone(), body.clone()).await {
-                Ok(response) => return Ok(response),
-                Err(e) => {
-                    if no >= self.max_retries {
-                        return Err(e);
-                    }
-                    tokio::time::sleep(self.retry_delay).await;
-                }
-            }
-
-            no += 1;
-        }
-    }
-
     async fn execute(
-        &self,
-        method: Method,
-        body: Option<Vec<u8>>,
+        mut self,
+        request: hyper::Request<Full<Bytes>>,
     ) -> Result<FlUrlResponse, FlUrlError> {
         #[cfg(feature = "with-ssh")]
         {
-            if let Some(ssh_credentials) = &self.ssh_target.credentials {
-                return self.execute_with_ssh(method, body, ssh_credentials).await;
+            if let Some(ssh_credentials) = self.ssh_target.credentials.clone() {
+                return self.execute_with_ssh(request, ssh_credentials).await;
             }
         }
 
-        let scheme_and_host = self.url.get_scheme_and_host();
+        let response = match self.url.get_scheme() {
+            crate::Scheme::Http => {
+                if self.do_not_reuse_connection {
+                    let remote_endpoint = self.url.get_remote_endpoint();
+                    let http_connector =
+                        crate::http_connectors::HttpConnector::new(remote_endpoint.to_owned());
+                    let client = MyHttpClient::new(http_connector);
+                    let response = client.do_request(request, self.request_timeout).await?;
+                    FlUrlResponse::from_http1_response(self.url, response)
+                } else {
+                    let reused_connection = self
+                        .get_clients_cache()
+                        .get_http_and_reuse(&self.url)
+                        .await?;
 
-        if self.do_not_reuse_connection {
-            let client =
-                HttpClient::new(&self.url, &self.client_cert, self.execute_timeout).await?;
-            return client
-                .execute_request(&self.url, method, &self.headers, body, self.execute_timeout)
-                .await;
-        }
-
-        return self
-            .execute_with_cancel_retry(scheme_and_host, method, body)
-            .await;
-
-        /*
-        let clients_cache = self.get_clients_cache();
-
-        let client = clients_cache
-            .get_and_reuse(
-                &self.url,
-                self.execute_timeout,
-                &self.client_cert,
-                self.not_used_connection_timeout,
-            )
-            .await?;
-
-        let result = client
-            .execute_request(&self.url, method, &self.headers, body, self.execute_timeout)
-            .await;
-
-        match result {
-            Ok(result) => {
-                if self.drop_connection_scenario.should_we_drop_it(&result) {
-                    clients_cache.remove(scheme_and_host.as_str()).await;
-                }
-                return Ok(result);
-            }
-            Err(err) => {
-                clients_cache.remove(scheme_and_host.as_str()).await;
-                return Err(err);
-            }
-        }
-        */
-    }
-
-    async fn execute_with_cancel_retry(
-        &self,
-        scheme_and_host: ShortString,
-        method: Method,
-        body: Option<Vec<u8>>,
-    ) -> Result<FlUrlResponse, FlUrlError> {
-        let clients_cache = self.get_clients_cache();
-
-        let mut had_retry = false;
-
-        loop {
-            let client = clients_cache
-                .get_and_reuse(
-                    &self.url,
-                    self.execute_timeout,
-                    &self.client_cert,
-                    self.not_used_connection_timeout,
-                )
-                .await?;
-
-            let result = client
-                .execute_request(
-                    &self.url,
-                    method.clone(),
-                    &self.headers,
-                    body.clone(),
-                    self.execute_timeout,
-                )
-                .await;
-
-            match result {
-                Ok(result) => {
-                    if self.drop_connection_scenario.should_we_drop_it(&result) {
-                        clients_cache.remove(scheme_and_host.as_str()).await;
-                    }
-                    return Ok(result);
-                }
-                Err(err) => {
-                    clients_cache.remove(scheme_and_host.as_str()).await;
-
-                    if !err.is_hyper_canceled() {
-                        return Err(err);
-                    }
-
-                    if had_retry {
-                        return Err(err);
-                    }
+                    let response = reused_connection
+                        .do_request(request, self.request_timeout)
+                        .await?;
+                    FlUrlResponse::from_http1_response(self.url, response)
                 }
             }
+            crate::Scheme::Https => {
+                if self.do_not_reuse_connection {
+                    let http_connector = crate::http_connectors::HttpsConnector::new(
+                        self.url.get_remote_endpoint().to_owned(),
+                        self.tls_server_name.take(),
+                        self.client_cert.take(),
+                    );
+                    let client = MyHttpClient::new(http_connector);
+                    let response = client.do_request(request, self.request_timeout).await?;
+                    FlUrlResponse::from_http1_response(self.url, response)
+                } else {
+                    let reused_connection = self
+                        .get_clients_cache()
+                        .get_https_and_reuse(
+                            &self.url,
+                            self.tls_server_name.take(),
+                            self.client_cert.take(),
+                        )
+                        .await?;
 
-            had_retry = true;
-        }
+                    let response = reused_connection
+                        .do_request(request, self.request_timeout)
+                        .await?;
+
+                    FlUrlResponse::from_http1_response(self.url, response)
+                }
+            }
+            #[cfg(not(feature = "unix-socket"))]
+            crate::Scheme::UnixSocket => {
+                panic!("To use unix socket you need to enable unix-socket feature")
+            }
+
+            #[cfg(feature = "unix-socket")]
+            crate::Scheme::UnixSocket => {
+                if self.do_not_reuse_connection {
+                    let remote_endpoint = self.url.get_remote_endpoint();
+                    let http_connector = crate::http_connectors::UnixSocketConnector::new(
+                        remote_endpoint.to_owned(),
+                    );
+                    let client = MyHttpClient::new(http_connector);
+                    let response = client.do_request(request, self.request_timeout).await?;
+                    FlUrlResponse::from_http1_response(self.url, response)
+                } else {
+                    let reused_connection = self
+                        .get_clients_cache()
+                        .get_unix_socket_and_reuse(&self.url)
+                        .await?;
+
+                    let response = reused_connection
+                        .do_request(request, self.request_timeout)
+                        .await?;
+
+                    FlUrlResponse::from_http1_response(self.url, response)
+                }
+            }
+        };
+
+        Ok(response)
     }
 
     #[cfg(feature = "with-ssh")]
     async fn execute_with_ssh(
-        &self,
-        method: Method,
-        body: Option<Vec<u8>>,
-        ssh_credentials: &Arc<my_ssh::SshCredentials>,
+        self,
+        request: hyper::Request<Full<Bytes>>,
+        ssh_credentials: Arc<my_ssh::SshCredentials>,
     ) -> Result<FlUrlResponse, FlUrlError> {
-        let http_client = HttpClient::new_ssh(
-            &self.url,
-            self.execute_timeout,
-            ssh_credentials,
-            self.ssh_target.sessions_pool.as_ref(),
-            self.ssh_target.http_buffer_size,
-        )
-        .await?;
+        let reused_connection = self
+            .get_clients_cache()
+            .get_ssh_and_reuse(&self.url, &ssh_credentials)
+            .await?;
 
-        let result = http_client
-            .execute_request(&self.url, method, &self.headers, body, self.execute_timeout)
-            .await;
+        let response = reused_connection
+            .do_request(request, self.request_timeout)
+            .await?;
 
-        if result.is_err() {
-            println!("Http through ssh failed. Removing session from cache");
-            if let Some(session_cache) = &self.ssh_target.sessions_pool {
-                if let Some(ssh_credentials) = &self.ssh_target.credentials {
-                    session_cache.remove(ssh_credentials).await;
-                }
-            }
-        }
-        return result;
+        let result = FlUrlResponse::from_http1_response(self.url, response);
+
+        Ok(result)
     }
 
     pub(crate) fn get_clients_cache(&self) -> Arc<HttpClientsCache> {
@@ -394,72 +331,84 @@ impl FlUrl {
         }
     }
 
-    pub async fn get(self) -> Result<FlUrlResponse, FlUrlError> {
-        if self.max_retries > 0 {
-            return self.execute_with_retires(Method::GET, None).await;
+    fn compile_request(
+        &self,
+        method: Method,
+        body: Option<Vec<u8>>,
+    ) -> hyper::Request<Full<Bytes>> {
+        let mut request = hyper::Request::builder()
+            .method(method)
+            .uri(self.url.to_string());
+
+        for header in self.headers.iter() {
+            request = request.header(header.name.as_str(), header.value.as_str());
         }
-        self.execute(Method::GET, None).await
+
+        match body {
+            Some(body) => request.body(Full::from(Bytes::from(body))).unwrap(),
+            None => {
+                let body = Bytes::from(vec![]);
+                request.body(Full::from(body)).unwrap()
+            }
+        }
+    }
+
+    pub async fn get(self) -> Result<FlUrlResponse, FlUrlError> {
+        let request = self.compile_request(Method::GET, None);
+        self.execute(request).await
     }
 
     pub async fn head(self) -> Result<FlUrlResponse, FlUrlError> {
-        if self.max_retries > 0 {
-            return self.execute_with_retires(Method::HEAD, None).await;
-        }
-        self.execute(Method::HEAD, None).await
+        let request = self.compile_request(Method::HEAD, None);
+        self.execute(request).await
     }
 
     pub async fn post(self, body: Option<Vec<u8>>) -> Result<FlUrlResponse, FlUrlError> {
-        if self.max_retries > 0 {
-            return self.execute_with_retires(Method::POST, body).await;
-        }
-        self.execute(Method::POST, body).await
+        let request = self.compile_request(Method::HEAD, body);
+        self.execute(request).await
     }
 
     pub async fn post_json(
         self,
         json: &impl serde::Serialize,
     ) -> Result<FlUrlResponse, FlUrlError> {
-        if self.max_retries > 0 {
-            return self.execute_json_with_retries(Method::POST, json).await;
-        }
-        self.execute_json(Method::POST, json).await
+        let body = serde_json::to_vec(json).unwrap();
+        let fl_url = self.with_header("Content-Type", "application/json");
+        let request = fl_url.compile_request(Method::POST, Some(body));
+
+        fl_url.execute(request).await
     }
 
     pub async fn patch(self, body: Option<Vec<u8>>) -> Result<FlUrlResponse, FlUrlError> {
-        if self.max_retries > 0 {
-            return self.execute_with_retires(Method::PATCH, body).await;
-        }
-        self.execute(Method::PATCH, body).await
+        let request = self.compile_request(Method::PATCH, body);
+        self.execute(request).await
     }
 
     pub async fn patch_json(
         self,
         json: &impl serde::Serialize,
     ) -> Result<FlUrlResponse, FlUrlError> {
-        if self.max_retries > 0 {
-            return self.execute_json_with_retries(Method::PATCH, json).await;
-        }
-        self.execute_json(Method::PATCH, json).await
+        let body = serde_json::to_vec(json).unwrap();
+        let fl_url = self.with_header("Content-Type", "application/json");
+        let request = fl_url.compile_request(Method::PATCH, Some(body));
+
+        fl_url.execute(request).await
     }
 
     pub async fn put(self, body: Option<Vec<u8>>) -> Result<FlUrlResponse, FlUrlError> {
-        if self.max_retries > 0 {
-            return self.execute_with_retires(Method::PUT, body).await;
-        }
-        self.execute(Method::PUT, body).await
+        let request = self.compile_request(Method::PUT, body);
+        self.execute(request).await
     }
 
     pub async fn put_json(self, json: &impl serde::Serialize) -> Result<FlUrlResponse, FlUrlError> {
-        if self.max_retries > 0 {
-            return self.execute_json_with_retries(Method::PUT, json).await;
-        }
-        self.execute_json(Method::PUT, json).await
+        let body = serde_json::to_vec(json).unwrap();
+        let fl_url = self.with_header("Content-Type", "application/json");
+        let request = fl_url.compile_request(Method::PUT, Some(body));
+        fl_url.execute(request).await
     }
 
     pub async fn delete(self) -> Result<FlUrlResponse, FlUrlError> {
-        if self.max_retries > 0 {
-            return self.execute_with_retires(Method::DELETE, None).await;
-        }
-        self.execute(Method::DELETE, None).await
+        let request = self.compile_request(Method::GET, None);
+        self.execute(request).await
     }
 }

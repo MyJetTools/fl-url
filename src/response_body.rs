@@ -1,11 +1,12 @@
 use std::collections::HashMap;
 
-use hyper::{body::Incoming, HeaderMap, Response};
+use http_body_util::BodyExt;
+use hyper::HeaderMap;
 
 use crate::{FlUrlError, FlUrlReadingHeaderError};
 
 pub enum ResponseBody {
-    Incoming(Option<Response<Incoming>>),
+    Hyper(Option<my_http_client::HyperResponse>),
     Body {
         headers: HeaderMap,
         body: Option<Vec<u8>>,
@@ -13,18 +14,18 @@ pub enum ResponseBody {
 }
 
 impl ResponseBody {
-    pub fn as_incoming(&self) -> &Response<Incoming> {
+    pub fn as_hyper_response(&self) -> &my_http_client::HyperResponse {
         match &self {
-            Self::Incoming(response) => response.as_ref().unwrap(),
+            Self::Hyper(response) => response.as_ref().unwrap(),
             Self::Body { .. } => {
                 panic!("Body is already disposed");
             }
         }
     }
 
-    pub fn into_hyper_response(self) -> Response<Incoming> {
+    pub fn into_hyper_response(self) -> my_http_client::HyperResponse {
         match self {
-            Self::Incoming(response) => {
+            Self::Hyper(response) => {
                 let response = response.unwrap();
                 response
             }
@@ -36,7 +37,7 @@ impl ResponseBody {
 
     pub fn get_header(&self, header: &str) -> Result<Option<&str>, FlUrlReadingHeaderError> {
         match self {
-            Self::Incoming(response) => {
+            Self::Hyper(response) => {
                 let result = response.as_ref().unwrap().headers().get(header);
 
                 if result.is_none() {
@@ -58,7 +59,7 @@ impl ResponseBody {
         header: &str,
     ) -> Result<Option<&str>, FlUrlReadingHeaderError> {
         match self {
-            Self::Incoming(response) => {
+            Self::Hyper(response) => {
                 for (name, value) in response.as_ref().unwrap().headers().iter() {
                     if rust_extensions::str_utils::compare_strings_case_insensitive(
                         name.as_str(),
@@ -82,7 +83,7 @@ impl ResponseBody {
         hash_map: &mut HashMap<&'s str, Option<&'s str>>,
     ) {
         match self {
-            ResponseBody::Incoming(incoming) => {
+            ResponseBody::Hyper(incoming) => {
                 if let Some(incoming) = incoming {
                     for (key, value) in incoming.headers() {
                         if let Ok(value) = value.to_str() {
@@ -106,7 +107,7 @@ impl ResponseBody {
         hash_map: &mut HashMap<String, Option<String>>,
     ) {
         match self {
-            ResponseBody::Incoming(incoming) => {
+            ResponseBody::Hyper(incoming) => {
                 if let Some(incoming) = incoming {
                     for (key, value) in incoming.headers() {
                         hash_map.insert(
@@ -137,12 +138,12 @@ impl ResponseBody {
 
     async fn convert_to_slice_if_needed(&mut self) -> Result<(), FlUrlError> {
         match self {
-            Self::Incoming(response) => {
+            Self::Hyper(response) => {
                 let response = response.take().unwrap();
 
                 let (parts, incoming) = response.into_parts();
 
-                let body = read_bytes(incoming).await?;
+                let body = body_to_vec(incoming).await?;
                 *self = Self::Body {
                     headers: parts.headers,
                     body: Some(body),
@@ -158,7 +159,7 @@ impl ResponseBody {
         self.convert_to_slice_if_needed().await?;
 
         match self {
-            ResponseBody::Incoming(_) => {
+            ResponseBody::Hyper(_) => {
                 panic!("Should not be here")
             }
             ResponseBody::Body { body, .. } => match body {
@@ -172,7 +173,7 @@ impl ResponseBody {
         self.convert_to_slice_if_needed().await?;
 
         match self {
-            ResponseBody::Incoming(_) => {
+            ResponseBody::Hyper(_) => {
                 panic!("Should not be here")
             }
             ResponseBody::Body { body, .. } => match body.take() {
@@ -183,12 +184,19 @@ impl ResponseBody {
     }
 }
 
-async fn read_bytes(
-    incoming: impl hyper::body::Body<Data = hyper::body::Bytes, Error = hyper::Error>,
+async fn body_to_vec(
+    body: http_body_util::combinators::BoxBody<bytes::Bytes, String>,
 ) -> Result<Vec<u8>, FlUrlError> {
-    use http_body_util::BodyExt;
+    let collected = body.collect().await;
 
-    let collected = incoming.collect().await?;
-    let bytes = collected.to_bytes();
-    Ok(bytes.into())
+    match collected {
+        Ok(bytes) => {
+            let bytes = bytes.to_bytes();
+            Ok(bytes.into())
+        }
+        Err(err) => {
+            let err = FlUrlError::ReadingHyperBodyError(err);
+            Err(err)
+        }
+    }
 }

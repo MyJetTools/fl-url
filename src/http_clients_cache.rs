@@ -1,85 +1,190 @@
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{collections::HashMap, sync::Arc};
 
-use rust_extensions::date_time::DateTimeAsMicroseconds;
-use tokio::sync::RwLock;
+use my_http_client::http1::MyHttpClient;
 
-use crate::{FlUrlError, HttpClient, UrlBuilder};
-use my_tls::ClientCertificate;
+use rust_extensions::{remote_endpoint::RemoteEndpoint, ShortString};
+
+use tokio::{net::TcpStream, sync::RwLock};
+
+use crate::{FlUrlError, UrlBuilder};
+use my_tls::{tokio_rustls::client::TlsStream, ClientCertificate};
+
+use crate::http_connectors::*;
+
+#[derive(Default)]
+pub struct HttpClientsCacheInner {
+    pub http: HashMap<String, Arc<MyHttpClient<TcpStream, HttpConnector>>>,
+    pub https: HashMap<String, Arc<MyHttpClient<TlsStream<TcpStream>, HttpsConnector>>>,
+    #[cfg(feature = "unix-socket")]
+    pub unix_socket: HashMap<String, Arc<MyHttpClient<UnixSocketStream, UnixSocketConnector>>>,
+    #[cfg(feature = "with-ssh")]
+    pub ssh: HashMap<String, Arc<MyHttpClient<my_ssh::SshAsyncChannel, SshHttpConnector>>>,
+}
 
 pub struct HttpClientsCache {
-    pub clients: RwLock<HashMap<String, Arc<HttpClient>>>,
+    pub inner: RwLock<HttpClientsCacheInner>,
 }
 
 impl HttpClientsCache {
     pub fn new() -> Self {
         Self {
-            clients: RwLock::new(HashMap::new()),
+            inner: RwLock::new(HttpClientsCacheInner::default()),
         }
     }
 
-    pub async fn get_and_reuse(
+    pub async fn get_http_and_reuse(
         &self,
         url_builder: &UrlBuilder,
-        request_timeout: Duration,
-        client_certificate: &Option<ClientCertificate>,
-        not_used_timeout: Duration,
-    ) -> Result<Arc<HttpClient>, FlUrlError> {
-        let schema_and_domain = url_builder.get_scheme_and_host();
+    ) -> Result<Arc<MyHttpClient<TcpStream, HttpConnector>>, FlUrlError> {
+        let remote_endpoint = url_builder.get_remote_endpoint();
 
-        let mut write_access = self.clients.write().await;
+        let mut write_access = self.inner.write().await;
 
-        if let Some(existing_connection) =
-            get_existing_connection(&mut write_access, schema_and_domain.as_str())
-        {
-            let now = DateTimeAsMicroseconds::now();
+        let hash_map_key = get_http_key(remote_endpoint);
 
-            if existing_connection
-                .last_accessed
-                .as_date_time()
-                .duration_since(now)
-                .as_positive_or_zero()
-                < not_used_timeout
-            {
-                existing_connection.last_accessed.update(now);
-                return Ok(existing_connection);
-            }
-            write_access.remove(schema_and_domain.as_str());
+        if let Some(existing_connection) = write_access.http.get(hash_map_key.as_str()) {
+            return Ok(existing_connection.clone());
         }
 
-        let new_one = HttpClient::new(url_builder, client_certificate, request_timeout).await?;
+        let connector = HttpConnector::new(remote_endpoint.to_owned());
+
+        let new_one = MyHttpClient::new(connector);
+
         let new_one = Arc::new(new_one);
 
-        write_access.insert(schema_and_domain.to_string(), new_one.clone());
+        write_access
+            .http
+            .insert(hash_map_key.to_string(), new_one.clone());
 
-        Ok(write_access
-            .get(schema_and_domain.as_str())
-            .cloned()
-            .unwrap())
+        Ok(new_one)
     }
 
-    pub async fn remove(&self, schema_domain: &str) {
-        let mut write_access = self.clients.write().await;
-        write_access.remove(schema_domain);
+    pub async fn get_https_and_reuse(
+        &self,
+        url_builder: &UrlBuilder,
+        domain_override: Option<String>,
+        client_certificate: Option<ClientCertificate>,
+    ) -> Result<Arc<MyHttpClient<TlsStream<TcpStream>, HttpsConnector>>, FlUrlError> {
+        let remote_endpoint = url_builder.get_remote_endpoint();
+
+        let mut write_access = self.inner.write().await;
+
+        let hash_map_key = get_https_key(remote_endpoint);
+
+        if let Some(existing_connection) = write_access.https.get(hash_map_key.as_str()) {
+            return Ok(existing_connection.clone());
+        }
+
+        let connector = HttpsConnector::new(
+            remote_endpoint.to_owned(),
+            domain_override,
+            client_certificate,
+        );
+        let new_one = MyHttpClient::new(connector);
+
+        let new_one = Arc::new(new_one);
+
+        write_access
+            .https
+            .insert(hash_map_key.to_string(), new_one.clone());
+
+        Ok(new_one)
+    }
+
+    #[cfg(feature = "unix-socket")]
+    pub async fn get_unix_socket_and_reuse(
+        &self,
+        url_builder: &UrlBuilder,
+    ) -> Result<Arc<MyHttpClient<UnixSocketStream, UnixSocketConnector>>, FlUrlError> {
+        let remote_endpoint = url_builder.get_remote_endpoint();
+
+        let mut write_access = self.inner.write().await;
+
+        let hash_map_key = get_unix_socket_key(remote_endpoint);
+
+        if let Some(existing_connection) = write_access.unix_socket.get(hash_map_key.as_str()) {
+            return Ok(existing_connection.clone());
+        }
+
+        let connector = UnixSocketConnector::new(remote_endpoint.to_owned());
+        let new_one = MyHttpClient::new(connector);
+
+        let new_one = Arc::new(new_one);
+
+        write_access
+            .unix_socket
+            .insert(hash_map_key.to_string(), new_one.clone());
+
+        Ok(new_one)
+    }
+
+    #[cfg(feature = "with-ssh")]
+    pub async fn get_ssh_and_reuse(
+        &self,
+        url_builder: &UrlBuilder,
+        ssh_credentials: &Arc<my_ssh::SshCredentials>,
+    ) -> Result<Arc<MyHttpClient<SshAsyncChannel, SshHttpConnector>>, FlUrlError> {
+        let remote_endpoint = url_builder.get_remote_endpoint();
+
+        let mut write_access = self.inner.write().await;
+
+        let hash_map_key = get_ssh_key(ssh_credentials, remote_endpoint);
+
+        if let Some(existing_connection) = write_access.ssh.get(hash_map_key.as_str()) {
+            return Ok(existing_connection.clone());
+        }
+
+        let ssh_session = crate::SSH_SESSIONS_POOL
+            .get_or_create(ssh_credentials)
+            .await;
+
+        let connector = SshHttpConnector {
+            ssh_session,
+            remote_host: remote_endpoint.to_owned(),
+        };
+        let new_one = MyHttpClient::new(connector);
+
+        let new_one = Arc::new(new_one);
+
+        write_access
+            .ssh
+            .insert(hash_map_key.to_string(), new_one.clone());
+
+        Ok(new_one)
     }
 }
 
-fn get_existing_connection(
-    connections: &mut HashMap<String, Arc<HttpClient>>,
-    schema_and_domain: &str,
-) -> Option<Arc<HttpClient>> {
-    let mut has_connection_disconnected = false;
+fn get_http_key(remote_endpoint: RemoteEndpoint) -> ShortString {
+    remote_endpoint.get_host_port(Some(80))
+}
 
-    if let Some(connection) = connections.get(schema_and_domain) {
-        if connection.is_disconnected() {
-            has_connection_disconnected = true;
-        } else {
-            return Some(connection.clone());
-        }
-    }
+fn get_https_key(remote_endpoint: RemoteEndpoint) -> ShortString {
+    remote_endpoint.get_host_port(Some(443))
+}
 
-    if has_connection_disconnected {
-        connections.remove(schema_and_domain);
-    }
+#[cfg(feature = "unix-socket")]
+fn get_unix_socket_key(remote_endpoint: RemoteEndpoint) -> ShortString {
+    ShortString::from_str(remote_endpoint.get_host()).unwrap()
+}
+#[cfg(feature = "with-ssh")]
+fn get_ssh_key(
+    ssh_credentials: &my_ssh::SshCredentials,
+    remote_endpoint: RemoteEndpoint,
+) -> ShortString {
+    let mut result = ShortString::new_empty();
 
-    None
+    result.push_str(ssh_credentials.get_user_name());
+    result.push('@');
+
+    let (host, port) = ssh_credentials.get_host_port();
+
+    result.push_str(host);
+    result.push(':');
+
+    result.push_str(port.to_string().as_str());
+
+    result.push_str("->");
+    result.push_str(remote_endpoint.get_host_port(None).as_str());
+
+    result
 }

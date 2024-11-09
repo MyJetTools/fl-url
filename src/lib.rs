@@ -24,8 +24,8 @@ pub extern crate hyper;
 mod response_body;
 pub use response_body::*;
 
-mod http_client;
-pub use http_client::*;
+mod http_connectors;
+
 mod errors;
 pub use errors::*;
 
@@ -42,4 +42,9 @@ pub extern crate my_ssh;
 
 lazy_static::lazy_static! {
     static ref CLIENTS_CACHED: Arc<HttpClientsCache> =  Arc::new(HttpClientsCache::new());
+}
+
+#[cfg(feature = "with-ssh")]
+lazy_static::lazy_static! {
+    static ref SSH_SESSIONS_POOL: Arc<my_ssh::SshSessionsPool> =  Arc::new(my_ssh::SshSessionsPool::new());
 }
