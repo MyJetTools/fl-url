@@ -1,6 +1,6 @@
 [package]
 name = "flurl"
-version = "0.5.3"
+version = "0.6.0"
 authors = ["Andrey <amigin@gmail.com>"]
 edition = "2021"
 
