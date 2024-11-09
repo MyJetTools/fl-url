@@ -48,3 +48,31 @@ lazy_static::lazy_static! {
 lazy_static::lazy_static! {
     static ref SSH_SESSIONS_POOL: Arc<my_ssh::SshSessionsPool> =  Arc::new(my_ssh::SshSessionsPool::new());
 }
+
+#[cfg(test)]
+mod tests {
+    use rust_extensions::StopWatch;
+
+    use crate::FlUrl;
+
+    #[tokio::test]
+    async fn test_google_com_request() {
+        let mut sw = StopWatch::new();
+        sw.start();
+        let mut fl_url_response = FlUrl::new("https://google.com").get().await.unwrap();
+
+        let _ = fl_url_response.body_as_str().await.unwrap();
+        println!("Status: {}", fl_url_response.get_status_code());
+        sw.pause();
+        println!("Elapsed: {}", sw.duration_as_string());
+
+        let mut sw = StopWatch::new();
+        sw.start();
+        let mut fl_url_response = FlUrl::new("https://google.com").get().await.unwrap();
+
+        let _ = fl_url_response.body_as_str().await.unwrap();
+        println!("Status: {}", fl_url_response.get_status_code());
+        sw.pause();
+        println!("Elapsed: {}", sw.duration_as_string());
+    }
+}
