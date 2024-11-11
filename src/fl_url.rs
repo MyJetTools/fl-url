@@ -336,7 +336,7 @@ impl FlUrl {
     #[cfg(feature = "with-ssh")]
     async fn execute_with_ssh(
         self,
-        request: hyper::Request<Full<Bytes>>,
+        request: MyHttpRequest,
         ssh_credentials: Arc<my_ssh::SshCredentials>,
     ) -> Result<FlUrlResponse, FlUrlError> {
         let reused_connection = self
