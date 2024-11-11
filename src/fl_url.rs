@@ -85,26 +85,6 @@ impl FlUrl {
         }
     }
 
-    /// Url can be: "http://localhost:8080" or "ssh://user:password@host:port->http://localhost:8080"
-    #[cfg(feature = "with-ssh")]
-    pub async fn new_with_maybe_ssh<'s>(
-        url: impl Into<StrOrString<'s>>,
-        ssh_credentials: Option<
-            &std::collections::HashMap<String, my_ssh::SshCredentialsSettingsModel>,
-        >,
-    ) -> Self {
-        let url = url.into();
-        let over_ssh_config =
-            my_ssh::OverSshConnectionSettings::parse(url.as_str(), ssh_credentials).await;
-
-        if over_ssh_config.ssh_credentials.is_none() {
-            return Self::new(url);
-        }
-
-        Self::new(over_ssh_config.remote_resource_string)
-            .set_ssh_credentials(Arc::new(over_ssh_config.ssh_credentials.unwrap()))
-    }
-
     pub fn set_not_used_connection_timeout(mut self, timeout: Duration) -> Self {
         self.not_used_connection_timeout = timeout;
         self
@@ -127,8 +107,47 @@ impl FlUrl {
     }
 
     #[cfg(feature = "with-ssh")]
-    pub fn set_ssh_credentials(mut self, ssh_credentials: Arc<my_ssh::SshCredentials>) -> Self {
-        self.ssh_target.credentials = Some(ssh_credentials);
+    pub fn set_ssh_password<'s>(mut self, password: impl Into<StrOrString<'s>>) -> Self {
+        let ssh_credentials = self.ssh_target.credentials.take();
+        if ssh_credentials.is_none() {
+            panic!("To specify ssh password you need to use ssh://user:password@host:port->http://localhost:8080 connection line");
+        }
+        let ssh_credentials = ssh_credentials.unwrap();
+
+        let (host, port) = ssh_credentials.get_host_port();
+
+        let password = password.into();
+
+        self.ssh_target.credentials = Some(Arc::new(my_ssh::SshCredentials::UserNameAndPassword {
+            ssh_remote_host: host.to_string(),
+            ssh_remote_port: port,
+            ssh_user_name: ssh_credentials.get_user_name().to_string(),
+            password: password.to_string(),
+        }));
+        self
+    }
+
+    #[cfg(feature = "with-ssh")]
+    pub fn set_ssh_private_key<'s>(
+        mut self,
+        private_key: String,
+        passphrase: Option<String>,
+    ) -> Self {
+        let ssh_credentials = self.ssh_target.credentials.take();
+        if ssh_credentials.is_none() {
+            panic!("To specify ssh password you need to use ssh://user:password@host:port->http://localhost:8080 connection line");
+        }
+        let ssh_credentials = ssh_credentials.unwrap();
+
+        let (host, port) = ssh_credentials.get_host_port();
+
+        self.ssh_target.credentials = Some(Arc::new(my_ssh::SshCredentials::PrivateKey {
+            ssh_remote_host: host.to_string(),
+            ssh_remote_port: port,
+            ssh_user_name: ssh_credentials.get_user_name().to_string(),
+            private_key,
+            passphrase,
+        }));
         self
     }
 
