@@ -1,9 +1,8 @@
-use bytes::Bytes;
-use http_body_util::Full;
-
 use hyper::Method;
 
+use hyper::Version;
 use my_http_client::http1::MyHttpClient;
+use my_http_client::http1::MyHttpRequest;
 use rust_extensions::StrOrString;
 
 use std::sync::Arc;
@@ -227,15 +226,15 @@ impl FlUrl {
         self
     }
 
-    pub fn with_header(
+    pub fn with_header<'n, 'v>(
         mut self,
-        name: impl Into<StrOrString<'static>>,
-        value: impl Into<StrOrString<'static>>,
+        name: impl Into<StrOrString<'n>>,
+        value: impl Into<StrOrString<'v>>,
     ) -> Self {
-        let name: StrOrString<'static> = name.into();
-        let value: StrOrString<'static> = value.into();
+        let name: StrOrString<'_> = name.into();
+        let value: StrOrString<'_> = value.into();
 
-        self.headers.add(name, value);
+        self.headers.add(name.as_str(), value.as_str());
         self
     }
 
@@ -245,10 +244,7 @@ impl FlUrl {
         self
     }
 
-    async fn execute(
-        mut self,
-        request: hyper::Request<Full<Bytes>>,
-    ) -> Result<FlUrlResponse, FlUrlError> {
+    async fn execute(mut self, request: MyHttpRequest) -> Result<FlUrlResponse, FlUrlError> {
         #[cfg(feature = "with-ssh")]
         {
             if let Some(ssh_credentials) = self.ssh_target.credentials.clone() {
@@ -364,95 +360,88 @@ impl FlUrl {
         }
     }
 
-    fn compile_request(
-        &self,
-        method: Method,
-        body: Option<Vec<u8>>,
-    ) -> hyper::Request<Full<Bytes>> {
-        let mut request = hyper::Request::builder()
-            .method(method)
-            .uri(self.url.to_string());
-
+    fn compile_request(&mut self, method: Method, body: Option<Vec<u8>>) -> MyHttpRequest {
         if !self.headers.has_host_header {
             if !self.url.host_is_ip() {
-                request = request.header(hyper::header::HOST, self.url.get_host());
+                self.headers
+                    .add(hyper::header::HOST.as_str(), self.url.get_host());
             }
         }
 
         if !self.headers.has_connection_header {
             if !self.do_not_reuse_connection {
-                request = request.header(hyper::header::CONNECTION, "keep-alive");
+                self.headers
+                    .add(hyper::header::CONNECTION.as_str(), "keep-alive");
             }
         }
 
-        for header in self.headers.iter() {
-            request = request.header(header.name.as_str(), header.value.as_str());
-        }
-
-        match body {
-            Some(body) => request.body(Full::from(Bytes::from(body))).unwrap(),
-            None => {
-                let body = Bytes::from(vec![]);
-                request.body(Full::from(body)).unwrap()
-            }
-        }
+        MyHttpRequest::new(
+            method,
+            self.url.get_path_and_query(),
+            Version::HTTP_11,
+            self.headers.get_builder(),
+            body.unwrap_or_default().into(),
+        )
     }
 
-    pub async fn get(self) -> Result<FlUrlResponse, FlUrlError> {
+    pub async fn get(mut self) -> Result<FlUrlResponse, FlUrlError> {
         let request = self.compile_request(Method::GET, None);
         self.execute(request).await
     }
 
-    pub async fn head(self) -> Result<FlUrlResponse, FlUrlError> {
+    pub async fn head(mut self) -> Result<FlUrlResponse, FlUrlError> {
         let request = self.compile_request(Method::HEAD, None);
         self.execute(request).await
     }
 
-    pub async fn post(self, body: Option<Vec<u8>>) -> Result<FlUrlResponse, FlUrlError> {
+    pub async fn post(mut self, body: Option<Vec<u8>>) -> Result<FlUrlResponse, FlUrlError> {
         let request = self.compile_request(Method::POST, body);
         self.execute(request).await
     }
 
     pub async fn post_json(
-        self,
+        mut self,
         json: &impl serde::Serialize,
     ) -> Result<FlUrlResponse, FlUrlError> {
         let body = serde_json::to_vec(json).unwrap();
-        let fl_url = self.with_header("Content-Type", "application/json");
-        let request = fl_url.compile_request(Method::POST, Some(body));
+        self.headers.add_json_content_type();
+        let request = self.compile_request(Method::POST, body.into());
 
-        fl_url.execute(request).await
+        self.execute(request).await
     }
 
-    pub async fn patch(self, body: Option<Vec<u8>>) -> Result<FlUrlResponse, FlUrlError> {
+    pub async fn patch(mut self, body: Option<Vec<u8>>) -> Result<FlUrlResponse, FlUrlError> {
         let request = self.compile_request(Method::PATCH, body);
         self.execute(request).await
     }
 
     pub async fn patch_json(
-        self,
+        mut self,
         json: &impl serde::Serialize,
     ) -> Result<FlUrlResponse, FlUrlError> {
         let body = serde_json::to_vec(json).unwrap();
-        let fl_url = self.with_header("Content-Type", "application/json");
-        let request = fl_url.compile_request(Method::PATCH, Some(body));
+        self.headers.add_json_content_type();
+        let request = self.compile_request(Method::PATCH, body.into());
 
-        fl_url.execute(request).await
+        self.execute(request).await
     }
 
-    pub async fn put(self, body: Option<Vec<u8>>) -> Result<FlUrlResponse, FlUrlError> {
+    pub async fn put(mut self, body: Option<Vec<u8>>) -> Result<FlUrlResponse, FlUrlError> {
         let request = self.compile_request(Method::PUT, body);
         self.execute(request).await
     }
 
-    pub async fn put_json(self, json: &impl serde::Serialize) -> Result<FlUrlResponse, FlUrlError> {
+    pub async fn put_json(
+        mut self,
+        json: &impl serde::Serialize,
+    ) -> Result<FlUrlResponse, FlUrlError> {
         let body = serde_json::to_vec(json).unwrap();
-        let fl_url = self.with_header("Content-Type", "application/json");
-        let request = fl_url.compile_request(Method::PUT, Some(body));
-        fl_url.execute(request).await
+        self.headers.add_json_content_type();
+        let request = self.compile_request(Method::PUT, body.into());
+        self.execute(request).await
     }
 
-    pub async fn delete(self) -> Result<FlUrlResponse, FlUrlError> {
+    pub async fn delete(mut self) -> Result<FlUrlResponse, FlUrlError> {
         let request = self.compile_request(Method::GET, None);
         self.execute(request).await
     }
