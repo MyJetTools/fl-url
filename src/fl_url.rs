@@ -61,7 +61,21 @@ impl FlUrl {
         };
 
         #[cfg(not(feature = "with-ssh"))]
-        let url = UrlBuilder::new(url.as_str());
+        let url = {
+            let endpoint =
+                rust_extensions::remote_endpoint::RemoteEndpointHostString::try_parse(url.as_str())
+                    .unwrap();
+
+            match endpoint {
+                rust_extensions::remote_endpoint::RemoteEndpointHostString::Direct(
+                    _remote_endpoint,
+                ) => UrlBuilder::new(url.as_str()),
+                rust_extensions::remote_endpoint::RemoteEndpointHostString::ViaSsh {
+                    ssh_remote_host: _,
+                    remote_host_behind_ssh: _,
+                } => panic!("To use ssh you need to enable with-ssh feature"),
+            }
+        };
 
         Self {
             headers: FlUrlHeaders::new(),
