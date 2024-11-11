@@ -227,15 +227,15 @@ impl FlUrl {
         self
     }
 
-    pub fn with_header<'v>(
+    pub fn with_header(
         mut self,
         name: impl Into<StrOrString<'static>>,
-        value: impl Into<StrOrString<'v>>,
+        value: impl Into<StrOrString<'static>>,
     ) -> Self {
         let name: StrOrString<'static> = name.into();
-        let value: StrOrString<'v> = value.into();
+        let value: StrOrString<'static> = value.into();
 
-        self.headers.add(name, value.to_string());
+        self.headers.add(name, value);
         self
     }
 
@@ -373,6 +373,18 @@ impl FlUrl {
             .method(method)
             .uri(self.url.to_string());
 
+        if !self.headers.has_host_header {
+            if !self.url.host_is_ip() {
+                request = request.header(hyper::header::HOST, self.url.get_host());
+            }
+        }
+
+        if !self.headers.has_connection_header {
+            if !self.do_not_reuse_connection {
+                request = request.header(hyper::header::CONNECTION, "keep-alive");
+            }
+        }
+
         for header in self.headers.iter() {
             request = request.header(header.name.as_str(), header.value.as_str());
         }
@@ -397,7 +409,7 @@ impl FlUrl {
     }
 
     pub async fn post(self, body: Option<Vec<u8>>) -> Result<FlUrlResponse, FlUrlError> {
-        let request = self.compile_request(Method::HEAD, body);
+        let request = self.compile_request(Method::POST, body);
         self.execute(request).await
     }
 

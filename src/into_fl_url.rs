@@ -11,10 +11,10 @@ pub trait IntoFlUrl {
         value: Option<impl Into<StrOrString<'v>>>,
     ) -> FlUrl;
 
-    fn with_header<'a>(
+    fn with_header(
         self,
         name: impl Into<StrOrString<'static>>,
-        value: impl Into<StrOrString<'a>>,
+        value: impl Into<StrOrString<'static>>,
     ) -> FlUrl;
 
     fn append_raw_ending_to_url<'s>(self, raw: impl Into<StrOrString<'s>>) -> FlUrl;
@@ -44,10 +44,10 @@ impl<'g> IntoFlUrl for &'g str {
         FlUrl::new(self).append_query_param(name, value)
     }
 
-    fn with_header<'a>(
+    fn with_header(
         self,
         name: impl Into<StrOrString<'static>>,
-        value: impl Into<StrOrString<'a>>,
+        value: impl Into<StrOrString<'static>>,
     ) -> FlUrl {
         FlUrl::new(self).with_header(name, value)
     }
@@ -98,10 +98,10 @@ impl<'g> IntoFlUrl for &'g String {
         FlUrl::new(self).append_query_param(name, value)
     }
 
-    fn with_header<'a>(
+    fn with_header(
         self,
         name: impl Into<StrOrString<'static>>,
-        value: impl Into<StrOrString<'a>>,
+        value: impl Into<StrOrString<'static>>,
     ) -> FlUrl {
         FlUrl::new(self).with_header(name, value)
     }
@@ -152,10 +152,10 @@ impl IntoFlUrl for String {
         FlUrl::new(self).append_query_param(name, value)
     }
 
-    fn with_header<'v>(
+    fn with_header(
         self,
         name: impl Into<StrOrString<'static>>,
-        value: impl Into<StrOrString<'v>>,
+        value: impl Into<StrOrString<'static>>,
     ) -> FlUrl {
         FlUrl::new(self).with_header(name, value)
     }

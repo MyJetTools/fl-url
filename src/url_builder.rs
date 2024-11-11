@@ -192,6 +192,10 @@ impl UrlBuilder {
 
         return &self.value[self.query_index..];
     }
+    pub fn host_is_ip(&self) -> bool {
+        let host = self.get_host();
+        host.chars().all(|c| c.is_numeric() || c == '.')
+    }
 
     pub fn get_path(&self) -> &str {
         if self.path_index == 0 {

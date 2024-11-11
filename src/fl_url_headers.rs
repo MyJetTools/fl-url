@@ -2,12 +2,13 @@ use rust_extensions::StrOrString;
 
 pub struct FlUrlHeader {
     pub name: StrOrString<'static>,
-    pub value: String,
+    pub value: StrOrString<'static>,
 }
 
 pub struct FlUrlHeaders {
     headers: Vec<FlUrlHeader>,
     pub has_host_header: bool,
+    pub has_connection_header: bool,
 }
 
 impl FlUrlHeaders {
@@ -15,6 +16,7 @@ impl FlUrlHeaders {
         Self {
             headers: Vec::new(),
             has_host_header: false,
+            has_connection_header: false,
         }
     }
 
@@ -24,9 +26,14 @@ impl FlUrlHeaders {
         })
     }
 
-    pub fn add(&mut self, name: StrOrString<'static>, value: String) {
+    pub fn add(&mut self, name: StrOrString<'static>, value: StrOrString<'static>) {
         if rust_extensions::str_utils::compare_strings_case_insensitive(name.as_str(), "host") {
             self.has_host_header = true;
+        }
+
+        if rust_extensions::str_utils::compare_strings_case_insensitive(name.as_str(), "connection")
+        {
+            self.has_connection_header = true;
         }
 
         match self.find_index(name.as_str()) {
