@@ -1,3 +1,5 @@
+use my_http_client::MyHttpClientError;
+
 #[derive(Debug)]
 pub enum FlUrlError {
     HyperError(hyper::Error),
@@ -11,9 +13,10 @@ pub enum FlUrlError {
     CanNotEstablishConnection(String),
     RustTlsError(my_tls::tokio_rustls::rustls::Error),
     CanNotConvertToUtf8(std::str::Utf8Error),
-
+    MyHttpClientError(my_http_client::MyHttpClientError),
     #[cfg(feature = "with-ssh")]
     SshSessionError(my_ssh::SshSessionError),
+    ReadingHyperBodyError(String),
 }
 
 impl FlUrlError {
@@ -28,6 +31,12 @@ impl FlUrlError {
 impl From<my_tls::tokio_rustls::rustls::Error> for FlUrlError {
     fn from(value: my_tls::tokio_rustls::rustls::Error) -> Self {
         Self::RustTlsError(value)
+    }
+}
+
+impl From<MyHttpClientError> for FlUrlError {
+    fn from(value: MyHttpClientError) -> Self {
+        Self::MyHttpClientError(value)
     }
 }
 

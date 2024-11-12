@@ -18,14 +18,14 @@ pub use fl_url::FlUrl;
 pub use http_clients_cache::*;
 pub use into_fl_url::*;
 pub use url_builder::*;
-mod url_builder_owned;
-pub use url_builder_owned::*;
+//mod url_builder_owned;
+//pub use url_builder_owned::*;
 pub extern crate hyper;
 mod response_body;
 pub use response_body::*;
 
-mod http_client;
-pub use http_client::*;
+mod http_connectors;
+
 mod errors;
 pub use errors::*;
 
