@@ -134,7 +134,7 @@ impl HttpClientsCache {
             return Ok(existing_connection.clone());
         }
 
-        let ssh_session = crate::SSH_SESSIONS_POOL
+        let ssh_session = my_ssh::SSH_SESSIONS_POOL
             .get_or_create(ssh_credentials)
             .await;
 

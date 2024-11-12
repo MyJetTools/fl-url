@@ -29,7 +29,7 @@ pub struct FlUrl {
     pub clients_cache: Option<Arc<HttpClientsCache>>,
     pub tls_server_name: Option<String>,
     #[cfg(feature = "with-ssh")]
-    ssh_target: crate::ssh::SshTarget,
+    ssh_credentials: Option<my_ssh::SshCredentials>,
 
     max_retries: usize,
     retry_delay: Duration,
@@ -54,7 +54,7 @@ impl FlUrl {
                     remote_host_behind_ssh,
                 } => (
                     UrlBuilder::new(remote_host_behind_ssh.as_str()),
-                    Some(Arc::new(crate::ssh::to_ssh_credentials(&ssh_remote_host))),
+                    Some(crate::ssh::to_ssh_credentials(&ssh_remote_host)),
                 ),
             }
         };
@@ -90,11 +90,7 @@ impl FlUrl {
             request_timeout: Duration::from_secs(10),
             tls_server_name: None,
             #[cfg(feature = "with-ssh")]
-            ssh_target: crate::ssh::SshTarget {
-                credentials,
-                sessions_pool: None,
-                http_buffer_size: 512 * 1024,
-            },
+            ssh_credentials: credentials,
         }
     }
 
@@ -121,7 +117,7 @@ impl FlUrl {
 
     #[cfg(feature = "with-ssh")]
     pub fn set_ssh_password<'s>(mut self, password: impl Into<StrOrString<'s>>) -> Self {
-        let ssh_credentials = self.ssh_target.credentials.take();
+        let ssh_credentials = self.ssh_credentials.take();
         if ssh_credentials.is_none() {
             panic!("To specify ssh password you need to use ssh://user:password@host:port->http://localhost:8080 connection line");
         }
@@ -131,12 +127,12 @@ impl FlUrl {
 
         let password = password.into();
 
-        self.ssh_target.credentials = Some(Arc::new(my_ssh::SshCredentials::UserNameAndPassword {
+        self.ssh_credentials = Some(my_ssh::SshCredentials::UserNameAndPassword {
             ssh_remote_host: host.to_string(),
             ssh_remote_port: port,
             ssh_user_name: ssh_credentials.get_user_name().to_string(),
             password: password.to_string(),
-        }));
+        });
         self
     }
 
@@ -146,7 +142,7 @@ impl FlUrl {
         private_key: String,
         passphrase: Option<String>,
     ) -> Self {
-        let ssh_credentials = self.ssh_target.credentials.take();
+        let ssh_credentials = self.ssh_credentials.take();
         if ssh_credentials.is_none() {
             panic!("To specify ssh password you need to use ssh://user:password@host:port->http://localhost:8080 connection line");
         }
@@ -154,25 +150,13 @@ impl FlUrl {
 
         let (host, port) = ssh_credentials.get_host_port();
 
-        self.ssh_target.credentials = Some(Arc::new(my_ssh::SshCredentials::PrivateKey {
+        self.ssh_credentials = Some(my_ssh::SshCredentials::PrivateKey {
             ssh_remote_host: host.to_string(),
             ssh_remote_port: port,
             ssh_user_name: ssh_credentials.get_user_name().to_string(),
             private_key,
             passphrase,
-        }));
-        self
-    }
-
-    #[cfg(feature = "with-ssh")]
-    pub fn set_ssh_sessions_pool(mut self, ssh_credentials: Arc<my_ssh::SshSessionsPool>) -> Self {
-        self.ssh_target.sessions_pool = Some(ssh_credentials);
-        self
-    }
-
-    #[cfg(feature = "with-ssh")]
-    pub fn set_http_buffer_size(mut self, buffer_size: usize) -> Self {
-        self.ssh_target.http_buffer_size = buffer_size;
+        });
         self
     }
 
@@ -247,7 +231,7 @@ impl FlUrl {
     async fn execute(mut self, request: MyHttpRequest) -> Result<FlUrlResponse, FlUrlError> {
         #[cfg(feature = "with-ssh")]
         {
-            if let Some(ssh_credentials) = self.ssh_target.credentials.clone() {
+            if let Some(ssh_credentials) = self.ssh_credentials.take() {
                 return self.execute_with_ssh(request, ssh_credentials).await;
             }
         }
@@ -337,11 +321,11 @@ impl FlUrl {
     async fn execute_with_ssh(
         self,
         request: MyHttpRequest,
-        ssh_credentials: Arc<my_ssh::SshCredentials>,
+        ssh_credentials: my_ssh::SshCredentials,
     ) -> Result<FlUrlResponse, FlUrlError> {
         let reused_connection = self
             .get_clients_cache()
-            .get_ssh_and_reuse(&self.url, &ssh_credentials)
+            .get_ssh_and_reuse(&self.url, &Arc::new(ssh_credentials))
             .await?;
 
         let response = reused_connection

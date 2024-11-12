@@ -43,8 +43,3 @@ pub extern crate my_ssh;
 lazy_static::lazy_static! {
     static ref CLIENTS_CACHED: Arc<HttpClientsCache> =  Arc::new(HttpClientsCache::new());
 }
-
-#[cfg(feature = "with-ssh")]
-lazy_static::lazy_static! {
-    static ref SSH_SESSIONS_POOL: Arc<my_ssh::SshSessionsPool> =  Arc::new(my_ssh::SshSessionsPool::new());
-}
