@@ -1,26 +1,13 @@
 use std::collections::HashMap;
 
 use lazy_static::lazy_static;
+use rust_extensions::StrOrString;
 
-pub fn parse_query_string(result: &mut HashMap<String, String>, query_string: &str) {
-    let elements = query_string.split("&");
-
-    for el in elements {
-        let kv = el.find('=');
-
-        if let Some(index) = kv {
-            let key = decode_from_url_string(&el[..index]);
-            let value = decode_from_url_string(&el[index + 1..]);
-            result.insert(key, value);
-        }
-    }
-}
-
-pub fn decode_from_url_string(src: &str) -> String {
+pub fn decode_from_url_string(src: &str) -> StrOrString {
     let index = src.find("%");
 
     if index.is_none() {
-        return src.to_string();
+        return StrOrString::create_as_str(src);
     }
 
     let mut result: Vec<u8> = Vec::new();
@@ -54,7 +41,7 @@ pub fn decode_from_url_string(src: &str) -> String {
         }
     }
 
-    return String::from_utf8(result).unwrap();
+    return StrOrString::create_as_string(String::from_utf8(result).unwrap());
 }
 
 pub fn decode_url_escape(s0: u8, s1: u8) -> u8 {
@@ -189,7 +176,7 @@ mod tests {
         let result = super::decode_from_url_string(src);
 
         assert_eq!(
-            result,
+            result.as_str(),
             "4/0AeaYSHA_pv6LYFSy9QdDASiSdr4X53iOaoo9ZJotKi536ELdyaLNqbsaQ0sjsTE9yuhhdQ"
         );
     }

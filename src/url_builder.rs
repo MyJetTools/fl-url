@@ -1,6 +1,6 @@
 use core::str;
 
-use rust_extensions::remote_endpoint::RemoteEndpoint;
+use rust_extensions::{remote_endpoint::RemoteEndpoint, StrOrString};
 
 use crate::{url_utils, Scheme};
 
@@ -208,6 +208,30 @@ impl UrlBuilder {
         &self.value[self.path_index..self.query_index]
     }
 
+    pub fn iter_query<'s>(
+        &'s self,
+    ) -> Option<impl Iterator<Item = (&'s str, Option<StrOrString<'s>>)>> {
+        if self.query_index == 0 {
+            return None;
+        }
+
+        let item = &self.value[self.query_index + 1..];
+
+        let result = item.split('&').map(|pair| {
+            let mut parts = pair.split('=');
+            let key = parts.next().unwrap();
+            match parts.next() {
+                None => (key, None),
+                Some(value) => {
+                    let value = url_utils::decode_from_url_string(value);
+                    (key, Some(value))
+                }
+            }
+        });
+
+        Some(result)
+    }
+
     pub fn as_str(&self) -> &str {
         &self.value
     }
@@ -358,6 +382,18 @@ mod tests {
             "?first=first_value&second=second_value",
             uri_builder.get_path_and_query()
         );
+
+        let mut query = uri_builder.iter_query().unwrap();
+
+        let (key, value) = query.next().unwrap();
+        assert_eq!("first", key);
+        assert_eq!("first_value", value.unwrap().as_str());
+
+        let (key, value) = query.next().unwrap();
+        assert_eq!("second", key);
+        assert_eq!("second_value", value.unwrap().as_str());
+
+        assert!(query.next().is_none());
     }
 
     #[test]
