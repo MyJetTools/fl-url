@@ -3,6 +3,7 @@ use hyper::Method;
 use hyper::Version;
 use my_http_client::http1::MyHttpClient;
 use my_http_client::http1::MyHttpRequest;
+use my_http_client::MyHttpClientError;
 use rust_extensions::StrOrString;
 
 use std::sync::Arc;
@@ -253,7 +254,9 @@ impl FlUrl {
 
                     let response = reused_connection
                         .do_request(request, self.request_timeout)
-                        .await?;
+                        .await;
+
+                    let response = self.handle_http_response(response).await?;
                     FlUrlResponse::from_http1_response(self.url, response)
                 }
             }
@@ -279,7 +282,8 @@ impl FlUrl {
 
                     let response = reused_connection
                         .do_request(request, self.request_timeout)
-                        .await?;
+                        .await;
+                    let response = self.handle_http_response(response).await?;
 
                     FlUrlResponse::from_http1_response(self.url, response)
                 }
@@ -307,7 +311,9 @@ impl FlUrl {
 
                     let response = reused_connection
                         .do_request(request, self.request_timeout)
-                        .await?;
+                        .await;
+
+                    let response = self.handle_http_response(response).await?;
 
                     FlUrlResponse::from_http1_response(self.url, response)
                 }
@@ -330,7 +336,8 @@ impl FlUrl {
 
         let response = reused_connection
             .do_request(request, self.request_timeout)
-            .await?;
+            .await;
+        let response = self.handle_http_response(response).await?;
 
         let result = FlUrlResponse::from_http1_response(self.url, response);
 
@@ -428,5 +435,20 @@ impl FlUrl {
     pub async fn delete(mut self) -> Result<FlUrlResponse, FlUrlError> {
         let request = self.compile_request(Method::GET, None);
         self.execute(request).await
+    }
+
+    async fn handle_http_response<TResult>(
+        &self,
+        result: Result<TResult, MyHttpClientError>,
+    ) -> Result<TResult, MyHttpClientError> {
+        match result {
+            Ok(result) => {
+                return Ok(result);
+            }
+            Err(err) => {
+                self.get_clients_cache().remove(&self.url).await;
+                Err(err)
+            }
+        }
     }
 }
