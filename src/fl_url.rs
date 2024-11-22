@@ -40,7 +40,6 @@ pub struct FlUrl {
     ssh_credentials: Option<my_ssh::SshCredentials>,
 
     max_retries: usize,
-    retry_delay: Duration,
 }
 
 impl FlUrl {
@@ -94,7 +93,6 @@ impl FlUrl {
             clients_cache: None,
             not_used_connection_timeout: Duration::from_secs(30),
             max_retries: 0,
-            retry_delay: Duration::from_secs(3),
             request_timeout: Duration::from_secs(10),
             tls_server_name: None,
             #[cfg(feature = "with-ssh")]
@@ -112,9 +110,8 @@ impl FlUrl {
         self
     }
 
-    pub fn with_retries(mut self, max_retries: usize, retry_delay: Duration) -> Self {
+    pub fn with_retries(mut self, max_retries: usize) -> Self {
         self.max_retries = max_retries;
-        self.retry_delay = retry_delay;
         self
     }
 
