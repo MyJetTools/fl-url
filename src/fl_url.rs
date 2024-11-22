@@ -435,7 +435,7 @@ impl FlUrl {
         let client_cert = self.client_cert.take();
 
         loop {
-            let reused_connection = http_client_resolver
+            let tcp_client = http_client_resolver
                 .get_http_client(
                     &self.url,
                     domain_override.as_ref(),
@@ -445,9 +445,7 @@ impl FlUrl {
                 )
                 .await;
 
-            let response = reused_connection
-                .do_request(request, self.request_timeout)
-                .await;
+            let response = tcp_client.do_request(request, self.request_timeout).await;
 
             match response {
                 Ok(response) => {
@@ -463,7 +461,7 @@ impl FlUrl {
                         )
                         .await;
 
-                    if self.max_retries >= attempt_no {
+                    if attempt_no >= self.max_retries {
                         return Err(FlUrlError::MyHttpClientError(err));
                     }
 
