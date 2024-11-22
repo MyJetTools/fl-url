@@ -24,7 +24,7 @@ hyper-util = { version = "*", features = ["tokio"] }
 
 http-body-util = { version = "*" }
 
-my-http-client = { tag = "0.1.1", git = "https://github.com/MyJetTools/my-http-client.git" }
+my-http-client = { tag = "0.1.2", git = "https://github.com/MyJetTools/my-http-client.git" }
 
 lazy_static = "*"
 async-trait = "*"
