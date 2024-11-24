@@ -8,7 +8,6 @@ pub enum FlUrlError {
     IoError(std::io::Error),
     HttpError(hyper::http::Error),
     HttpsInvalidDomainName,
-    ConnectionIsDead,
     InvalidHttp1HandShake(String),
     CanNotEstablishConnection(String),
     RustTlsError(my_tls::tokio_rustls::rustls::Error),
