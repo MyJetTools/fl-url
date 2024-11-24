@@ -82,7 +82,7 @@ impl HttpClientResolver<TlsStream<TcpStream>, HttpsConnector> for HttpClientsCac
         let remote_endpoint = url_builder.get_remote_endpoint();
         let hash_map_key = get_https_key(remote_endpoint);
         let mut write_access = self.inner.write().await;
-        write_access.http.remove(hash_map_key.as_str());
+        write_access.https.remove(hash_map_key.as_str());
     }
 }
 

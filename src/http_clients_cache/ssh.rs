@@ -85,7 +85,7 @@ impl HttpClientResolver<my_ssh::SshAsyncChannel, SshHttpConnector> for HttpClien
         let ssh_credentials = ssh_credentials.unwrap();
         let hash_map_key = get_ssh_key(ssh_credentials, remote_endpoint);
         let mut write_access = self.inner.write().await;
-        write_access.http.remove(hash_map_key.as_str());
+        write_access.ssh.remove(hash_map_key.as_str());
     }
 }
 

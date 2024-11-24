@@ -83,7 +83,7 @@ impl HttpClientResolver<UnixSocketStream, UnixSocketConnector> for HttpClientsCa
         let remote_endpoint = url_builder.get_remote_endpoint();
         let hash_map_key = get_unix_socket_key(remote_endpoint);
         let mut write_access = self.inner.write().await;
-        write_access.http.remove(hash_map_key.as_str());
+        write_access.unix_socket.remove(hash_map_key.as_str());
     }
 }
 
