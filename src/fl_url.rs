@@ -100,6 +100,11 @@ impl FlUrl {
         }
     }
 
+    #[cfg(feature = "with-ssh")]
+    pub fn via_ssh(&self) -> bool {
+        self.ssh_credentials.is_some()
+    }
+
     pub fn set_not_used_connection_timeout(mut self, timeout: Duration) -> Self {
         self.not_used_connection_timeout = timeout;
         self
