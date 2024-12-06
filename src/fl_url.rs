@@ -154,7 +154,7 @@ impl FlUrl {
     ) -> Self {
         let ssh_credentials = self.ssh_credentials.take();
         if ssh_credentials.is_none() {
-            panic!("To specify ssh password you need to use ssh://user:password@host:port->http://localhost:8080 connection line");
+            return self;
         }
         let ssh_credentials = ssh_credentials.unwrap();
 
@@ -166,6 +166,25 @@ impl FlUrl {
             ssh_user_name: ssh_credentials.get_user_name().to_string(),
             private_key,
             passphrase,
+        });
+        self
+    }
+
+    #[cfg(feature = "with-ssh")]
+    pub fn set_ssh_user_password<'s>(mut self, password: String) -> Self {
+        let ssh_credentials = self.ssh_credentials.take();
+        if ssh_credentials.is_none() {
+            return self;
+        }
+        let ssh_credentials = ssh_credentials.unwrap();
+
+        let (host, port) = ssh_credentials.get_host_port();
+
+        self.ssh_credentials = Some(my_ssh::SshCredentials::UserNameAndPassword {
+            ssh_remote_host: host.to_string(),
+            ssh_remote_port: port,
+            ssh_user_name: ssh_credentials.get_user_name().to_string(),
+            password,
         });
         self
     }
