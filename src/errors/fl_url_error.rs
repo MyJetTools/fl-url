@@ -25,6 +25,10 @@ impl FlUrlError {
             _ => false,
         }
     }
+
+    pub fn to_string(&self) -> String {
+        format!("{:?}", self)
+    }
 }
 
 impl From<my_tls::tokio_rustls::rustls::Error> for FlUrlError {
