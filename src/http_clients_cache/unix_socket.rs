@@ -1,12 +1,10 @@
 use std::sync::Arc;
 
-use crate::{
-    http_connectors::{UnixSocketConnector, UnixSocketStream},
-    UrlBuilder,
-};
+use crate::http_connectors::{UnixSocketConnector, UnixSocketStream};
 use my_http_client::http1::MyHttpClient;
 use my_tls::ClientCertificate;
 use rust_extensions::ShortString;
+use url_utils::UrlBuilder;
 
 use super::{HttpClientResolver, HttpClientsCache};
 

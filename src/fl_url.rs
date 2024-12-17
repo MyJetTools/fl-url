@@ -319,9 +319,8 @@ impl FlUrl {
             Scheme::UnixSocket => {
                 panic!("To use unix socket you need to enable unix-socket feature")
             }
-
             #[cfg(feature = "unix-socket")]
-            crate::Scheme::UnixSocket => {
+            Scheme::UnixSocket => {
                 if self.do_not_reuse_connection {
                     self.execute_with_retry::<UnixSocketStream, UnixSocketConnector, _>(
                         &request,

@@ -3,8 +3,9 @@ use std::sync::Arc;
 use my_http_client::http1::MyHttpClient;
 use my_tls::ClientCertificate;
 use rust_extensions::{remote_endpoint::RemoteEndpoint, ShortString};
+use url_utils::UrlBuilder;
 
-use crate::{http_connectors::SshHttpConnector, UrlBuilder};
+use crate::http_connectors::SshHttpConnector;
 
 use super::{HttpClientResolver, HttpClientsCache};
 
