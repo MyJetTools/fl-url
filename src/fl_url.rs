@@ -5,6 +5,7 @@ use my_http_client::http1::*;
 use my_http_client::MyHttpClientConnector;
 use my_tls::tokio_rustls::client::TlsStream;
 
+use rust_extensions::remote_endpoint::Scheme;
 use rust_extensions::StrOrString;
 
 use std::sync::Arc;
@@ -22,7 +23,7 @@ use crate::FlUrlError;
 
 use crate::FlUrlHeaders;
 
-use crate::UrlBuilder;
+use url_utils::UrlBuilder;
 
 pub struct FlUrl {
     pub url: UrlBuilder,
@@ -266,7 +267,14 @@ impl FlUrl {
         }
 
         let response = match self.url.get_scheme() {
-            crate::Scheme::Http => {
+            Scheme::Ws => {
+                panic!("WebSocket Ws scheme is not supported")
+            }
+
+            Scheme::Wss => {
+                panic!("WebSocket Wss scheme is not supported")
+            }
+            Scheme::Http => {
                 if self.do_not_reuse_connection {
                     self.execute_with_retry::<TcpStream, HttpConnector, _>(
                         &request,
@@ -286,7 +294,7 @@ impl FlUrl {
                     .await?
                 }
             }
-            crate::Scheme::Https => {
+            Scheme::Https => {
                 if self.do_not_reuse_connection {
                     self.execute_with_retry::<TlsStream<TcpStream>, HttpsConnector, _>(
                         &request,
@@ -308,7 +316,7 @@ impl FlUrl {
                 }
             }
             #[cfg(not(feature = "unix-socket"))]
-            crate::Scheme::UnixSocket => {
+            Scheme::UnixSocket => {
                 panic!("To use unix socket you need to enable unix-socket feature")
             }
 

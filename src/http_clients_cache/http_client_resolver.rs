@@ -2,8 +2,7 @@ use std::sync::Arc;
 
 use my_http_client::{http1::MyHttpClient, MyHttpClientConnector};
 use my_tls::ClientCertificate;
-
-use crate::UrlBuilder;
+use url_utils::UrlBuilder;
 
 #[async_trait::async_trait]
 pub trait HttpClientResolver<

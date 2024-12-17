@@ -2,8 +2,9 @@ use std::{collections::HashMap, fmt::Debug};
 
 use hyper::StatusCode;
 use serde::de::DeserializeOwned;
+use url_utils::UrlBuilder;
 
-use crate::{FlUrlError, FlUrlReadingHeaderError, ResponseBody, UrlBuilder};
+use crate::{FlUrlError, FlUrlReadingHeaderError, ResponseBody};
 
 pub struct FlUrlResponse {
     pub url: UrlBuilder,

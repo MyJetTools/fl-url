@@ -30,6 +30,8 @@ lazy_static = "*"
 async-trait = "*"
 bytes = "*"
 
+url-utils = { tag = "0.1.4", git = "https://github.com/MyJetTools/url-utils.git" }
+
 serde = { version = "*", features = ["derive"] }
 serde_json = { version = "*" }
 openssl = { version = "*" }

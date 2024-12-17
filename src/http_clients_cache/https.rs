@@ -4,8 +4,9 @@ use my_http_client::http1::MyHttpClient;
 use my_tls::{tokio_rustls::client::TlsStream, ClientCertificate};
 use rust_extensions::{remote_endpoint::RemoteEndpoint, ShortString};
 use tokio::net::TcpStream;
+use url_utils::UrlBuilder;
 
-use crate::{http_connectors::HttpsConnector, UrlBuilder};
+use crate::http_connectors::HttpsConnector;
 
 use super::{HttpClientResolver, HttpClientsCache};
 

@@ -1,7 +1,4 @@
-mod scheme;
 use std::sync::Arc;
-
-pub use scheme::*;
 
 mod fl_drop_connection_scenario;
 mod http_clients_cache;
@@ -11,13 +8,11 @@ pub use fl_drop_connection_scenario::*;
 mod fl_response;
 mod fl_url;
 mod into_fl_url;
-mod url_builder;
-pub mod url_utils;
+
 pub use fl_response::*;
 pub use fl_url::FlUrl;
 pub use http_clients_cache::*;
 pub use into_fl_url::*;
-pub use url_builder::*;
 //mod url_builder_owned;
 //pub use url_builder_owned::*;
 pub extern crate hyper;
