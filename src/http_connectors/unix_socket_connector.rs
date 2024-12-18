@@ -1,5 +1,5 @@
 use my_http_client::{MyHttpClientConnector, MyHttpClientError};
-use rust_extensions::{remote_endpoint::RemoteEndpointOwned, StrOrString};
+use rust_extensions::remote_endpoint::*;
 use tokio::net::{UnixSocket, UnixStream};
 
 pub type UnixSocketStream = tokio::net::UnixStream;
@@ -40,8 +40,8 @@ impl MyHttpClientConnector<UnixStream> for UnixSocketConnector {
             ),
         }
     }
-    fn get_remote_host(&self) -> StrOrString {
-        self.remote_host.as_str().into()
+    fn get_remote_endpoint(&self) -> RemoteEndpoint {
+        self.remote_host.to_ref()
     }
     fn is_debug(&self) -> bool {
         false

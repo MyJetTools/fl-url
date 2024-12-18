@@ -21,7 +21,7 @@ impl HttpClientResolver<UnixSocketStream, UnixSocketConnector> for UnixSocketHtt
         _client_certificate: Option<&ClientCertificate>,
         #[cfg(feature = "with-ssh")] _ssh_credentials: Option<&Arc<my_ssh::SshCredentials>>,
     ) -> Arc<MyHttpClient<UnixSocketStream, UnixSocketConnector>> {
-        let remote_endpoint = url_builder.get_remote_endpoint();
+        let remote_endpoint = url_builder.get_remote_endpoint(None);
         let connector = UnixSocketConnector::new(remote_endpoint.to_owned());
         let new_one = MyHttpClient::new(connector);
 
@@ -46,7 +46,7 @@ impl HttpClientResolver<UnixSocketStream, UnixSocketConnector> for HttpClientsCa
         client_certificate: Option<&ClientCertificate>,
         #[cfg(feature = "with-ssh")] ssh_credentials: Option<&Arc<my_ssh::SshCredentials>>,
     ) -> Arc<MyHttpClient<UnixSocketStream, UnixSocketConnector>> {
-        let remote_endpoint = url_builder.get_remote_endpoint();
+        let remote_endpoint = url_builder.get_remote_endpoint(None);
 
         let mut write_access = self.inner.write().await;
 
@@ -78,7 +78,7 @@ impl HttpClientResolver<UnixSocketStream, UnixSocketConnector> for HttpClientsCa
         url_builder: &UrlBuilder,
         #[cfg(feature = "with-ssh")] _ssh_credentials: Option<&Arc<my_ssh::SshCredentials>>,
     ) {
-        let remote_endpoint = url_builder.get_remote_endpoint();
+        let remote_endpoint = url_builder.get_remote_endpoint(None);
         let hash_map_key = get_unix_socket_key(remote_endpoint);
         let mut write_access = self.inner.write().await;
         write_access.unix_socket.remove(hash_map_key.as_str());

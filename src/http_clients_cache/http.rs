@@ -23,7 +23,7 @@ impl HttpClientResolver<TcpStream, HttpConnector> for HttpClientCreator {
         _client_certificate: Option<&ClientCertificate>,
         #[cfg(feature = "with-ssh")] _ssh_credentials: Option<&Arc<my_ssh::SshCredentials>>,
     ) -> Arc<MyHttpClient<TcpStream, HttpConnector>> {
-        let remote_endpoint = url_builder.get_remote_endpoint(HTTP_DEFAULT_PORT);
+        let remote_endpoint = url_builder.get_remote_endpoint(HTTP_DEFAULT_PORT.into());
         let http_connector = crate::http_connectors::HttpConnector::new(remote_endpoint.to_owned());
 
         Arc::new(MyHttpClient::new(http_connector))
@@ -46,7 +46,7 @@ impl HttpClientResolver<TcpStream, HttpConnector> for HttpClientsCache {
         client_certificate: Option<&ClientCertificate>,
         #[cfg(feature = "with-ssh")] ssh_credentials: Option<&Arc<my_ssh::SshCredentials>>,
     ) -> Arc<MyHttpClient<TcpStream, HttpConnector>> {
-        let remote_endpoint = url_builder.get_remote_endpoint(HTTP_DEFAULT_PORT);
+        let remote_endpoint = url_builder.get_remote_endpoint(HTTP_DEFAULT_PORT.into());
 
         let hash_map_key = get_http_key(remote_endpoint);
 
@@ -78,7 +78,7 @@ impl HttpClientResolver<TcpStream, HttpConnector> for HttpClientsCache {
         url_builder: &UrlBuilder,
         #[cfg(feature = "with-ssh")] _ssh_credentials: Option<&Arc<my_ssh::SshCredentials>>,
     ) {
-        let remote_endpoint = url_builder.get_remote_endpoint(HTTP_DEFAULT_PORT);
+        let remote_endpoint = url_builder.get_remote_endpoint(HTTP_DEFAULT_PORT.into());
         let hash_map_key = get_http_key(remote_endpoint);
         let mut write_access = self.inner.write().await;
         write_access.http.remove(hash_map_key.as_str());

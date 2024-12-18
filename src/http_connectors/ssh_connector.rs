@@ -2,7 +2,7 @@ use std::{sync::Arc, time::Duration};
 
 use my_http_client::{MyHttpClientConnector, MyHttpClientError};
 use my_ssh::{SshAsyncChannel, SshSession};
-use rust_extensions::{remote_endpoint::RemoteEndpointOwned, StrOrString};
+use rust_extensions::remote_endpoint::*;
 
 pub struct SshHttpConnector {
     pub ssh_session: Arc<SshSession>,
@@ -16,7 +16,7 @@ impl MyHttpClientConnector<SshAsyncChannel> for SshHttpConnector {
         if port.is_none() {
             panic!(
                 "Port is not defined in the remote endpoint {}",
-                self.remote_host.get_host_port(None)
+                self.remote_host.get_host_port()
             );
         }
 
@@ -41,15 +41,15 @@ impl MyHttpClientConnector<SshAsyncChannel> for SshHttpConnector {
                         ssh_credentials.get_user_name(),
                         ssh_host,
                         ssh_port,
-                        self.remote_host.get_host_port(None).as_str(),
+                        self.remote_host.get_host_port().as_str(),
                         err
                     )),
                 )
             }
         }
     }
-    fn get_remote_host(&self) -> StrOrString {
-        self.remote_host.as_str().into()
+    fn get_remote_endpoint(&self) -> RemoteEndpoint {
+        self.remote_host.to_ref()
     }
     fn is_debug(&self) -> bool {
         false
