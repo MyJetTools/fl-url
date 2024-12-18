@@ -25,7 +25,7 @@ impl HttpClientResolver<my_ssh::SshAsyncChannel, SshHttpConnector> for SshHttpCl
             .get_or_create(ssh_credentials)
             .await;
 
-        let remote_endpoint = url_builder.get_remote_endpoint(80); //todo!("Detect 80 or 443 according to schemes")
+        let remote_endpoint = url_builder.get_remote_endpoint(None);
 
         let connector = SshHttpConnector {
             ssh_session,
@@ -53,7 +53,7 @@ impl HttpClientResolver<my_ssh::SshAsyncChannel, SshHttpConnector> for HttpClien
         client_certificate: Option<&ClientCertificate>,
         ssh_credentials: Option<&Arc<my_ssh::SshCredentials>>,
     ) -> Arc<MyHttpClient<my_ssh::SshAsyncChannel, SshHttpConnector>> {
-        let remote_endpoint = url_builder.get_remote_endpoint(80); //todo!("Detect 80 or 443 according to schemes")
+        let remote_endpoint = url_builder.get_remote_endpoint(None);
         let hash_map_key = get_ssh_key(ssh_credentials.unwrap(), remote_endpoint);
         let mut write_access = self.inner.write().await;
 
@@ -82,7 +82,7 @@ impl HttpClientResolver<my_ssh::SshAsyncChannel, SshHttpConnector> for HttpClien
         url_builder: &UrlBuilder,
         ssh_credentials: Option<&Arc<my_ssh::SshCredentials>>,
     ) {
-        let remote_endpoint = url_builder.get_remote_endpoint(80); //todo!("Detect 80 or 443 according to schemes")
+        let remote_endpoint = url_builder.get_remote_endpoint(None);
         let ssh_credentials = ssh_credentials.unwrap();
         let hash_map_key = get_ssh_key(ssh_credentials, remote_endpoint);
         let mut write_access = self.inner.write().await;
