@@ -12,6 +12,8 @@ use super::{HttpClientResolver, HttpClientsCache};
 
 pub struct HttpsClientCreator;
 
+const HTTPS_DEFAULT_PORT: u16 = 443;
+
 #[async_trait::async_trait]
 impl HttpClientResolver<TlsStream<TcpStream>, HttpsConnector> for HttpsClientCreator {
     async fn get_http_client(
@@ -21,7 +23,7 @@ impl HttpClientResolver<TlsStream<TcpStream>, HttpsConnector> for HttpsClientCre
         client_certificate: Option<&ClientCertificate>,
         #[cfg(feature = "with-ssh")] _ssh_credentials: Option<&Arc<my_ssh::SshCredentials>>,
     ) -> Arc<MyHttpClient<TlsStream<TcpStream>, HttpsConnector>> {
-        let remote_endpoint = url_builder.get_remote_endpoint();
+        let remote_endpoint = url_builder.get_remote_endpoint(HTTPS_DEFAULT_PORT);
 
         let connector = HttpsConnector::new(
             remote_endpoint.to_owned(),
@@ -50,7 +52,7 @@ impl HttpClientResolver<TlsStream<TcpStream>, HttpsConnector> for HttpClientsCac
         client_certificate: Option<&ClientCertificate>,
         #[cfg(feature = "with-ssh")] ssh_credentials: Option<&Arc<my_ssh::SshCredentials>>,
     ) -> Arc<MyHttpClient<TlsStream<TcpStream>, HttpsConnector>> {
-        let remote_endpoint = url_builder.get_remote_endpoint();
+        let remote_endpoint = url_builder.get_remote_endpoint(HTTPS_DEFAULT_PORT);
         let hash_map_key = get_https_key(remote_endpoint);
         let mut write_access = self.inner.write().await;
 
@@ -80,7 +82,7 @@ impl HttpClientResolver<TlsStream<TcpStream>, HttpsConnector> for HttpClientsCac
         url_builder: &UrlBuilder,
         #[cfg(feature = "with-ssh")] _ssh_credentials: Option<&Arc<my_ssh::SshCredentials>>,
     ) {
-        let remote_endpoint = url_builder.get_remote_endpoint();
+        let remote_endpoint = url_builder.get_remote_endpoint(HTTPS_DEFAULT_PORT);
         let hash_map_key = get_https_key(remote_endpoint);
         let mut write_access = self.inner.write().await;
         write_access.https.remove(hash_map_key.as_str());
@@ -88,5 +90,5 @@ impl HttpClientResolver<TlsStream<TcpStream>, HttpsConnector> for HttpClientsCac
 }
 
 fn get_https_key(remote_endpoint: RemoteEndpoint) -> ShortString {
-    remote_endpoint.get_host_port(Some(443))
+    remote_endpoint.get_host_port()
 }

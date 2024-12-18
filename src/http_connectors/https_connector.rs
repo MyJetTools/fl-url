@@ -5,7 +5,7 @@ use my_tls::{
     tokio_rustls::{client::TlsStream, TlsConnector},
     ClientCertificate,
 };
-use rust_extensions::{remote_endpoint::RemoteEndpointOwned, StrOrString};
+use rust_extensions::remote_endpoint::{RemoteEndpoint, RemoteEndpointOwned};
 use tokio::net::TcpStream;
 
 pub struct HttpsConnector {
@@ -31,7 +31,7 @@ impl HttpsConnector {
 #[async_trait::async_trait]
 impl MyHttpClientConnector<TlsStream<TcpStream>> for HttpsConnector {
     async fn connect(&self) -> Result<TlsStream<TcpStream>, MyHttpClientError> {
-        let host_port = self.remote_host.get_host_port(Some(443));
+        let host_port = self.remote_host.get_host_port();
         let connect_result = TcpStream::connect(host_port.as_str()).await;
 
         if let Err(err) = &connect_result {
@@ -81,9 +81,10 @@ impl MyHttpClientConnector<TlsStream<TcpStream>> for HttpsConnector {
         }
     }
 
-    fn get_remote_host(&self) -> StrOrString {
-        self.remote_host.as_str().into()
+    fn get_remote_endpoint(&self) -> RemoteEndpoint {
+        self.remote_host.to_ref()
     }
+
     fn is_debug(&self) -> bool {
         false
     }

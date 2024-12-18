@@ -1,5 +1,5 @@
 use my_http_client::{MyHttpClientConnector, MyHttpClientError};
-use rust_extensions::{remote_endpoint::RemoteEndpointOwned, StrOrString};
+use rust_extensions::remote_endpoint::{RemoteEndpoint, RemoteEndpointOwned};
 use tokio::net::TcpStream;
 
 pub struct HttpConnector {
@@ -15,7 +15,7 @@ impl HttpConnector {
 #[async_trait::async_trait]
 impl MyHttpClientConnector<TcpStream> for HttpConnector {
     async fn connect(&self) -> Result<TcpStream, MyHttpClientError> {
-        let host_port = self.remote_host.get_host_port(Some(80));
+        let host_port = self.remote_host.get_host_port();
         match TcpStream::connect(host_port.as_str()).await {
             Ok(tcp_stream) => Ok(tcp_stream),
             Err(err) => Err(
@@ -26,9 +26,10 @@ impl MyHttpClientConnector<TcpStream> for HttpConnector {
             ),
         }
     }
-    fn get_remote_host(&self) -> StrOrString {
-        self.remote_host.as_str().into()
+    fn get_remote_endpoint(&self) -> RemoteEndpoint {
+        self.remote_host.to_ref()
     }
+
     fn is_debug(&self) -> bool {
         false
     }
