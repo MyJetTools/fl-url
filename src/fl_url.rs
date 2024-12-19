@@ -382,13 +382,10 @@ impl FlUrl {
 
         self.headers.add("Content-Encoding", "gzip");
 
-        println!("Before compression: {}", body.len());
-
         let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
         encoder.write_all(body.as_slice()).unwrap();
         let result = encoder.finish().unwrap();
 
-        println!("After compression: {}", result.len());
         result
     }
 
