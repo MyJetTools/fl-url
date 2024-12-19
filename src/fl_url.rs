@@ -382,9 +382,14 @@ impl FlUrl {
 
         self.headers.add("Content-Encoding", "gzip");
 
+        println!("Before compression: {}", body.len());
+
         let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
         encoder.write_all(body.as_slice()).unwrap();
-        encoder.finish().unwrap()
+        let result = encoder.finish().unwrap();
+
+        println!("After compression: {}", result.len());
+        result
     }
 
     fn compile_request(&mut self, method: Method, body: Option<Vec<u8>>) -> MyHttpRequest {
