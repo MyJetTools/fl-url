@@ -8,6 +8,7 @@ use my_tls::tokio_rustls::client::TlsStream;
 use rust_extensions::remote_endpoint::Scheme;
 use rust_extensions::StrOrString;
 
+use std::io::Write;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpStream;
@@ -37,6 +38,7 @@ pub struct FlUrl {
     pub do_not_reuse_connection: bool,
     pub clients_cache: Option<Arc<HttpClientsCache>>,
     pub tls_server_name: Option<String>,
+    pub compress_body: bool,
     #[cfg(feature = "with-ssh")]
     ssh_credentials: Option<my_ssh::SshCredentials>,
 
@@ -96,6 +98,7 @@ impl FlUrl {
             max_retries: 0,
             request_timeout: Duration::from_secs(10),
             tls_server_name: None,
+            compress_body: false,
             #[cfg(feature = "with-ssh")]
             ssh_credentials: credentials,
         }
@@ -104,6 +107,11 @@ impl FlUrl {
     #[cfg(feature = "with-ssh")]
     pub fn via_ssh(&self) -> bool {
         self.ssh_credentials.is_some()
+    }
+
+    pub fn compress(mut self) -> Self {
+        self.compress_body = true;
+        self
     }
 
     pub fn set_not_used_connection_timeout(mut self, timeout: Duration) -> Self {
@@ -365,6 +373,20 @@ impl FlUrl {
         }
     }
 
+    fn compress_body(&mut self, body: Vec<u8>) -> Vec<u8> {
+        use flate2::{write::GzEncoder, Compression};
+
+        if body.len() < 64 {
+            return body;
+        }
+
+        self.headers.add("Content-Encoding", "gzip");
+
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(body.as_slice()).unwrap();
+        encoder.finish().unwrap()
+    }
+
     fn compile_request(&mut self, method: Method, body: Option<Vec<u8>>) -> MyHttpRequest {
         if !self.headers.has_host_header {
             if !self.url.host_is_ip() {
@@ -380,12 +402,18 @@ impl FlUrl {
             }
         }
 
+        let mut body = body.unwrap_or_default();
+
+        if self.compress_body {
+            body = self.compress_body(body);
+        }
+
         MyHttpRequest::new(
             method,
             self.url.get_path_and_query(),
             Version::HTTP_11,
             self.headers.get_builder(),
-            body.unwrap_or_default().into(),
+            body,
         )
     }
 
