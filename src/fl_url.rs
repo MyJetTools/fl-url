@@ -42,7 +42,7 @@ pub struct FlUrl {
     #[cfg(feature = "with-ssh")]
     ssh_credentials: Option<my_ssh::SshCredentials>,
     #[cfg(feature = "with-ssh")]
-    ssh_private_key_resolver:
+    ssh_security_credentials_resolver:
         Option<Arc<dyn my_ssh::ssh_settings::SshSecurityCredentialsResolver + Send + Sync>>,
 
     max_retries: usize,
@@ -105,7 +105,7 @@ impl FlUrl {
             #[cfg(feature = "with-ssh")]
             ssh_credentials: credentials,
             #[cfg(feature = "with-ssh")]
-            ssh_private_key_resolver: None,
+            ssh_security_credentials_resolver: None,
         }
     }
 
@@ -140,11 +140,11 @@ impl FlUrl {
     }
 
     #[cfg(feature = "with-ssh")]
-    pub fn set_ssh_private_key_resolver(
+    pub fn set_ssh_security_credentials_resolver(
         mut self,
         resolver: Arc<dyn my_ssh::ssh_settings::SshSecurityCredentialsResolver + Send + Sync>,
     ) -> Self {
-        self.ssh_private_key_resolver = Some(resolver);
+        self.ssh_security_credentials_resolver = Some(resolver);
         self
     }
 
@@ -377,7 +377,7 @@ impl FlUrl {
     async fn execute_ssh(mut self, request: MyHttpRequest) -> Result<FlUrlResponse, FlUrlError> {
         let mut ssh_credentials = self.ssh_credentials.take().unwrap();
 
-        if let Some(private_key_resolver) = self.ssh_private_key_resolver.take() {
+        if let Some(private_key_resolver) = self.ssh_security_credentials_resolver.take() {
             ssh_credentials = private_key_resolver
                 .update_credentials(&ssh_credentials)
                 .await;
