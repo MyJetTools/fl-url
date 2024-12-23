@@ -41,7 +41,7 @@ pub struct FlUrl {
     pub compress_body: bool,
     #[cfg(feature = "with-ssh")]
     ssh_credentials: Option<my_ssh::SshCredentials>,
-
+    #[cfg(feature = "with-ssh")]
     ssh_private_key_resolver:
         Option<Arc<dyn my_ssh::ssh_settings::SshSecurityCredentialsResolver + Send + Sync>>,
 
@@ -139,6 +139,7 @@ impl FlUrl {
         self
     }
 
+    #[cfg(feature = "with-ssh")]
     pub fn set_ssh_private_key_resolver(
         mut self,
         resolver: Arc<dyn my_ssh::ssh_settings::SshSecurityCredentialsResolver + Send + Sync>,
