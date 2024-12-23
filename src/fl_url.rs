@@ -42,6 +42,9 @@ pub struct FlUrl {
     #[cfg(feature = "with-ssh")]
     ssh_credentials: Option<my_ssh::SshCredentials>,
 
+    ssh_private_key_resolver:
+        Option<Arc<dyn my_ssh::ssh_settings::SshSecurityCredentialsResolver + Send + Sync>>,
+
     max_retries: usize,
 }
 
@@ -101,6 +104,8 @@ impl FlUrl {
             compress_body: false,
             #[cfg(feature = "with-ssh")]
             ssh_credentials: credentials,
+            #[cfg(feature = "with-ssh")]
+            ssh_private_key_resolver: None,
         }
     }
 
@@ -131,6 +136,14 @@ impl FlUrl {
 
     pub fn set_tls_server_name(mut self, domain: String) -> Self {
         self.tls_server_name = Some(domain);
+        self
+    }
+
+    pub fn set_ssh_private_key_resolver(
+        mut self,
+        resolver: Arc<dyn my_ssh::ssh_settings::SshSecurityCredentialsResolver + Send + Sync>,
+    ) -> Self {
+        self.ssh_private_key_resolver = Some(resolver);
         self
     }
 
@@ -267,6 +280,11 @@ impl FlUrl {
     }
 
     async fn execute(self, request: MyHttpRequest) -> Result<FlUrlResponse, FlUrlError> {
+        println!(
+            "headers: {}",
+            std::str::from_utf8(request.headers.as_ref()).unwrap()
+        );
+
         #[cfg(feature = "with-ssh")]
         {
             if self.ssh_credentials.is_some() {
@@ -356,7 +374,13 @@ impl FlUrl {
 
     #[cfg(feature = "with-ssh")]
     async fn execute_ssh(mut self, request: MyHttpRequest) -> Result<FlUrlResponse, FlUrlError> {
-        let ssh_credentials = self.ssh_credentials.take().unwrap();
+        let mut ssh_credentials = self.ssh_credentials.take().unwrap();
+
+        if let Some(private_key_resolver) = self.ssh_private_key_resolver.take() {
+            ssh_credentials = private_key_resolver
+                .update_credentials(&ssh_credentials)
+                .await;
+        }
 
         let clients_cache = self.get_clients_cache();
         self.execute_with_retry::<my_ssh::SshAsyncChannel, SshHttpConnector, _>(
@@ -530,5 +554,21 @@ impl FlUrl {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::FlUrl;
+
+    #[tokio::test]
+    async fn test_setings() {
+        let mut fl_url_response =
+            FlUrl::new("http://192.168.123.67:9898/settings/hetzner/audit-log-grpc-service")
+                .get()
+                .await
+                .unwrap();
+        let body = fl_url_response.body_as_str().await.unwrap();
+        println!("{}", body);
     }
 }

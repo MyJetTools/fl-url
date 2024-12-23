@@ -17,7 +17,10 @@ impl MyHttpClientConnector<TcpStream> for HttpConnector {
     async fn connect(&self) -> Result<TcpStream, MyHttpClientError> {
         let host_port = self.remote_host.get_host_port();
         match TcpStream::connect(host_port.as_str()).await {
-            Ok(tcp_stream) => Ok(tcp_stream),
+            Ok(tcp_stream) => {
+                println!("Connected");
+                return Ok(tcp_stream);
+            }
             Err(err) => Err(
                 my_http_client::MyHttpClientError::CanNotConnectToRemoteHost(format!(
                     "{}. Err:{}",
