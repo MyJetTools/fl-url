@@ -557,19 +557,3 @@ impl FlUrl {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use crate::FlUrl;
-
-    #[tokio::test]
-    async fn test_setings() {
-        let mut fl_url_response =
-            FlUrl::new("http://192.168.123.67:9898/settings/hetzner/audit-log-grpc-service")
-                .get()
-                .await
-                .unwrap();
-        let body = fl_url_response.body_as_str().await.unwrap();
-        println!("{}", body);
-    }
-}
