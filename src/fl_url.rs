@@ -281,11 +281,6 @@ impl FlUrl {
     }
 
     async fn execute(self, request: MyHttpRequest) -> Result<FlUrlResponse, FlUrlError> {
-        println!(
-            "headers: {}",
-            std::str::from_utf8(request.headers.as_ref()).unwrap()
-        );
-
         #[cfg(feature = "with-ssh")]
         {
             if self.ssh_credentials.is_some() {
