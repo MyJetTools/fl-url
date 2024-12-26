@@ -430,9 +430,11 @@ impl FlUrl {
             body = self.compress_body(body);
         }
 
+        let path_and_query = self.url.get_path_and_query();
+
         MyHttpRequest::new(
             method,
-            self.url.get_path_and_query(),
+            &path_and_query,
             Version::HTTP_11,
             self.headers.get_builder(),
             body,

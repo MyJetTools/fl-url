@@ -15,7 +15,7 @@ pub struct FlUrlResponse {
 impl Debug for FlUrlResponse {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FlUrlResponse")
-            .field("url", &self.url.as_str())
+            .field("url", &self.url.to_string())
             .field("status_code", &self.status_code)
             .finish()
     }
