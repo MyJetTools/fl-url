@@ -33,7 +33,7 @@ impl MyHttpClientConnector<UnixStream> for UnixSocketConnector {
             Ok(stream) => Ok(stream),
             Err(err) => Err(
                 my_http_client::MyHttpClientError::CanNotConnectToRemoteHost(format!(
-                    "{}. Err:{}",
+                    "Error connecting to '{}'. Err:{}",
                     self.remote_host.as_str(),
                     err
                 )),
