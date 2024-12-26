@@ -343,25 +343,15 @@ impl FlUrl {
             }
             #[cfg(feature = "unix-socket")]
             Scheme::UnixSocket => {
-                if self.do_not_reuse_connection {
-                    self.execute_with_retry::<UnixSocketStream, UnixSocketConnector, _>(
-                        &request,
-                        &unix_socket::UnixSocketHttpClientCreator,
-                        #[cfg(feature = "with-ssh")]
-                        None,
-                    )
-                    .await?
-                } else {
-                    let clients_cache = self.get_clients_cache();
+                println!("{:?}", std::str::from_utf8(request.headers.as_slice()));
 
-                    self.execute_with_retry::<UnixSocketStream, UnixSocketConnector, _>(
-                        &request,
-                        clients_cache.as_ref(),
-                        #[cfg(feature = "with-ssh")]
-                        None,
-                    )
-                    .await?
-                }
+                self.execute_with_retry::<UnixSocketStream, UnixSocketConnector, _>(
+                    &request,
+                    &unix_socket::UnixSocketHttpClientCreator,
+                    #[cfg(feature = "with-ssh")]
+                    None,
+                )
+                .await?
             }
         };
 
