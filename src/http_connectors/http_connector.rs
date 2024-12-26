@@ -18,7 +18,6 @@ impl MyHttpClientConnector<TcpStream> for HttpConnector {
         let host_port = self.remote_host.get_host_port();
         match TcpStream::connect(host_port.as_str()).await {
             Ok(tcp_stream) => {
-                println!("Connected");
                 return Ok(tcp_stream);
             }
             Err(err) => Err(
