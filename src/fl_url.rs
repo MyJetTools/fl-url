@@ -39,6 +39,7 @@ pub struct FlUrl {
     pub clients_cache: Option<Arc<HttpClientsCache>>,
     pub tls_server_name: Option<String>,
     pub compress_body: bool,
+    pub print_input_request: bool,
     #[cfg(feature = "with-ssh")]
     ssh_credentials: Option<my_ssh::SshCredentials>,
     #[cfg(feature = "with-ssh")]
@@ -101,6 +102,7 @@ impl FlUrl {
             max_retries: 0,
             request_timeout: Duration::from_secs(10),
             tls_server_name: None,
+            print_input_request: false,
             compress_body: false,
             #[cfg(feature = "with-ssh")]
             ssh_credentials: credentials,
@@ -136,6 +138,11 @@ impl FlUrl {
 
     pub fn set_tls_server_name(mut self, domain: String) -> Self {
         self.tls_server_name = Some(domain);
+        self
+    }
+
+    pub fn print_input_request(mut self) -> Self {
+        self.print_input_request = true;
         self
     }
 
@@ -343,8 +350,6 @@ impl FlUrl {
             }
             #[cfg(feature = "unix-socket")]
             Scheme::UnixSocket => {
-                println!("{:?}", std::str::from_utf8(request.headers.as_slice()));
-
                 self.execute_with_retry::<UnixSocketStream, UnixSocketConnector, _>(
                     &request,
                     &unix_socket::UnixSocketHttpClientCreator,
@@ -512,6 +517,9 @@ impl FlUrl {
         http_client_resolver: &THttpClientResolver,
         #[cfg(feature = "with-ssh")] ssh_credentials: Option<Arc<my_ssh::SshCredentials>>,
     ) -> Result<FlUrlResponse, FlUrlError> {
+        if self.print_input_request {
+            println!("{:?}", std::str::from_utf8(request.headers.as_slice()));
+        }
         let mut attempt_no = 0;
         let domain_override = self.tls_server_name.take();
         let client_cert = self.client_cert.take();

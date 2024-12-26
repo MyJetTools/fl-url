@@ -30,7 +30,6 @@ impl MyHttpClientConnector<UnixStream> for UnixSocketConnector {
 
         let host = self.remote_host.get_host();
 
-        println!("Connecting to '{}'", host);
         let connect_result = unix_socket.connect(host).await;
         match connect_result {
             Ok(stream) => Ok(stream),
