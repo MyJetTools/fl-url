@@ -417,7 +417,7 @@ impl FlUrl {
 
             self.url.get_path_and_query()
         } else {
-            self.url.to_string()
+            self.url.to_string()[11..].to_string()
         };
 
         let mut body = body.unwrap_or_default();
