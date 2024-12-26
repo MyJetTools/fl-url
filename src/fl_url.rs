@@ -401,8 +401,7 @@ impl FlUrl {
 
     fn compile_request(&mut self, method: Method, body: Option<Vec<u8>>) -> MyHttpRequest {
         if self.url.is_unix_socket() {
-            self.headers
-                .add(hyper::header::CONNECTION.as_str(), "close");
+            self.headers.add(hyper::header::ACCEPT.as_str(), "*/*");
         } else {
             if !self.headers.has_host_header {
                 if !self.url.host_is_ip() {
