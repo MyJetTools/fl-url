@@ -400,17 +400,19 @@ impl FlUrl {
     }
 
     fn compile_request(&mut self, method: Method, body: Option<Vec<u8>>) -> MyHttpRequest {
-        if !self.headers.has_host_header {
-            if !self.url.host_is_ip() {
-                self.headers
-                    .add(hyper::header::HOST.as_str(), self.url.get_host());
+        if !self.url.is_unix_socket() {
+            if !self.headers.has_host_header {
+                if !self.url.host_is_ip() {
+                    self.headers
+                        .add(hyper::header::HOST.as_str(), self.url.get_host());
+                }
             }
-        }
 
-        if !self.headers.has_connection_header {
-            if !self.do_not_reuse_connection {
-                self.headers
-                    .add(hyper::header::CONNECTION.as_str(), "keep-alive");
+            if !self.headers.has_connection_header {
+                if !self.do_not_reuse_connection {
+                    self.headers
+                        .add(hyper::header::CONNECTION.as_str(), "keep-alive");
+                }
             }
         }
 
