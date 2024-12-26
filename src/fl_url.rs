@@ -400,7 +400,7 @@ impl FlUrl {
     }
 
     fn compile_request(&mut self, method: Method, body: Option<Vec<u8>>) -> MyHttpRequest {
-        let path_and_query = if !self.url.is_unix_socket() {
+        if !self.url.is_unix_socket() {
             if !self.headers.has_host_header {
                 if !self.url.host_is_ip() {
                     self.headers
@@ -414,17 +414,15 @@ impl FlUrl {
                         .add(hyper::header::CONNECTION.as_str(), "keep-alive");
                 }
             }
-
-            self.url.get_path_and_query()
-        } else {
-            self.url.to_string()[11..].to_string()
-        };
+        }
 
         let mut body = body.unwrap_or_default();
 
         if self.compress_body {
             body = self.compress_body(body);
         }
+
+        let path_and_query = self.url.get_path_and_query();
 
         MyHttpRequest::new(
             method,
