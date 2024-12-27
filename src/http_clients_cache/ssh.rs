@@ -16,7 +16,7 @@ impl HttpClientResolver<my_ssh::SshAsyncChannel, SshHttpConnector> for SshHttpCl
     async fn get_http_client(
         &self,
         url_builder: &UrlBuilder,
-        _domain_override: Option<&String>,
+        _host_header: Option<&str>,
         _client_certificate: Option<&ClientCertificate>,
         #[cfg(feature = "with-ssh")] ssh_credentials: Option<&Arc<my_ssh::SshCredentials>>,
     ) -> Arc<MyHttpClient<my_ssh::SshAsyncChannel, SshHttpConnector>> {
@@ -49,7 +49,7 @@ impl HttpClientResolver<my_ssh::SshAsyncChannel, SshHttpConnector> for HttpClien
     async fn get_http_client(
         &self,
         url_builder: &UrlBuilder,
-        domain_override: Option<&String>,
+        host_header: Option<&str>,
         client_certificate: Option<&ClientCertificate>,
         ssh_credentials: Option<&Arc<my_ssh::SshCredentials>>,
     ) -> Arc<MyHttpClient<my_ssh::SshAsyncChannel, SshHttpConnector>> {
@@ -64,7 +64,7 @@ impl HttpClientResolver<my_ssh::SshAsyncChannel, SshHttpConnector> for HttpClien
         let new_one = SshHttpClientCreator
             .get_http_client(
                 url_builder,
-                domain_override,
+                host_header,
                 client_certificate,
                 ssh_credentials,
             )

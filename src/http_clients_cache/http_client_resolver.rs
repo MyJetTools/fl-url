@@ -13,7 +13,7 @@ pub trait HttpClientResolver<
     async fn get_http_client(
         &self,
         url_builder: &UrlBuilder,
-        domain_override: Option<&String>,
+        host_header: Option<&str>,
         client_certificate: Option<&ClientCertificate>,
         #[cfg(feature = "with-ssh")] ssh_credentials: Option<&Arc<my_ssh::SshCredentials>>,
     ) -> Arc<MyHttpClient<TStream, TConnector>>;

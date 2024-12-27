@@ -19,7 +19,7 @@ impl HttpClientResolver<TcpStream, HttpConnector> for HttpClientCreator {
     async fn get_http_client(
         &self,
         url_builder: &UrlBuilder,
-        _domain_override: Option<&String>,
+        _host_header: Option<&str>,
         _client_certificate: Option<&ClientCertificate>,
         #[cfg(feature = "with-ssh")] _ssh_credentials: Option<&Arc<my_ssh::SshCredentials>>,
     ) -> Arc<MyHttpClient<TcpStream, HttpConnector>> {
@@ -42,7 +42,7 @@ impl HttpClientResolver<TcpStream, HttpConnector> for HttpClientsCache {
     async fn get_http_client(
         &self,
         url_builder: &UrlBuilder,
-        domain_override: Option<&String>,
+        host_header: Option<&str>,
         client_certificate: Option<&ClientCertificate>,
         #[cfg(feature = "with-ssh")] ssh_credentials: Option<&Arc<my_ssh::SshCredentials>>,
     ) -> Arc<MyHttpClient<TcpStream, HttpConnector>> {
@@ -59,7 +59,7 @@ impl HttpClientResolver<TcpStream, HttpConnector> for HttpClientsCache {
         let new_one = HttpClientCreator
             .get_http_client(
                 url_builder,
-                domain_override,
+                host_header,
                 client_certificate,
                 #[cfg(feature = "with-ssh")]
                 ssh_credentials,

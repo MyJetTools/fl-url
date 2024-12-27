@@ -19,15 +19,24 @@ impl HttpClientResolver<TlsStream<TcpStream>, HttpsConnector> for HttpsClientCre
     async fn get_http_client(
         &self,
         url_builder: &UrlBuilder,
-        domain_override: Option<&String>,
+        host_header: Option<&str>,
         client_certificate: Option<&ClientCertificate>,
         #[cfg(feature = "with-ssh")] _ssh_credentials: Option<&Arc<my_ssh::SshCredentials>>,
     ) -> Arc<MyHttpClient<TlsStream<TcpStream>, HttpsConnector>> {
         let remote_endpoint = url_builder.get_remote_endpoint(HTTPS_DEFAULT_PORT.into());
 
+        let domain_override = if url_builder.host_is_ip() {
+            match host_header {
+                Some(x) => Some(x.to_string()),
+                None => None,
+            }
+        } else {
+            Some(url_builder.get_host().to_string())
+        };
+
         let connector = HttpsConnector::new(
             remote_endpoint.to_owned(),
-            domain_override.cloned(),
+            domain_override,
             client_certificate.map(|x| x.clone()),
         );
         let new_one = MyHttpClient::new(connector);
@@ -48,7 +57,7 @@ impl HttpClientResolver<TlsStream<TcpStream>, HttpsConnector> for HttpClientsCac
     async fn get_http_client(
         &self,
         url_builder: &UrlBuilder,
-        domain_override: Option<&String>,
+        host_header: Option<&str>,
         client_certificate: Option<&ClientCertificate>,
         #[cfg(feature = "with-ssh")] ssh_credentials: Option<&Arc<my_ssh::SshCredentials>>,
     ) -> Arc<MyHttpClient<TlsStream<TcpStream>, HttpsConnector>> {
@@ -63,7 +72,7 @@ impl HttpClientResolver<TlsStream<TcpStream>, HttpsConnector> for HttpClientsCac
         let new_one = HttpsClientCreator
             .get_http_client(
                 url_builder,
-                domain_override,
+                host_header,
                 client_certificate,
                 #[cfg(feature = "with-ssh")]
                 ssh_credentials,

@@ -37,7 +37,6 @@ pub struct FlUrl {
     pub request_timeout: Duration,
     pub do_not_reuse_connection: bool,
     pub clients_cache: Option<Arc<HttpClientsCache>>,
-    pub tls_server_name: Option<String>,
     pub compress_body: bool,
     pub print_input_request: bool,
     #[cfg(feature = "with-ssh")]
@@ -101,7 +100,6 @@ impl FlUrl {
             not_used_connection_timeout: Duration::from_secs(30),
             max_retries: 0,
             request_timeout: Duration::from_secs(10),
-            tls_server_name: None,
             print_input_request: false,
             compress_body: false,
             #[cfg(feature = "with-ssh")]
@@ -133,11 +131,6 @@ impl FlUrl {
 
     pub fn with_retries(mut self, max_retries: usize) -> Self {
         self.max_retries = max_retries;
-        self
-    }
-
-    pub fn set_tls_server_name(mut self, domain: String) -> Self {
-        self.tls_server_name = Some(domain);
         self
     }
 
@@ -405,21 +398,16 @@ impl FlUrl {
     }
 
     fn compile_request(&mut self, method: Method, body: Option<Vec<u8>>) -> MyHttpRequest {
-        if self.url.is_unix_socket() {
-            self.headers.add(hyper::header::ACCEPT.as_str(), "*/*");
-
-            if !self.headers.has_host_header {
+        if !self.headers.has_host_header() {
+            if !self.url.host_is_ip() {
                 self.headers
                     .add(hyper::header::HOST.as_str(), self.url.get_host());
             }
-        } else {
-            if !self.headers.has_host_header {
-                if !self.url.host_is_ip() {
-                    self.headers
-                        .add(hyper::header::HOST.as_str(), self.url.get_host());
-                }
-            }
+        }
 
+        if self.url.is_unix_socket() {
+            self.headers.add(hyper::header::ACCEPT.as_str(), "*/*");
+        } else {
             if !self.headers.has_connection_header {
                 if !self.do_not_reuse_connection {
                     self.headers
@@ -521,14 +509,14 @@ impl FlUrl {
             println!("{:?}", std::str::from_utf8(request.headers.as_slice()));
         }
         let mut attempt_no = 0;
-        let domain_override = self.tls_server_name.take();
+
         let client_cert = self.client_cert.take();
 
         loop {
             let tcp_client = http_client_resolver
                 .get_http_client(
                     &self.url,
-                    domain_override.as_ref(),
+                    self.headers.get_host_header_value(),
                     client_cert.as_ref(),
                     #[cfg(feature = "with-ssh")]
                     ssh_credentials.as_ref(),

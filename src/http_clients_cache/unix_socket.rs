@@ -17,7 +17,7 @@ impl HttpClientResolver<UnixSocketStream, UnixSocketConnector> for UnixSocketHtt
     async fn get_http_client(
         &self,
         url_builder: &UrlBuilder,
-        _domain_override: Option<&String>,
+        _host_value: Option<&str>,
         _client_certificate: Option<&ClientCertificate>,
         #[cfg(feature = "with-ssh")] _ssh_credentials: Option<&Arc<my_ssh::SshCredentials>>,
     ) -> Arc<MyHttpClient<UnixSocketStream, UnixSocketConnector>> {
@@ -42,7 +42,7 @@ impl HttpClientResolver<UnixSocketStream, UnixSocketConnector> for HttpClientsCa
     async fn get_http_client(
         &self,
         url_builder: &UrlBuilder,
-        domain_override: Option<&String>,
+        host_header: Option<&str>,
         client_certificate: Option<&ClientCertificate>,
         #[cfg(feature = "with-ssh")] ssh_credentials: Option<&Arc<my_ssh::SshCredentials>>,
     ) -> Arc<MyHttpClient<UnixSocketStream, UnixSocketConnector>> {
@@ -59,7 +59,7 @@ impl HttpClientResolver<UnixSocketStream, UnixSocketConnector> for HttpClientsCa
         let new_one = UnixSocketHttpClientCreator
             .get_http_client(
                 url_builder,
-                domain_override,
+                host_header,
                 client_certificate,
                 #[cfg(feature = "with-ssh")]
                 ssh_credentials,
