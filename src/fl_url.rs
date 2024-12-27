@@ -31,7 +31,6 @@ pub struct FlUrl {
     pub headers: FlUrlHeaders,
     pub client_cert: Option<my_tls::ClientCertificate>,
     pub accept_invalid_certificate: bool,
-    pub execute_timeout: Duration,
     // If we are trying to reuse connection, but it was not used for this time, we will drop it
     pub not_used_connection_timeout: Duration,
     pub request_timeout: Duration,
@@ -91,7 +90,6 @@ impl FlUrl {
 
         Self {
             headers: FlUrlHeaders::new(),
-            execute_timeout: Duration::from_secs(30),
             client_cert: None,
             url,
             accept_invalid_certificate: false,
@@ -213,7 +211,7 @@ impl FlUrl {
     }
 
     pub fn set_timeout(mut self, timeout: Duration) -> Self {
-        self.execute_timeout = timeout;
+        self.request_timeout = timeout;
         self
     }
 
