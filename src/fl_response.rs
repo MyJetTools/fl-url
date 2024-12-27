@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fmt::Debug};
 
-use hyper::StatusCode;
+use hyper::{header::CONNECTION, StatusCode};
 use serde::de::DeserializeOwned;
 use url_utils::UrlBuilder;
 
@@ -33,6 +33,16 @@ impl FlUrlResponse {
             response: ResponseBody::Hyper(Some(response.into_response())),
             url,
         }
+    }
+
+    pub fn drop_connection(&self) -> bool {
+        let header = self.response.get_header(CONNECTION.as_str());
+        if let Ok(header) = header {
+            if let Some(header) = header {
+                return header.eq_ignore_ascii_case("close");
+            }
+        }
+        false
     }
 
     pub fn into_hyper_response(self) -> my_http_client::HyperResponse {

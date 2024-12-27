@@ -540,6 +540,16 @@ impl FlUrl {
             match response {
                 Ok(response) => {
                     let response = FlUrlResponse::from_http1_response(self.url, response);
+
+                    if response.drop_connection() {
+                        http_client_resolver
+                            .drop_http_client(
+                                &response.url,
+                                #[cfg(feature = "with-ssh")]
+                                ssh_credentials.as_ref(),
+                            )
+                            .await;
+                    }
                     return Ok(response);
                 }
                 Err(err) => {
