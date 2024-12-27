@@ -354,7 +354,7 @@ impl FlUrl {
                 } else {
                     let clients_cache = self.get_clients_cache();
 
-                    self.execute_with_retry::<TlsStream<TcpStream>, HttpsConnector, _>(
+                    self.execute_with_retry::<UnixSocketStream, UnixSocketConnector, _>(
                         &request,
                         clients_cache.as_ref(),
                         #[cfg(feature = "with-ssh")]
