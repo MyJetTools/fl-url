@@ -1,13 +1,17 @@
 use std::collections::HashMap;
 
+use http::header::*;
 use http_body_util::BodyExt;
 use hyper::HeaderMap;
+use my_http_client::HyperResponse;
 
 use crate::{FlUrlError, FlUrlReadingHeaderError};
 
 pub enum ResponseBody {
     Hyper(Option<my_http_client::HyperResponse>),
     Body {
+        status_code: http::StatusCode,
+        version: http::Version,
         headers: HeaderMap,
         body: Option<Vec<u8>>,
     },
@@ -141,10 +145,15 @@ impl ResponseBody {
             Self::Hyper(response) => {
                 let response = response.take().unwrap();
 
+                let status_code = response.status();
+                let version = response.version();
+
                 let (parts, incoming) = response.into_parts();
 
                 let body = body_to_vec(incoming).await?;
                 *self = Self::Body {
+                    status_code,
+                    version,
                     headers: parts.headers,
                     body: Some(body),
                 }
@@ -180,6 +189,62 @@ impl ResponseBody {
                 Some(body) => Ok(body),
                 None => panic!("Body is already disposed"),
             },
+        }
+    }
+    pub fn into_http_body(self) -> Result<HyperResponse, FlUrlError> {
+        match self {
+            ResponseBody::Hyper(mut response) => {
+                let result = response.take().unwrap();
+                Ok(result)
+            }
+            ResponseBody::Body {
+                status_code,
+                version,
+                headers,
+                body,
+            } => {
+                let mut builder = http::response::Builder::new()
+                    .status(status_code)
+                    .version(version);
+
+                let mut has_content_len = false;
+
+                for header in headers {
+                    if let Some(header_name) = header.0 {
+                        if header_name
+                            .as_str()
+                            .eq_ignore_ascii_case(CONTENT_LENGTH.as_str())
+                        {
+                            has_content_len = true;
+                        }
+
+                        if header_name
+                            .as_str()
+                            .eq_ignore_ascii_case(TRANSFER_ENCODING.as_str())
+                        {
+                            continue;
+                        }
+
+                        builder = builder.header(header_name, header.1);
+                    }
+                }
+
+                let body = body.unwrap_or_default();
+
+                if body.len() > 0 {
+                    if !has_content_len {
+                        builder = builder.header(CONTENT_LENGTH, body.len());
+                    }
+                }
+
+                let full_body = http_body_util::Full::new(hyper::body::Bytes::from(body));
+
+                let result = builder
+                    .body(full_body.map_err(|itm| itm.to_string()).boxed())
+                    .unwrap();
+
+                Ok(result)
+            }
         }
     }
 }
