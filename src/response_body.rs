@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use http::header::*;
 use http_body_util::BodyExt;
 use hyper::HeaderMap;
 use my_http_client::HyperResponse;
@@ -150,7 +149,10 @@ impl ResponseBody {
 
                 let (parts, incoming) = response.into_parts();
 
-                let body = body_to_vec(incoming).await?;
+                let body = my_hyper_utils::box_body_to_vec(incoming, |err| {
+                    FlUrlError::ReadingHyperBodyError(err)
+                })
+                .await?;
                 *self = Self::Body {
                     status_code,
                     version,
@@ -203,7 +205,7 @@ impl ResponseBody {
                 headers,
                 body,
             } => {
-                let result = compile_full_body(
+                let result = my_hyper_utils::compile_full_body(
                     status_code,
                     version,
                     headers,
@@ -230,9 +232,12 @@ impl ResponseBody {
                 let version = response.version();
                 let (parts, body) = response.into_parts();
 
-                let body = body_to_vec(body).await?;
+                let body = my_hyper_utils::box_body_to_vec(body, |err| {
+                    FlUrlError::ReadingHyperBodyError(err)
+                })
+                .await?;
 
-                let result = compile_full_body(
+                let result = my_hyper_utils::compile_full_body(
                     status_code,
                     version,
                     parts.headers,
@@ -248,7 +253,7 @@ impl ResponseBody {
                 headers,
                 body,
             } => {
-                let result = compile_full_body(
+                let result = my_hyper_utils::compile_full_body(
                     status_code,
                     version,
                     headers,
@@ -262,6 +267,7 @@ impl ResponseBody {
     }
 }
 
+/*
 fn compile_full_body<TResult>(
     status_code: http::StatusCode,
     version: http::Version,
@@ -325,3 +331,4 @@ async fn body_to_vec(
         }
     }
 }
+ */
