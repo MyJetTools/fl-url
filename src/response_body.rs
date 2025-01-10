@@ -203,50 +203,110 @@ impl ResponseBody {
                 headers,
                 body,
             } => {
-                let mut builder = http::response::Builder::new()
-                    .status(status_code)
-                    .version(version);
-
-                let mut has_content_len = false;
-
-                for header in headers {
-                    if let Some(header_name) = header.0 {
-                        if header_name
-                            .as_str()
-                            .eq_ignore_ascii_case(CONTENT_LENGTH.as_str())
-                        {
-                            has_content_len = true;
-                        }
-
-                        if header_name
-                            .as_str()
-                            .eq_ignore_ascii_case(TRANSFER_ENCODING.as_str())
-                        {
-                            continue;
-                        }
-
-                        builder = builder.header(header_name, header.1);
-                    }
-                }
-
-                let body = body.unwrap_or_default();
-
-                if body.len() > 0 {
-                    if !has_content_len {
-                        builder = builder.header(CONTENT_LENGTH, body.len());
-                    }
-                }
-
-                let full_body = http_body_util::Full::new(hyper::body::Bytes::from(body));
-
-                let result = builder
-                    .body(full_body.map_err(|itm| itm.to_string()).boxed())
-                    .unwrap();
+                let result = compile_full_body(
+                    status_code,
+                    version,
+                    headers,
+                    body.unwrap_or_default(),
+                    |builder, full_body| {
+                        builder
+                            .body(full_body.map_err(|itm| itm.to_string()).boxed())
+                            .unwrap()
+                    },
+                );
 
                 Ok(result)
             }
         }
     }
+
+    pub async fn into_http_full_body(
+        self,
+    ) -> Result<http::Response<http_body_util::Full<hyper::body::Bytes>>, FlUrlError> {
+        match self {
+            ResponseBody::Hyper(response) => {
+                let response = response.unwrap();
+                let status_code = response.status();
+                let version = response.version();
+                let (parts, body) = response.into_parts();
+
+                let body = body_to_vec(body).await?;
+
+                let result = compile_full_body(
+                    status_code,
+                    version,
+                    parts.headers,
+                    body,
+                    |builder, full_body| builder.body(full_body).unwrap(),
+                );
+
+                Ok(result)
+            }
+            ResponseBody::Body {
+                status_code,
+                version,
+                headers,
+                body,
+            } => {
+                let result = compile_full_body(
+                    status_code,
+                    version,
+                    headers,
+                    body.unwrap_or_default(),
+                    |builder, full_body| builder.body(full_body).unwrap(),
+                );
+
+                Ok(result)
+            }
+        }
+    }
+}
+
+fn compile_full_body<TResult>(
+    status_code: http::StatusCode,
+    version: http::Version,
+    headers: HeaderMap,
+    body: Vec<u8>,
+    compiler: impl Fn(
+        http::response::Builder,
+        http_body_util::Full<hyper::body::Bytes>,
+    ) -> http::Response<TResult>,
+) -> http::Response<TResult> {
+    let mut builder = http::response::Builder::new()
+        .status(status_code)
+        .version(version);
+
+    let mut has_content_len = false;
+
+    for header in headers {
+        if let Some(header_name) = header.0 {
+            if header_name
+                .as_str()
+                .eq_ignore_ascii_case(CONTENT_LENGTH.as_str())
+            {
+                has_content_len = true;
+            }
+
+            if header_name
+                .as_str()
+                .eq_ignore_ascii_case(TRANSFER_ENCODING.as_str())
+            {
+                continue;
+            }
+
+            builder = builder.header(header_name, header.1);
+        }
+    }
+
+    if body.len() > 0 {
+        if !has_content_len {
+            builder = builder.header(CONTENT_LENGTH, body.len());
+        }
+    }
+
+    let full_body = http_body_util::Full::new(hyper::body::Bytes::from(body));
+
+    compiler(builder, full_body)
 }
 
 async fn body_to_vec(
