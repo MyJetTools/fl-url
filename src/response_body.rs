@@ -7,7 +7,7 @@ use my_http_client::HyperResponse;
 use crate::{FlUrlError, FlUrlReadingHeaderError};
 
 pub enum ResponseBody {
-    Hyper(Option<my_http_client::HyperResponse>),
+    Hyper(Option<my_hyper_utils::MyHttpResponse>),
     Body {
         status_code: http::StatusCode,
         version: http::Version,
@@ -17,7 +17,7 @@ pub enum ResponseBody {
 }
 
 impl ResponseBody {
-    pub fn as_hyper_response(&self) -> &my_http_client::HyperResponse {
+    pub fn as_hyper_response(&self) -> &my_hyper_utils::MyHttpResponse {
         match &self {
             Self::Hyper(response) => response.as_ref().unwrap(),
             Self::Body { .. } => {
@@ -26,7 +26,7 @@ impl ResponseBody {
         }
     }
 
-    pub fn into_hyper_response(self) -> my_http_client::HyperResponse {
+    pub fn into_hyper_response(self) -> my_hyper_utils::MyHttpResponse {
         match self {
             Self::Hyper(response) => {
                 let response = response.unwrap();
