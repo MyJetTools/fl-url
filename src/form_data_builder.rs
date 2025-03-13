@@ -17,9 +17,9 @@ pub struct MultipartFile {
 
 pub struct FormDataBuilder {
     fl_url: FlUrl,
-    fields: Vec<(StrOrString<'static>, String)>,
     // files: Vec<MultipartFile>,
     boundary: String,
+    buffer: Vec<u8>,
 }
 
 impl FormDataBuilder {
@@ -28,8 +28,7 @@ impl FormDataBuilder {
         Self {
             fl_url,
             boundary,
-            fields: vec![],
-            //files: vec![],
+            buffer: vec![], //files: vec![],
         }
     }
 
@@ -38,88 +37,50 @@ impl FormDataBuilder {
         name: impl Into<StrOrString<'static>>,
         value: impl Display,
     ) -> Self {
-        let value = value.to_string();
-        self.fields.push((name.into(), value));
+        use std::io::Write;
+
+        let name = name.into();
+        write!(
+            &mut self.buffer,
+            "--{}\r\nContent-Disposition: form-data; name=\"{}\"\r\n\r\n{}\r\n",
+            self.boundary, name, value
+        )
+        .unwrap();
 
         self
     }
 
-    fn form_data_to_bytes(&self) -> std::io::Result<Vec<u8>> {
+    fn get_result(mut self) -> (Vec<u8>, FlUrl) {
         use std::io::Write;
 
-        let mut buffer: Vec<u8> = Vec::new();
+        let content_type = self.get_content_type();
+        write!(&mut self.buffer, "--{}--\r\n", self.boundary).unwrap();
 
-        // Write text fields
-        for (name, value) in &self.fields {
-            let _ = write!(
-                &mut buffer,
-                "--{}\r\nContent-Disposition: form-data; name=\"{}\"\r\n\r\n{}\r\n",
-                self.boundary, name, value
-            )?;
-        }
+        self.fl_url
+            .headers
+            .add(CONTENT_TYPE.as_str(), &content_type);
 
-        // Write closing boundary
-        write!(&mut buffer, "--{}--\r\n", self.boundary)?;
-
-        Ok(buffer)
+        (self.buffer, self.fl_url)
     }
 
     fn get_content_type(&self) -> String {
         format!("multipart/form-data; boundary={}", self.boundary)
     }
 
-    pub async fn post(mut self) -> Result<FlUrlResponse, FlUrlError> {
-        let body = self.form_data_to_bytes();
+    pub async fn post(self) -> Result<FlUrlResponse, FlUrlError> {
+        let (body, fl_url) = self.get_result();
 
-        if let Err(err) = body {
-            panic!(
-                "Somehow we could not serialize from data for request: '{}'. Err: {}",
-                self.fl_url.url.to_string(),
-                err
-            );
-        }
-
-        let body = body.unwrap();
-
-        self.fl_url
-            .headers
-            .add(CONTENT_TYPE.as_str(), &self.get_content_type());
-
-        self.fl_url.post(body.into()).await
+        fl_url.post(body.into()).await
     }
 
-    pub async fn put(mut self) -> Result<FlUrlResponse, FlUrlError> {
-        let body = self.form_data_to_bytes();
-
-        if let Err(err) = body {
-            panic!(
-                "Somehow we could not serialize from data for request: '{}'. Err: {}",
-                self.fl_url.url.to_string(),
-                err
-            );
-        }
-
-        let body = body.unwrap();
-
-        self.fl_url
-            .headers
-            .add(CONTENT_TYPE.as_str(), &self.get_content_type());
-
-        self.fl_url.put(body.into()).await
+    pub async fn put(self) -> Result<FlUrlResponse, FlUrlError> {
+        let (body, fl_url) = self.get_result();
+        fl_url.put(body.into()).await
     }
 }
 
 // Simple random string generator for boundary (for demonstration)
 fn rand_string(len: usize) -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let seed = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let mut s = String::new();
-    for i in 0..len {
-        let c = ((seed >> (i % 64)) & 0xF) as u8;
-        s.push((b'A' + (c % 26)) as char);
-    }
-    s
+    use rand::distr::Alphanumeric;
+    rand::distr::SampleString::sample_string(&Alphanumeric, &mut rand::rng(), len)
 }

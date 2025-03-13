@@ -44,3 +44,4 @@ pem = "*"
 flate2 = "*"
 http = "*"
 my-hyper-utils = { tag = "0.1.0", git = "https://github.com/MyJetTools/my-hyper-utils.git" }
+rand = "*"
