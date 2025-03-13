@@ -18,6 +18,7 @@ use crate::http_connectors::*;
 
 use crate::http_clients_cache::*;
 
+use crate::FormDataBuilder;
 use crate::HttpClientResolver;
 
 use crate::FlUrlError;
@@ -467,6 +468,10 @@ impl FlUrl {
         let request = self.compile_request(Method::POST, body.into());
 
         self.execute(request).await
+    }
+
+    pub async fn with_form_data(self) -> FormDataBuilder {
+        FormDataBuilder::new(self)
     }
 
     pub async fn patch(mut self, body: Option<Vec<u8>>) -> Result<FlUrlResponse, FlUrlError> {
