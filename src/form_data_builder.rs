@@ -44,7 +44,7 @@ impl FormDataBuilder {
         self
     }
 
-    fn response_as_bytes(&self) -> std::io::Result<Vec<u8>> {
+    fn form_data_to_bytes(&self) -> std::io::Result<Vec<u8>> {
         use std::io::Write;
 
         let mut buffer: Vec<u8> = Vec::new();
@@ -69,7 +69,7 @@ impl FormDataBuilder {
     }
 
     pub async fn post(mut self) -> Result<FlUrlResponse, FlUrlError> {
-        let body = self.response_as_bytes();
+        let body = self.form_data_to_bytes();
 
         if let Err(err) = body {
             panic!(
@@ -89,7 +89,7 @@ impl FormDataBuilder {
     }
 
     pub async fn put(mut self) -> Result<FlUrlResponse, FlUrlError> {
-        let body = self.response_as_bytes();
+        let body = self.form_data_to_bytes();
 
         if let Err(err) = body {
             panic!(
