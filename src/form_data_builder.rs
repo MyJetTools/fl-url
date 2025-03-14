@@ -60,6 +60,8 @@ impl FormDataBuilder {
             .headers
             .add(CONTENT_TYPE.as_str(), &content_type);
 
+        println!("{:?}", std::str::from_utf8(self.buffer.as_slice()));
+
         (self.buffer, self.fl_url)
     }
 
