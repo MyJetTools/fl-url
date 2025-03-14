@@ -470,7 +470,7 @@ impl FlUrl {
         self.execute(request).await
     }
 
-    pub async fn with_form_data(self) -> FormDataBuilder {
+    pub fn with_form_data(self) -> FormDataBuilder {
         FormDataBuilder::new(self)
     }
 
