@@ -459,11 +459,37 @@ impl FlUrl {
         self.execute(request).await
     }
 
+    pub async fn post_with_debug(
+        mut self,
+        body: Option<Vec<u8>>,
+        request_debug_string: &mut String,
+    ) -> Result<FlUrlResponse, FlUrlError> {
+        self.compile_debug_info_with_body(request_debug_string, "POST", body.as_ref());
+
+        let request = self.compile_request(Method::POST, body);
+        self.execute(request).await
+    }
+
     pub async fn post_json(
         mut self,
         json: &impl serde::Serialize,
     ) -> Result<FlUrlResponse, FlUrlError> {
         let body = serde_json::to_vec(json).unwrap();
+        self.headers.add_json_content_type();
+        let request = self.compile_request(Method::POST, body.into());
+
+        self.execute(request).await
+    }
+
+    pub async fn post_json_with_debug(
+        mut self,
+        json: &impl serde::Serialize,
+        request_debug_string: &mut String,
+    ) -> Result<FlUrlResponse, FlUrlError> {
+        let body = serde_json::to_vec(json).unwrap();
+
+        self.compile_debug_info_with_body(request_debug_string, "POST", Some(&body));
+
         self.headers.add_json_content_type();
         let request = self.compile_request(Method::POST, body.into());
 
@@ -508,6 +534,46 @@ impl FlUrl {
     pub async fn delete(mut self) -> Result<FlUrlResponse, FlUrlError> {
         let request = self.compile_request(Method::GET, None);
         self.execute(request).await
+    }
+
+    fn compile_debug_info(&self, out: &mut String) {
+        out.push_str("PathAndQuery: '");
+        out.push_str(self.url.get_path_and_query().as_str());
+        out.push_str("'; Headers: '");
+        out.push_str(self.headers.headers.as_str());
+    }
+    fn compile_debug_info_with_body(
+        &self,
+        request_debug_string: &mut String,
+        method: &str,
+        body: Option<&Vec<u8>>,
+    ) {
+        request_debug_string.push_str("[");
+        request_debug_string.push_str(method);
+        request_debug_string.push_str("] ");
+
+        self.compile_debug_info(request_debug_string);
+
+        if let Some(body) = body {
+            match std::str::from_utf8(&body) {
+                Ok(body) => {
+                    request_debug_string.push_str("Body: ");
+                    request_debug_string.push_str(body);
+                }
+                Err(_) => {
+                    request_debug_string.push_str("Body: ");
+                    request_debug_string.push_str(body.len().to_string().as_str());
+                    request_debug_string.push_str("non string bytes");
+                }
+            }
+        }
+    }
+
+    pub fn to_string(&self) -> String {
+        let mut result = String::new();
+        self.compile_debug_info(&mut result);
+
+        result
     }
 
     async fn execute_with_retry<

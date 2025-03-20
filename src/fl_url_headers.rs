@@ -2,7 +2,7 @@ use hyper::header::CONTENT_TYPE;
 use my_http_client::{HeaderValuePosition, MyHttpClientHeadersBuilder};
 
 pub struct FlUrlHeaders {
-    headers: MyHttpClientHeadersBuilder,
+    pub(crate) headers: MyHttpClientHeadersBuilder,
     pub has_connection_header: bool,
     pub len: usize,
     pub host_header_value: Option<HeaderValuePosition>,
