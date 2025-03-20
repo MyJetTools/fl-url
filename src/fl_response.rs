@@ -94,4 +94,29 @@ impl FlUrlResponse {
     pub fn get_status_code(&self) -> u16 {
         self.status_code.as_u16()
     }
+
+    pub fn to_string(&self) -> String {
+        let mut result = String::new();
+
+        result.push_str("StatusCode: ");
+        result.push_str(self.status_code.as_u16().to_string().as_str());
+
+        result.push_str("; ");
+
+        result.push_str("Headers: ");
+
+        let mut headers = HashMap::new();
+        self.response.copy_headers_to_hash_map(&mut headers);
+
+        for (key, value) in headers {
+            result.push_str(key);
+            result.push_str("='");
+            if let Some(value) = value {
+                result.push_str(value);
+            }
+            result.push_str("';");
+        }
+
+        result
+    }
 }
