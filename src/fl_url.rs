@@ -532,10 +532,18 @@ impl FlUrl {
     }
 
     pub async fn delete(mut self) -> Result<FlUrlResponse, FlUrlError> {
-        let request = self.compile_request(Method::GET, None);
+        let request = self.compile_request(Method::DELETE, None);
         self.execute(request).await
     }
 
+    pub async fn delete_with_debug(
+        mut self,
+        request_debug_string: &mut String,
+    ) -> Result<FlUrlResponse, FlUrlError> {
+        self.compile_debug_info_with_body(request_debug_string, "DELETE", None);
+        let request = self.compile_request(Method::DELETE, None);
+        self.execute(request).await
+    }
     fn compile_debug_info(&self, out: &mut String) {
         out.push_str("PathAndQuery: '");
         out.push_str(self.url.get_path_and_query().as_str());
