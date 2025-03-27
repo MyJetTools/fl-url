@@ -62,8 +62,7 @@ impl MyHttpClientConnector<TlsStream<TcpStream>> for HttpsConnector {
         let mut client_config = client_config.unwrap();
 
         if self.h2 {
-            client_config.alpn_protocols =
-                vec![b"h2".to_vec(), b"http/1.1".to_vec(), b"http/1.0".to_vec()];
+            client_config.alpn_protocols = vec![b"h2".to_vec()];
         }
 
         let connector = TlsConnector::from(Arc::new(client_config));
