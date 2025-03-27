@@ -1,7 +1,11 @@
 use std::sync::Arc;
 
-use crate::http_connectors::{UnixSocketConnector, UnixSocketStream};
-use my_http_client::http1::MyHttpClient;
+use crate::{
+    fl_url::FlUrlMode,
+    http_connectors::{UnixSocketConnector, UnixSocketStream},
+    my_http_client_wrapper::MyHttpClientWrapper,
+};
+use my_http_client::{http1::MyHttpClient, http1_hyper::MyHttpHyperClient, http2::MyHttp2Client};
 use my_tls::ClientCertificate;
 use rust_extensions::ShortString;
 use url_utils::UrlBuilder;
@@ -16,17 +20,20 @@ pub struct UnixSocketHttpClientCreator;
 impl HttpClientResolver<UnixSocketStream, UnixSocketConnector> for UnixSocketHttpClientCreator {
     async fn get_http_client(
         &self,
+        mode: FlUrlMode,
         url_builder: &UrlBuilder,
         _host_value: Option<&str>,
         _client_certificate: Option<&ClientCertificate>,
         #[cfg(feature = "with-ssh")] _ssh_credentials: Option<&Arc<my_ssh::SshCredentials>>,
-    ) -> Arc<MyHttpClient<UnixSocketStream, UnixSocketConnector>> {
+    ) -> Arc<MyHttpClientWrapper<UnixSocketStream, UnixSocketConnector>> {
         let remote_endpoint = url_builder.get_remote_endpoint(None);
         let connector = UnixSocketConnector::new(remote_endpoint.to_owned());
-        let new_one = MyHttpClient::new(connector);
 
-        let new_one = Arc::new(new_one);
-        new_one
+        match mode {
+            FlUrlMode::H2 => Arc::new(MyHttp2Client::new(connector).into()),
+            FlUrlMode::Http1NoHyper => Arc::new(MyHttpClient::new(connector).into()),
+            FlUrlMode::Http1Hyper => Arc::new(MyHttpHyperClient::new(connector).into()),
+        }
     }
 
     async fn drop_http_client(
@@ -41,11 +48,12 @@ impl HttpClientResolver<UnixSocketStream, UnixSocketConnector> for UnixSocketHtt
 impl HttpClientResolver<UnixSocketStream, UnixSocketConnector> for HttpClientsCache {
     async fn get_http_client(
         &self,
+        mode: FlUrlMode,
         url_builder: &UrlBuilder,
         host_header: Option<&str>,
         client_certificate: Option<&ClientCertificate>,
         #[cfg(feature = "with-ssh")] ssh_credentials: Option<&Arc<my_ssh::SshCredentials>>,
-    ) -> Arc<MyHttpClient<UnixSocketStream, UnixSocketConnector>> {
+    ) -> Arc<MyHttpClientWrapper<UnixSocketStream, UnixSocketConnector>> {
         let remote_endpoint = url_builder.get_remote_endpoint(None);
 
         let mut write_access = self.inner.write().await;
@@ -58,6 +66,7 @@ impl HttpClientResolver<UnixSocketStream, UnixSocketConnector> for HttpClientsCa
 
         let new_one = UnixSocketHttpClientCreator
             .get_http_client(
+                mode,
                 url_builder,
                 host_header,
                 client_certificate,

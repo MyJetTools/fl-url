@@ -27,6 +27,13 @@ use crate::FlUrlHeaders;
 
 use url_utils::UrlBuilder;
 
+#[derive(Debug, Clone, Copy)]
+pub enum FlUrlMode {
+    H2,
+    Http1NoHyper,
+    Http1Hyper,
+}
+
 pub struct FlUrl {
     pub url: UrlBuilder,
     pub headers: FlUrlHeaders,
@@ -39,6 +46,7 @@ pub struct FlUrl {
     pub clients_cache: Option<Arc<HttpClientsCache>>,
     pub compress_body: bool,
     pub print_input_request: bool,
+    mode: FlUrlMode,
     #[cfg(feature = "with-ssh")]
     ssh_credentials: Option<my_ssh::SshCredentials>,
     #[cfg(feature = "with-ssh")]
@@ -105,6 +113,7 @@ impl FlUrl {
             ssh_credentials: credentials,
             #[cfg(feature = "with-ssh")]
             ssh_security_credentials_resolver: None,
+            mode: FlUrlMode::Http1Hyper,
         }
     }
 
@@ -120,6 +129,11 @@ impl FlUrl {
 
     pub fn set_not_used_connection_timeout(mut self, timeout: Duration) -> Self {
         self.not_used_connection_timeout = timeout;
+        self
+    }
+
+    pub fn update_mode(mut self, mode: FlUrlMode) -> Self {
+        self.mode = mode;
         self
     }
 
@@ -585,7 +599,7 @@ impl FlUrl {
     }
 
     async fn execute_with_retry<
-        TStream: tokio::io::AsyncRead + tokio::io::AsyncWrite + Send + Sync + 'static,
+        TStream: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + Sync + 'static,
         TConnector: MyHttpClientConnector<TStream> + Send + Sync + 'static,
         THttpClientResolver: HttpClientResolver<TStream, TConnector>,
     >(
@@ -604,6 +618,7 @@ impl FlUrl {
         loop {
             let tcp_client = http_client_resolver
                 .get_http_client(
+                    self.mode,
                     &self.url,
                     self.headers.get_host_header_value(),
                     client_cert.as_ref(),
@@ -646,5 +661,22 @@ impl FlUrl {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::FlUrl;
+
+    #[tokio::test]
+    async fn test() {
+        let mut fl_url_resp = FlUrl::new("https://jetdev.eu/img/logo.png")
+            .get()
+            .await
+            .unwrap();
+
+        let resp = fl_url_resp.get_body_as_slice().await.unwrap();
+
+        println!("{}", resp.len());
     }
 }

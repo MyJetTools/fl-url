@@ -1,11 +1,14 @@
 use std::sync::Arc;
 
-use my_http_client::http1::MyHttpClient;
+use my_http_client::{http1::MyHttpClient, http1_hyper::MyHttpHyperClient, http2::MyHttp2Client};
 use my_tls::ClientCertificate;
 use rust_extensions::{remote_endpoint::RemoteEndpoint, ShortString};
 use url_utils::UrlBuilder;
 
-use crate::http_connectors::SshHttpConnector;
+use crate::{
+    fl_url::FlUrlMode, http_connectors::SshHttpConnector,
+    my_http_client_wrapper::MyHttpClientWrapper,
+};
 
 use super::{HttpClientResolver, HttpClientsCache};
 
@@ -15,11 +18,12 @@ pub struct SshHttpClientCreator;
 impl HttpClientResolver<my_ssh::SshAsyncChannel, SshHttpConnector> for SshHttpClientCreator {
     async fn get_http_client(
         &self,
+        mode: FlUrlMode,
         url_builder: &UrlBuilder,
         _host_header: Option<&str>,
         _client_certificate: Option<&ClientCertificate>,
         #[cfg(feature = "with-ssh")] ssh_credentials: Option<&Arc<my_ssh::SshCredentials>>,
-    ) -> Arc<MyHttpClient<my_ssh::SshAsyncChannel, SshHttpConnector>> {
+    ) -> Arc<MyHttpClientWrapper<my_ssh::SshAsyncChannel, SshHttpConnector>> {
         let ssh_credentials = ssh_credentials.unwrap();
         let ssh_session = my_ssh::SSH_SESSIONS_POOL
             .get_or_create(ssh_credentials)
@@ -31,9 +35,11 @@ impl HttpClientResolver<my_ssh::SshAsyncChannel, SshHttpConnector> for SshHttpCl
             ssh_session,
             remote_host: remote_endpoint.to_owned(),
         };
-        let new_one = MyHttpClient::new(connector);
-
-        Arc::new(new_one)
+        match mode {
+            FlUrlMode::H2 => Arc::new(MyHttp2Client::new(connector).into()),
+            FlUrlMode::Http1NoHyper => Arc::new(MyHttpClient::new(connector).into()),
+            FlUrlMode::Http1Hyper => Arc::new(MyHttpHyperClient::new(connector).into()),
+        }
     }
 
     async fn drop_http_client(
@@ -48,11 +54,12 @@ impl HttpClientResolver<my_ssh::SshAsyncChannel, SshHttpConnector> for SshHttpCl
 impl HttpClientResolver<my_ssh::SshAsyncChannel, SshHttpConnector> for HttpClientsCache {
     async fn get_http_client(
         &self,
+        mode: FlUrlMode,
         url_builder: &UrlBuilder,
         host_header: Option<&str>,
         client_certificate: Option<&ClientCertificate>,
         ssh_credentials: Option<&Arc<my_ssh::SshCredentials>>,
-    ) -> Arc<MyHttpClient<my_ssh::SshAsyncChannel, SshHttpConnector>> {
+    ) -> Arc<MyHttpClientWrapper<my_ssh::SshAsyncChannel, SshHttpConnector>> {
         let remote_endpoint = url_builder.get_remote_endpoint(None);
         let hash_map_key = get_ssh_key(ssh_credentials.unwrap(), remote_endpoint);
         let mut write_access = self.inner.write().await;
@@ -63,6 +70,7 @@ impl HttpClientResolver<my_ssh::SshAsyncChannel, SshHttpConnector> for HttpClien
 
         let new_one = SshHttpClientCreator
             .get_http_client(
+                mode,
                 url_builder,
                 host_header,
                 client_certificate,

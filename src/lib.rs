@@ -8,6 +8,7 @@ pub use fl_drop_connection_scenario::*;
 mod fl_response;
 mod fl_url;
 mod into_fl_url;
+mod my_http_client_wrapper;
 
 pub use fl_response::*;
 pub use fl_url::FlUrl;

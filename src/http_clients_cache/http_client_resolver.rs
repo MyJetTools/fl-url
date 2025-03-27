@@ -1,22 +1,26 @@
 use std::sync::Arc;
 
-use my_http_client::{http1::MyHttpClient, MyHttpClientConnector};
+use my_http_client::MyHttpClientConnector;
 use my_tls::ClientCertificate;
 use url_utils::UrlBuilder;
 
+use crate::{fl_url::FlUrlMode, my_http_client_wrapper::MyHttpClientWrapper};
+
 #[async_trait::async_trait]
 pub trait HttpClientResolver<
-    TStream: tokio::io::AsyncRead + tokio::io::AsyncWrite + Send + Sync + 'static,
+    TStream: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + Sync + 'static,
     TConnector: MyHttpClientConnector<TStream> + Send + Sync + 'static,
 >
 {
     async fn get_http_client(
         &self,
+        mode: FlUrlMode,
         url_builder: &UrlBuilder,
         host_header: Option<&str>,
         client_certificate: Option<&ClientCertificate>,
+
         #[cfg(feature = "with-ssh")] ssh_credentials: Option<&Arc<my_ssh::SshCredentials>>,
-    ) -> Arc<MyHttpClient<TStream, TConnector>>;
+    ) -> Arc<MyHttpClientWrapper<TStream, TConnector>>;
 
     async fn drop_http_client(
         &self,

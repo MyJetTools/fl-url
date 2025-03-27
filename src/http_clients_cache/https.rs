@@ -1,12 +1,14 @@
 use std::sync::Arc;
 
-use my_http_client::http1::MyHttpClient;
+use my_http_client::{http1::MyHttpClient, http1_hyper::MyHttpHyperClient, http2::MyHttp2Client};
 use my_tls::{tokio_rustls::client::TlsStream, ClientCertificate};
 use rust_extensions::{remote_endpoint::RemoteEndpoint, ShortString};
 use tokio::net::TcpStream;
 use url_utils::UrlBuilder;
 
-use crate::http_connectors::HttpsConnector;
+use crate::{
+    fl_url::FlUrlMode, http_connectors::HttpsConnector, my_http_client_wrapper::MyHttpClientWrapper,
+};
 
 use super::{HttpClientResolver, HttpClientsCache};
 
@@ -18,11 +20,12 @@ const HTTPS_DEFAULT_PORT: u16 = 443;
 impl HttpClientResolver<TlsStream<TcpStream>, HttpsConnector> for HttpsClientCreator {
     async fn get_http_client(
         &self,
+        mode: FlUrlMode,
         url_builder: &UrlBuilder,
         host_header: Option<&str>,
         client_certificate: Option<&ClientCertificate>,
         #[cfg(feature = "with-ssh")] _ssh_credentials: Option<&Arc<my_ssh::SshCredentials>>,
-    ) -> Arc<MyHttpClient<TlsStream<TcpStream>, HttpsConnector>> {
+    ) -> Arc<MyHttpClientWrapper<TlsStream<TcpStream>, HttpsConnector>> {
         let remote_endpoint = url_builder.get_remote_endpoint(HTTPS_DEFAULT_PORT.into());
 
         let domain_override = if url_builder.host_is_ip() {
@@ -39,9 +42,12 @@ impl HttpClientResolver<TlsStream<TcpStream>, HttpsConnector> for HttpsClientCre
             domain_override,
             client_certificate.map(|x| x.clone()),
         );
-        let new_one = MyHttpClient::new(connector);
 
-        Arc::new(new_one)
+        match mode {
+            FlUrlMode::H2 => Arc::new(MyHttp2Client::new(connector).into()),
+            FlUrlMode::Http1NoHyper => Arc::new(MyHttpClient::new(connector).into()),
+            FlUrlMode::Http1Hyper => Arc::new(MyHttpHyperClient::new(connector).into()),
+        }
     }
 
     async fn drop_http_client(
@@ -56,11 +62,12 @@ impl HttpClientResolver<TlsStream<TcpStream>, HttpsConnector> for HttpsClientCre
 impl HttpClientResolver<TlsStream<TcpStream>, HttpsConnector> for HttpClientsCache {
     async fn get_http_client(
         &self,
+        mode: FlUrlMode,
         url_builder: &UrlBuilder,
         host_header: Option<&str>,
         client_certificate: Option<&ClientCertificate>,
         #[cfg(feature = "with-ssh")] ssh_credentials: Option<&Arc<my_ssh::SshCredentials>>,
-    ) -> Arc<MyHttpClient<TlsStream<TcpStream>, HttpsConnector>> {
+    ) -> Arc<MyHttpClientWrapper<TlsStream<TcpStream>, HttpsConnector>> {
         let remote_endpoint = url_builder.get_remote_endpoint(HTTPS_DEFAULT_PORT.into());
         let hash_map_key = get_https_key(remote_endpoint);
         let mut write_access = self.inner.write().await;
@@ -71,6 +78,7 @@ impl HttpClientResolver<TlsStream<TcpStream>, HttpsConnector> for HttpClientsCac
 
         let new_one = HttpsClientCreator
             .get_http_client(
+                mode,
                 url_builder,
                 host_header,
                 client_certificate,
