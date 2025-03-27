@@ -1,7 +1,9 @@
+use bytes::Bytes;
+use http_body_util::Full;
 use hyper::Method;
 
+use hyper::Uri;
 use hyper::Version;
-use my_http_client::http1::*;
 use my_http_client::MyHttpClientConnector;
 use my_tls::tokio_rustls::client::TlsStream;
 
@@ -310,13 +312,12 @@ impl FlUrl {
 
     async fn execute(
         self,
-        request: MyHttpRequest,
-        is_https: bool,
+        request: my_http_client::http::request::Request<Full<Bytes>>,
     ) -> Result<FlUrlResponse, FlUrlError> {
         #[cfg(feature = "with-ssh")]
         {
             if self.ssh_credentials.is_some() {
-                return self.execute_ssh(request, is_https).await;
+                return self.execute_ssh(request).await;
             }
         }
 
@@ -332,7 +333,6 @@ impl FlUrl {
                 if self.do_not_reuse_connection {
                     self.execute_with_retry::<TcpStream, HttpConnector, _>(
                         &request,
-                        is_https,
                         &http::HttpClientCreator,
                         #[cfg(feature = "with-ssh")]
                         None,
@@ -342,7 +342,6 @@ impl FlUrl {
                     let clients_cache = self.get_clients_cache();
                     self.execute_with_retry::<TcpStream, HttpConnector, _>(
                         &request,
-                        is_https,
                         clients_cache.as_ref(),
                         #[cfg(feature = "with-ssh")]
                         None,
@@ -354,7 +353,6 @@ impl FlUrl {
                 if self.do_not_reuse_connection {
                     self.execute_with_retry::<TlsStream<TcpStream>, HttpsConnector, _>(
                         &request,
-                        is_https,
                         &https::HttpsClientCreator,
                         #[cfg(feature = "with-ssh")]
                         None,
@@ -365,7 +363,6 @@ impl FlUrl {
 
                     self.execute_with_retry::<TlsStream<TcpStream>, HttpsConnector, _>(
                         &request,
-                        is_https,
                         clients_cache.as_ref(),
                         #[cfg(feature = "with-ssh")]
                         None,
@@ -382,7 +379,6 @@ impl FlUrl {
                 if self.do_not_reuse_connection {
                     self.execute_with_retry::<UnixSocketStream, UnixSocketConnector, _>(
                         &request,
-                        is_https,
                         &unix_socket::UnixSocketHttpClientCreator,
                         #[cfg(feature = "with-ssh")]
                         None,
@@ -393,7 +389,6 @@ impl FlUrl {
 
                     self.execute_with_retry::<UnixSocketStream, UnixSocketConnector, _>(
                         &request,
-                        is_https,
                         clients_cache.as_ref(),
                         #[cfg(feature = "with-ssh")]
                         None,
@@ -409,8 +404,7 @@ impl FlUrl {
     #[cfg(feature = "with-ssh")]
     async fn execute_ssh(
         mut self,
-        request: MyHttpRequest,
-        is_https: bool,
+        request: my_http_client::http::request::Request<Full<Bytes>>,
     ) -> Result<FlUrlResponse, FlUrlError> {
         let mut ssh_credentials = self.ssh_credentials.take().unwrap();
 
@@ -423,7 +417,6 @@ impl FlUrl {
         let clients_cache = self.get_clients_cache();
         self.execute_with_retry::<my_ssh::SshAsyncChannel, SshHttpConnector, _>(
             &request,
-            is_https,
             clients_cache.as_ref(),
             Some(Arc::new(ssh_credentials)),
         )
@@ -452,25 +445,11 @@ impl FlUrl {
         result
     }
 
-    fn compile_request(&mut self, method: Method, body: Option<Vec<u8>>) -> MyHttpRequest {
-        if !self.headers.has_host_header() {
-            if !self.url.host_is_ip() {
-                self.headers
-                    .add(hyper::header::HOST.as_str(), self.url.get_host());
-            }
-        }
-
-        if self.url.is_unix_socket() {
-            self.headers.add(hyper::header::ACCEPT.as_str(), "*/*");
-        } else {
-            if !self.headers.has_connection_header {
-                if !self.do_not_reuse_connection {
-                    self.headers
-                        .add(hyper::header::CONNECTION.as_str(), "keep-alive");
-                }
-            }
-        }
-
+    fn compile_request(
+        &mut self,
+        method: Method,
+        body: Option<Vec<u8>>,
+    ) -> my_http_client::http::request::Request<Full<Bytes>> {
         let mut body = body.unwrap_or_default();
 
         if self.compress_body {
@@ -479,31 +458,70 @@ impl FlUrl {
 
         let path_and_query = self.url.get_path_and_query();
 
-        MyHttpRequest::new(
-            method,
-            &path_and_query,
-            Version::HTTP_11,
-            self.headers.get_builder(),
-            body,
-        )
+        let mut result = match self.mode {
+            FlUrlMode::H2 => {
+                let scheme = if self.url.get_scheme().is_https() {
+                    "https"
+                } else {
+                    "http"
+                };
+
+                let uri = Uri::builder()
+                    .authority(self.url.get_host_port())
+                    .path_and_query(path_and_query)
+                    .scheme(scheme)
+                    .build()
+                    .unwrap();
+                my_http_client::http::request::Builder::new()
+                    .version(Version::HTTP_2)
+                    .method(method)
+                    .uri(uri)
+            }
+            _ => my_http_client::http::request::Builder::new()
+                .method(method)
+                .uri(path_and_query),
+        };
+
+        for (key, value) in self.headers.iter() {
+            result = result.header(key, value);
+        }
+
+        if !self.headers.has_host_header() {
+            if !self.url.host_is_ip() {
+                if !self.mode.is_h2() {
+                    result = result.header(hyper::header::HOST.as_str(), self.url.get_host());
+                }
+            }
+        }
+
+        if self.url.is_unix_socket() {
+            result = result.header(hyper::header::ACCEPT, "*/*");
+        } else {
+            if !self.headers.has_connection_header {
+                if !self.do_not_reuse_connection {
+                    result = result.header(hyper::header::CONNECTION.as_str(), "keep-alive");
+                }
+            }
+        }
+
+        let result = result.body(Full::new(body.into())).unwrap();
+
+        result
     }
 
     pub async fn get(mut self) -> Result<FlUrlResponse, FlUrlError> {
-        let is_https = self.url.get_scheme().is_https();
         let request = self.compile_request(Method::GET, None);
-        self.execute(request, is_https).await
+        self.execute(request).await
     }
 
     pub async fn head(mut self) -> Result<FlUrlResponse, FlUrlError> {
-        let is_https = self.url.get_scheme().is_https();
         let request = self.compile_request(Method::HEAD, None);
-        self.execute(request, is_https).await
+        self.execute(request).await
     }
 
     pub async fn post(mut self, body: Option<Vec<u8>>) -> Result<FlUrlResponse, FlUrlError> {
-        let is_https = self.url.get_scheme().is_https();
         let request = self.compile_request(Method::POST, body);
-        self.execute(request, is_https).await
+        self.execute(request).await
     }
 
     pub async fn post_with_debug(
@@ -511,24 +529,22 @@ impl FlUrl {
         body: Option<Vec<u8>>,
         request_debug_string: &mut String,
     ) -> Result<FlUrlResponse, FlUrlError> {
-        let is_https = self.url.get_scheme().is_https();
         self.compile_debug_info_with_body(request_debug_string, "POST", body.as_ref());
 
         let request = self.compile_request(Method::POST, body);
-        self.execute(request, is_https).await
+        self.execute(request).await
     }
 
     pub async fn post_json(
         mut self,
         json: &impl serde::Serialize,
     ) -> Result<FlUrlResponse, FlUrlError> {
-        let is_https = self.url.get_scheme().is_https();
         let body = serde_json::to_vec(json).unwrap();
         self.headers.add_json_content_type();
 
         let request = self.compile_request(Method::POST, body.into());
 
-        self.execute(request, is_https).await
+        self.execute(request).await
     }
 
     pub async fn post_json_with_debug(
@@ -536,7 +552,6 @@ impl FlUrl {
         json: &impl serde::Serialize,
         request_debug_string: &mut String,
     ) -> Result<FlUrlResponse, FlUrlError> {
-        let is_https = self.url.get_scheme().is_https();
         let body = serde_json::to_vec(json).unwrap();
 
         self.compile_debug_info_with_body(request_debug_string, "POST", Some(&body));
@@ -544,7 +559,7 @@ impl FlUrl {
         self.headers.add_json_content_type();
         let request = self.compile_request(Method::POST, body.into());
 
-        self.execute(request, is_https).await
+        self.execute(request).await
     }
 
     pub fn with_form_data(self) -> FormDataBuilder {
@@ -552,54 +567,48 @@ impl FlUrl {
     }
 
     pub async fn patch(mut self, body: Option<Vec<u8>>) -> Result<FlUrlResponse, FlUrlError> {
-        let is_https = self.url.get_scheme().is_https();
         let request = self.compile_request(Method::PATCH, body);
-        self.execute(request, is_https).await
+        self.execute(request).await
     }
 
     pub async fn patch_json(
         mut self,
         json: &impl serde::Serialize,
     ) -> Result<FlUrlResponse, FlUrlError> {
-        let is_https = self.url.get_scheme().is_https();
         let body = serde_json::to_vec(json).unwrap();
         self.headers.add_json_content_type();
         let request = self.compile_request(Method::PATCH, body.into());
 
-        self.execute(request, is_https).await
+        self.execute(request).await
     }
 
     pub async fn put(mut self, body: Option<Vec<u8>>) -> Result<FlUrlResponse, FlUrlError> {
-        let is_https = self.url.get_scheme().is_https();
         let request = self.compile_request(Method::PUT, body);
-        self.execute(request, is_https).await
+        self.execute(request).await
     }
 
     pub async fn put_json(
         mut self,
         json: &impl serde::Serialize,
     ) -> Result<FlUrlResponse, FlUrlError> {
-        let is_https = self.url.get_scheme().is_https();
         let body = serde_json::to_vec(json).unwrap();
         self.headers.add_json_content_type();
         let request = self.compile_request(Method::PUT, body.into());
-        self.execute(request, is_https).await
+        self.execute(request).await
     }
 
     pub async fn delete(mut self) -> Result<FlUrlResponse, FlUrlError> {
-        let is_https = self.url.get_scheme().is_https();
         let request = self.compile_request(Method::DELETE, None);
-        self.execute(request, is_https).await
+        self.execute(request).await
     }
 
     pub async fn delete_with_debug(
         mut self,
         request_debug_string: &mut String,
     ) -> Result<FlUrlResponse, FlUrlError> {
-        let is_https = self.url.get_scheme().is_https();
         self.compile_debug_info_with_body(request_debug_string, "DELETE", None);
         let request = self.compile_request(Method::DELETE, None);
-        self.execute(request, is_https).await
+        self.execute(request).await
     }
     fn compile_debug_info(&self, out: &mut String) {
         out.push_str("PathAndQuery: '");
@@ -647,13 +656,12 @@ impl FlUrl {
         THttpClientResolver: HttpClientResolver<TStream, TConnector>,
     >(
         mut self,
-        request: &MyHttpRequest,
-        is_https: bool,
+        request: &my_http_client::http::request::Request<Full<Bytes>>,
         http_client_resolver: &THttpClientResolver,
         #[cfg(feature = "with-ssh")] ssh_credentials: Option<Arc<my_ssh::SshCredentials>>,
     ) -> Result<FlUrlResponse, FlUrlError> {
         if self.print_input_request {
-            println!("{:?}", std::str::from_utf8(request.headers.as_slice()));
+            println!("{:?}", request.headers());
         }
         let mut attempt_no = 0;
 
@@ -671,9 +679,7 @@ impl FlUrl {
                 )
                 .await;
 
-            let response = tcp_client
-                .do_request(request, self.request_timeout, is_https)
-                .await;
+            let response = tcp_client.do_request(request, self.request_timeout).await;
 
             match response {
                 Ok(response) => {
@@ -722,8 +728,9 @@ mod test {
             .await
             .unwrap();
 
-        let resp = fl_url_resp.get_body_as_slice().await.unwrap();
+        println!("{}", fl_url_resp.get_status_code());
 
+        let resp = fl_url_resp.get_body_as_slice().await.unwrap();
         println!("{}", resp.len());
     }
 

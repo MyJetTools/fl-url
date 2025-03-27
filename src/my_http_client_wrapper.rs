@@ -1,5 +1,7 @@
 use std::time::Duration;
 
+use bytes::Bytes;
+use http_body_util::Full;
 use my_http_client::{
     http1::{MyHttpRequest, MyHttpResponse},
     MyHttpClientConnector, MyHttpClientError,
@@ -21,25 +23,28 @@ impl<
 {
     pub async fn do_request(
         &self,
-        req: &MyHttpRequest,
+        request: &my_http_client::http::request::Request<Full<Bytes>>,
         request_timeout: Duration,
-        is_https: bool,
     ) -> Result<MyHttpResponse<TStream>, MyHttpClientError> {
         match self {
             MyHttpClientWrapper::MyHttpClient(my_http_client) => {
-                my_http_client.do_request(req, request_timeout).await
+                let request = MyHttpRequest::from_hyper_request(request.clone()).await;
+                my_http_client.do_request(&request, request_timeout).await
             }
             MyHttpClientWrapper::Hyper(my_http_client) => {
-                let req = req.to_hyper_h1_request();
-                let result = my_http_client.do_request(req, request_timeout).await?;
+                let result = my_http_client
+                    .do_request(request.clone(), request_timeout)
+                    .await?;
                 Ok(MyHttpResponse::Response(result))
             }
 
             MyHttpClientWrapper::H2(my_http_client) => {
-                let req = req.to_hyper_h2_request(is_https);
+                //let req = req.to_hyper_h2_request(is_https);
 
-                println!("H2 request: {:?}", req);
-                let result = my_http_client.do_request(req, request_timeout).await?;
+                //println!("H2 request: {:?}", req);
+                let result = my_http_client
+                    .do_request(request.clone(), request_timeout)
+                    .await?;
                 Ok(MyHttpResponse::Response(result))
             }
         }
