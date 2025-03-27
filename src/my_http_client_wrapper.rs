@@ -23,6 +23,7 @@ impl<
         &self,
         req: &MyHttpRequest,
         request_timeout: Duration,
+        is_https: bool,
     ) -> Result<MyHttpResponse<TStream>, MyHttpClientError> {
         match self {
             MyHttpClientWrapper::MyHttpClient(my_http_client) => {
@@ -35,7 +36,7 @@ impl<
             }
 
             MyHttpClientWrapper::H2(my_http_client) => {
-                let req = req.to_hyper_h2_request();
+                let req = req.to_hyper_h2_request(is_https);
                 let result = my_http_client.do_request(req, request_timeout).await?;
                 Ok(MyHttpResponse::Response(result))
             }

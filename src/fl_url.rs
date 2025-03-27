@@ -299,11 +299,15 @@ impl FlUrl {
         self
     }
 
-    async fn execute(self, request: MyHttpRequest) -> Result<FlUrlResponse, FlUrlError> {
+    async fn execute(
+        self,
+        request: MyHttpRequest,
+        is_https: bool,
+    ) -> Result<FlUrlResponse, FlUrlError> {
         #[cfg(feature = "with-ssh")]
         {
             if self.ssh_credentials.is_some() {
-                return self.execute_ssh(request).await;
+                return self.execute_ssh(request, is_https).await;
             }
         }
 
@@ -319,6 +323,7 @@ impl FlUrl {
                 if self.do_not_reuse_connection {
                     self.execute_with_retry::<TcpStream, HttpConnector, _>(
                         &request,
+                        is_https,
                         &http::HttpClientCreator,
                         #[cfg(feature = "with-ssh")]
                         None,
@@ -328,6 +333,7 @@ impl FlUrl {
                     let clients_cache = self.get_clients_cache();
                     self.execute_with_retry::<TcpStream, HttpConnector, _>(
                         &request,
+                        is_https,
                         clients_cache.as_ref(),
                         #[cfg(feature = "with-ssh")]
                         None,
@@ -339,6 +345,7 @@ impl FlUrl {
                 if self.do_not_reuse_connection {
                     self.execute_with_retry::<TlsStream<TcpStream>, HttpsConnector, _>(
                         &request,
+                        is_https,
                         &https::HttpsClientCreator,
                         #[cfg(feature = "with-ssh")]
                         None,
@@ -349,6 +356,7 @@ impl FlUrl {
 
                     self.execute_with_retry::<TlsStream<TcpStream>, HttpsConnector, _>(
                         &request,
+                        is_https,
                         clients_cache.as_ref(),
                         #[cfg(feature = "with-ssh")]
                         None,
@@ -365,6 +373,7 @@ impl FlUrl {
                 if self.do_not_reuse_connection {
                     self.execute_with_retry::<UnixSocketStream, UnixSocketConnector, _>(
                         &request,
+                        is_https,
                         &unix_socket::UnixSocketHttpClientCreator,
                         #[cfg(feature = "with-ssh")]
                         None,
@@ -375,6 +384,7 @@ impl FlUrl {
 
                     self.execute_with_retry::<UnixSocketStream, UnixSocketConnector, _>(
                         &request,
+                        is_https,
                         clients_cache.as_ref(),
                         #[cfg(feature = "with-ssh")]
                         None,
@@ -388,7 +398,11 @@ impl FlUrl {
     }
 
     #[cfg(feature = "with-ssh")]
-    async fn execute_ssh(mut self, request: MyHttpRequest) -> Result<FlUrlResponse, FlUrlError> {
+    async fn execute_ssh(
+        mut self,
+        request: MyHttpRequest,
+        is_https: bool,
+    ) -> Result<FlUrlResponse, FlUrlError> {
         let mut ssh_credentials = self.ssh_credentials.take().unwrap();
 
         if let Some(private_key_resolver) = self.ssh_security_credentials_resolver.take() {
@@ -400,6 +414,7 @@ impl FlUrl {
         let clients_cache = self.get_clients_cache();
         self.execute_with_retry::<my_ssh::SshAsyncChannel, SshHttpConnector, _>(
             &request,
+            is_https,
             clients_cache.as_ref(),
             Some(Arc::new(ssh_credentials)),
         )
@@ -465,18 +480,21 @@ impl FlUrl {
     }
 
     pub async fn get(mut self) -> Result<FlUrlResponse, FlUrlError> {
+        let is_https = self.url.get_scheme().is_https();
         let request = self.compile_request(Method::GET, None);
-        self.execute(request).await
+        self.execute(request, is_https).await
     }
 
     pub async fn head(mut self) -> Result<FlUrlResponse, FlUrlError> {
+        let is_https = self.url.get_scheme().is_https();
         let request = self.compile_request(Method::HEAD, None);
-        self.execute(request).await
+        self.execute(request, is_https).await
     }
 
     pub async fn post(mut self, body: Option<Vec<u8>>) -> Result<FlUrlResponse, FlUrlError> {
+        let is_https = self.url.get_scheme().is_https();
         let request = self.compile_request(Method::POST, body);
-        self.execute(request).await
+        self.execute(request, is_https).await
     }
 
     pub async fn post_with_debug(
@@ -484,21 +502,24 @@ impl FlUrl {
         body: Option<Vec<u8>>,
         request_debug_string: &mut String,
     ) -> Result<FlUrlResponse, FlUrlError> {
+        let is_https = self.url.get_scheme().is_https();
         self.compile_debug_info_with_body(request_debug_string, "POST", body.as_ref());
 
         let request = self.compile_request(Method::POST, body);
-        self.execute(request).await
+        self.execute(request, is_https).await
     }
 
     pub async fn post_json(
         mut self,
         json: &impl serde::Serialize,
     ) -> Result<FlUrlResponse, FlUrlError> {
+        let is_https = self.url.get_scheme().is_https();
         let body = serde_json::to_vec(json).unwrap();
         self.headers.add_json_content_type();
+
         let request = self.compile_request(Method::POST, body.into());
 
-        self.execute(request).await
+        self.execute(request, is_https).await
     }
 
     pub async fn post_json_with_debug(
@@ -506,6 +527,7 @@ impl FlUrl {
         json: &impl serde::Serialize,
         request_debug_string: &mut String,
     ) -> Result<FlUrlResponse, FlUrlError> {
+        let is_https = self.url.get_scheme().is_https();
         let body = serde_json::to_vec(json).unwrap();
 
         self.compile_debug_info_with_body(request_debug_string, "POST", Some(&body));
@@ -513,7 +535,7 @@ impl FlUrl {
         self.headers.add_json_content_type();
         let request = self.compile_request(Method::POST, body.into());
 
-        self.execute(request).await
+        self.execute(request, is_https).await
     }
 
     pub fn with_form_data(self) -> FormDataBuilder {
@@ -521,48 +543,54 @@ impl FlUrl {
     }
 
     pub async fn patch(mut self, body: Option<Vec<u8>>) -> Result<FlUrlResponse, FlUrlError> {
+        let is_https = self.url.get_scheme().is_https();
         let request = self.compile_request(Method::PATCH, body);
-        self.execute(request).await
+        self.execute(request, is_https).await
     }
 
     pub async fn patch_json(
         mut self,
         json: &impl serde::Serialize,
     ) -> Result<FlUrlResponse, FlUrlError> {
+        let is_https = self.url.get_scheme().is_https();
         let body = serde_json::to_vec(json).unwrap();
         self.headers.add_json_content_type();
         let request = self.compile_request(Method::PATCH, body.into());
 
-        self.execute(request).await
+        self.execute(request, is_https).await
     }
 
     pub async fn put(mut self, body: Option<Vec<u8>>) -> Result<FlUrlResponse, FlUrlError> {
+        let is_https = self.url.get_scheme().is_https();
         let request = self.compile_request(Method::PUT, body);
-        self.execute(request).await
+        self.execute(request, is_https).await
     }
 
     pub async fn put_json(
         mut self,
         json: &impl serde::Serialize,
     ) -> Result<FlUrlResponse, FlUrlError> {
+        let is_https = self.url.get_scheme().is_https();
         let body = serde_json::to_vec(json).unwrap();
         self.headers.add_json_content_type();
         let request = self.compile_request(Method::PUT, body.into());
-        self.execute(request).await
+        self.execute(request, is_https).await
     }
 
     pub async fn delete(mut self) -> Result<FlUrlResponse, FlUrlError> {
+        let is_https = self.url.get_scheme().is_https();
         let request = self.compile_request(Method::DELETE, None);
-        self.execute(request).await
+        self.execute(request, is_https).await
     }
 
     pub async fn delete_with_debug(
         mut self,
         request_debug_string: &mut String,
     ) -> Result<FlUrlResponse, FlUrlError> {
+        let is_https = self.url.get_scheme().is_https();
         self.compile_debug_info_with_body(request_debug_string, "DELETE", None);
         let request = self.compile_request(Method::DELETE, None);
-        self.execute(request).await
+        self.execute(request, is_https).await
     }
     fn compile_debug_info(&self, out: &mut String) {
         out.push_str("PathAndQuery: '");
@@ -611,6 +639,7 @@ impl FlUrl {
     >(
         mut self,
         request: &MyHttpRequest,
+        is_https: bool,
         http_client_resolver: &THttpClientResolver,
         #[cfg(feature = "with-ssh")] ssh_credentials: Option<Arc<my_ssh::SshCredentials>>,
     ) -> Result<FlUrlResponse, FlUrlError> {
@@ -633,7 +662,9 @@ impl FlUrl {
                 )
                 .await;
 
-            let response = tcp_client.do_request(request, self.request_timeout).await;
+            let response = tcp_client
+                .do_request(request, self.request_timeout, is_https)
+                .await;
 
             match response {
                 Ok(response) => {
@@ -675,8 +706,21 @@ mod test {
     use crate::FlUrl;
 
     #[tokio::test]
-    async fn test() {
+    async fn test_h1() {
         let mut fl_url_resp = FlUrl::new("https://jetdev.eu/img/logo.png")
+            .get()
+            .await
+            .unwrap();
+
+        let resp = fl_url_resp.get_body_as_slice().await.unwrap();
+
+        println!("{}", resp.len());
+    }
+
+    #[tokio::test]
+    async fn test_h2() {
+        let mut fl_url_resp = FlUrl::new("https://jetdev.eu/img/logo.png")
+            .update_mode(crate::fl_url::FlUrlMode::H2)
             .get()
             .await
             .unwrap();
