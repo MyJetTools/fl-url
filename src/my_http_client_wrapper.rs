@@ -1,7 +1,5 @@
 use std::time::Duration;
 
-use bytes::Bytes;
-use http_body_util::Full;
 use my_http_client::{
     http1::{MyHttpRequest, MyHttpResponse},
     MyHttpClientConnector, MyHttpClientError,
@@ -31,13 +29,13 @@ impl<
                 my_http_client.do_request(req, request_timeout).await
             }
             MyHttpClientWrapper::Hyper(my_http_client) => {
-                let req: hyper::Request<Full<Bytes>> = req.into();
+                let req = req.to_hyper_h1_request();
                 let result = my_http_client.do_request(req, request_timeout).await?;
                 Ok(MyHttpResponse::Response(result))
             }
 
             MyHttpClientWrapper::H2(my_http_client) => {
-                let req: hyper::Request<Full<Bytes>> = req.into();
+                let req = req.to_hyper_h2_request();
                 let result = my_http_client.do_request(req, request_timeout).await?;
                 Ok(MyHttpResponse::Response(result))
             }

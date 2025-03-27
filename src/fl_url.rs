@@ -34,6 +34,12 @@ pub enum FlUrlMode {
     Http1Hyper,
 }
 
+impl Default for FlUrlMode {
+    fn default() -> Self {
+        Self::Http1Hyper
+    }
+}
+
 pub struct FlUrl {
     pub url: UrlBuilder,
     pub headers: FlUrlHeaders,
@@ -113,7 +119,7 @@ impl FlUrl {
             ssh_credentials: credentials,
             #[cfg(feature = "with-ssh")]
             ssh_security_credentials_resolver: None,
-            mode: FlUrlMode::Http1Hyper,
+            mode: Default::default(),
         }
     }
 
