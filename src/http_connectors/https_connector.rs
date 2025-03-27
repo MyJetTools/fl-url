@@ -12,6 +12,7 @@ pub struct HttpsConnector {
     pub remote_host: RemoteEndpointOwned,
     pub domain: Option<String>,
     pub client_certificate: Option<ClientCertificate>,
+    h2: bool,
 }
 
 impl HttpsConnector {
@@ -19,11 +20,13 @@ impl HttpsConnector {
         remote_host: RemoteEndpointOwned,
         domain: Option<String>,
         client_certificate: Option<ClientCertificate>,
+        h2: bool,
     ) -> Self {
         Self {
             remote_host,
             domain,
             client_certificate,
+            h2,
         }
     }
 }
@@ -56,7 +59,12 @@ impl MyHttpClientConnector<TlsStream<TcpStream>> for HttpsConnector {
             );
         }
 
-        let client_config = client_config.unwrap();
+        let mut client_config = client_config.unwrap();
+
+        if self.h2 {
+            client_config.alpn_protocols =
+                vec![b"h2".to_vec(), b"http/1.1".to_vec(), b"http/1.0".to_vec()];
+        }
 
         let connector = TlsConnector::from(Arc::new(client_config));
 

@@ -41,6 +41,7 @@ impl HttpClientResolver<TlsStream<TcpStream>, HttpsConnector> for HttpsClientCre
             remote_endpoint.to_owned(),
             domain_override,
             client_certificate.map(|x| x.clone()),
+            mode.is_h2(),
         );
 
         match mode {

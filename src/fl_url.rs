@@ -34,6 +34,15 @@ pub enum FlUrlMode {
     Http1Hyper,
 }
 
+impl FlUrlMode {
+    pub fn is_h2(&self) -> bool {
+        match self {
+            Self::H2 => true,
+            _ => false,
+        }
+    }
+}
+
 impl Default for FlUrlMode {
     fn default() -> Self {
         Self::Http1Hyper
@@ -703,6 +712,7 @@ impl FlUrl {
 
 #[cfg(test)]
 mod test {
+
     use crate::FlUrl;
 
     #[tokio::test]
