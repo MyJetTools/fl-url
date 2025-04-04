@@ -14,6 +14,12 @@ use super::{HttpClientResolver, HttpClientsCache};
 
 pub struct HttpClientCreator;
 
+impl Drop for HttpClientCreator {
+    fn drop(&mut self) {
+        println!("Drop HttpClientCreator");
+    }
+}
+
 const HTTP_DEFAULT_PORT: u16 = 80;
 
 #[async_trait::async_trait]
