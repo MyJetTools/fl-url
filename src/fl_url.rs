@@ -668,7 +668,7 @@ impl FlUrl {
         let client_cert = self.client_cert.take();
 
         loop {
-            let tcp_client = http_client_resolver
+            let http_client = http_client_resolver
                 .get_http_client(
                     self.mode,
                     &self.url,
@@ -679,7 +679,7 @@ impl FlUrl {
                 )
                 .await;
 
-            let response = tcp_client.do_request(request, self.request_timeout).await;
+            let response = http_client.do_request(request, self.request_timeout).await;
 
             match response {
                 Ok(response) => {

@@ -103,9 +103,3 @@ impl MyHttpClientConnector<TlsStream<TcpStream>> for HttpsConnector {
         panic!("Would implement this if upgrade fl-url to support WebSockets")
     }
 }
-
-impl Drop for HttpsConnector {
-    fn drop(&mut self) {
-        println!("Https connector is dropped")
-    }
-}

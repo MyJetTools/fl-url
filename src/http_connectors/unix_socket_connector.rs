@@ -56,9 +56,3 @@ impl MyHttpClientConnector<UnixStream> for UnixSocketConnector {
         panic!("Would implement this if upgrade fl-url to support WebSockets")
     }
 }
-
-impl Drop for UnixSocketConnector {
-    fn drop(&mut self) {
-        println!("Unix socket connector is dropped");
-    }
-}
