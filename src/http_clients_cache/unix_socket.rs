@@ -16,6 +16,12 @@ use rust_extensions::remote_endpoint::RemoteEndpoint;
 
 pub struct UnixSocketHttpClientCreator;
 
+impl Drop for UnixSocketHttpClientCreator {
+    fn drop(&mut self) {
+        println!("UnixSocketCreator is dropped");
+    }
+}
+
 #[async_trait::async_trait]
 impl HttpClientResolver<UnixSocketStream, UnixSocketConnector> for UnixSocketHttpClientCreator {
     async fn get_http_client(

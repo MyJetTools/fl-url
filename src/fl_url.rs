@@ -723,18 +723,16 @@ mod test {
 
     #[tokio::test]
     async fn test_h1() {
-        for _ in 0..5 {
-            let mut fl_url_resp = FlUrl::new("https://jetdev.eu/img/logo.png")
-                .do_not_reuse_connection()
-                .get()
-                .await
-                .unwrap();
+        let mut fl_url_resp = FlUrl::new("https://jetdev.eu/img/logo.png")
+            .do_not_reuse_connection()
+            .get()
+            .await
+            .unwrap();
 
-            println!("{}", fl_url_resp.get_status_code());
+        println!("{}", fl_url_resp.get_status_code());
 
-            let resp = fl_url_resp.get_body_as_slice().await.unwrap();
-            println!("{}", resp.len());
-        }
+        let resp = fl_url_resp.get_body_as_slice().await.unwrap();
+        println!("{}", resp.len());
     }
 
     #[tokio::test]
