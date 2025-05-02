@@ -514,6 +514,17 @@ impl FlUrl {
         self.execute(request).await
     }
 
+    pub async fn get_with_debug(
+        mut self,
+        body: Option<Vec<u8>>,
+        request_debug_string: &mut String,
+    ) -> Result<FlUrlResponse, FlUrlError> {
+        self.compile_debug_info_with_body(request_debug_string, "GET", body.as_ref());
+
+        let request = self.compile_request(Method::GET, body);
+        self.execute(request).await
+    }
+
     pub async fn head(mut self) -> Result<FlUrlResponse, FlUrlError> {
         let request = self.compile_request(Method::HEAD, None);
         self.execute(request).await
