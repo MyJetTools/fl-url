@@ -5,16 +5,6 @@ use rust_extensions::StrOrString;
 
 use crate::{FlUrl, FlUrlError, FlUrlResponse};
 
-/*
-pub struct MultipartFile {
-    name: StrOrString<'static>,
-    file_name: StrOrString<'static>,
-    content_type: StrOrString<'static>,
-    content: Vec<u8>,
-    boundary: String,
-}
-*/
-
 pub struct FormDataBuilder {
     fl_url: FlUrl,
     // files: Vec<MultipartFile>,
@@ -47,6 +37,35 @@ impl FormDataBuilder {
         )
         .unwrap();
 
+        self
+    }
+
+    pub fn append_form_data_file(
+        mut self,
+        name: impl Into<StrOrString<'static>>,
+        file_name: impl Into<StrOrString<'static>>,
+        content_type: impl Into<StrOrString<'static>>,
+        content: &[u8],
+    ) -> Self {
+        use std::io::Write;
+
+        let name = name.into();
+        let file_name = file_name.into();
+        let content_type = content_type.into();
+        write!(
+            &mut self.buffer,
+            "--{}\r\nContent-Disposition: form-data; name=\"{}\"; filename=\"{}\"\r\nContent-Type:{}\r\n\r\n",
+            self.boundary,
+            name,
+            file_name.as_str(),
+            content_type.as_str()
+        )
+        .unwrap();
+
+        self.buffer.extend_from_slice(content);
+        self.buffer.extend_from_slice(b"--");
+        self.buffer.extend_from_slice(self.boundary.as_bytes());
+        self.buffer.extend_from_slice(b"\r\n");
         self
     }
 

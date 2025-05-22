@@ -757,4 +757,16 @@ mod test {
 
         println!("{}", resp.len());
     }
+
+    #[tokio::test]
+    async fn test_head() {
+        let mut fl_url_resp = FlUrl::new("https://jetdev.eu/img/logo.png")
+            .head()
+            .await
+            .unwrap();
+
+        let resp = fl_url_resp.get_body_as_slice().await.unwrap();
+
+        println!("{}", resp.len());
+    }
 }
