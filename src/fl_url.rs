@@ -200,6 +200,12 @@ impl FlUrl {
     }
 
     #[cfg(feature = "with-ssh")]
+    pub fn set_ssh_credentials(mut self, ssh_credentials: my_ssh::SshCredentials) -> Self {
+        self.ssh_credentials = Some(ssh_credentials);
+        self
+    }
+
+    #[cfg(feature = "with-ssh")]
     pub fn set_ssh_private_key<'s>(
         mut self,
         private_key: String,
