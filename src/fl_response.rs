@@ -4,7 +4,9 @@ use hyper::{header::CONNECTION, StatusCode};
 use serde::de::DeserializeOwned;
 use url_utils::UrlBuilder;
 
-use crate::{FlUrlError, FlUrlReadingHeaderError, ResponseBody};
+use crate::{
+    fl_response_as_stream::FlResponseAsStream, FlUrlError, FlUrlReadingHeaderError, ResponseBody,
+};
 
 pub struct FlUrlResponse {
     pub url: UrlBuilder,
@@ -86,6 +88,22 @@ impl FlUrlResponse {
         self.response.convert_body_and_receive_it().await
     }
 
+    pub async fn get_body_as_str(&mut self) -> Result<&str, FlUrlError> {
+        let bytes = self.response.convert_body_and_get_as_slice().await?;
+        Ok(std::str::from_utf8(bytes)?)
+    }
+
+    pub async fn get_body_as_stream(self) -> FlResponseAsStream {
+        let response = match self.response {
+            ResponseBody::Hyper(response) => response.unwrap(),
+            ResponseBody::Body { .. } => {
+                panic!("Can not get body as stream when body is materialized");
+            }
+        };
+        FlResponseAsStream::new(self.url, response)
+    }
+
+    #[deprecated(note = "Use get_body_as_str")]
     pub async fn body_as_str(&mut self) -> Result<&str, FlUrlError> {
         let bytes = self.response.convert_body_and_get_as_slice().await?;
         Ok(std::str::from_utf8(bytes)?)
