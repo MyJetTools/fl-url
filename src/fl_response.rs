@@ -93,7 +93,7 @@ impl FlUrlResponse {
         Ok(std::str::from_utf8(bytes)?)
     }
 
-    pub async fn get_body_as_stream(self) -> FlResponseAsStream {
+    pub fn get_body_as_stream(self) -> FlResponseAsStream {
         let response = match self.response {
             ResponseBody::Hyper(response) => response.unwrap(),
             ResponseBody::Body { .. } => {
