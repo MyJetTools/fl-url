@@ -7,6 +7,7 @@ pub use fl_drop_connection_scenario::*;
 //mod fl_request;
 mod fl_response;
 mod fl_response_as_stream;
+pub use fl_response_as_stream::*;
 mod fl_url;
 mod into_fl_url;
 mod my_http_client_wrapper;
