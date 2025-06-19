@@ -493,10 +493,8 @@ impl FlUrl {
         }
 
         if !self.headers.has_host_header() {
-            if !self.url.host_is_ip() {
-                if !self.mode.is_h2() {
-                    result = result.header(hyper::header::HOST.as_str(), self.url.get_host());
-                }
+            if !self.mode.is_h2() {
+                result = result.header(hyper::header::HOST.as_str(), self.url.get_host());
             }
         }
 
