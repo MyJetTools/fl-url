@@ -10,7 +10,7 @@ use crate::{http_connectors::*, my_http_client_wrapper::MyHttpClientWrapper};
 pub struct HttpClientsCacheInner {
     pub http: HashMap<String, Arc<MyHttpClientWrapper<TcpStream, HttpConnector>>>,
     pub https: HashMap<String, Arc<MyHttpClientWrapper<TlsStream<TcpStream>, HttpsConnector>>>,
-    #[cfg(feature = "unix-socket")]
+    #[cfg(unix)]
     pub unix_socket:
         HashMap<String, Arc<MyHttpClientWrapper<UnixSocketStream, UnixSocketConnector>>>,
     #[cfg(feature = "with-ssh")]

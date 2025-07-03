@@ -8,7 +8,7 @@ mod ssh_connector;
 pub use ssh_connector::*;
 mod https_connector;
 pub use https_connector::*;
-#[cfg(feature = "unix-socket")]
+#[cfg(unix)]
 mod unix_socket_connector;
-#[cfg(feature = "unix-socket")]
+#[cfg(unix)]
 pub use unix_socket_connector::*;

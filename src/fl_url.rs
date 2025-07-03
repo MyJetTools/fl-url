@@ -376,11 +376,11 @@ impl FlUrl {
                     .await?
                 }
             }
-            #[cfg(not(feature = "unix-socket"))]
+            #[cfg(not(unix))]
             Scheme::UnixSocket => {
-                panic!("To use unix socket you need to enable unix-socket feature")
+                panic!("OS does not support unix sockets")
             }
-            #[cfg(feature = "unix-socket")]
+            #[cfg(unix)]
             Scheme::UnixSocket => {
                 if self.do_not_reuse_connection {
                     self.execute_with_retry::<UnixSocketStream, UnixSocketConnector, _>(

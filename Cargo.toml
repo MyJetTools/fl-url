@@ -7,7 +7,6 @@ edition = "2021"
 [features]
 default = []
 with-ssh = ["my-ssh"]
-unix-socket = []
 debug-request = []
 
 

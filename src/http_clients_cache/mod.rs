@@ -5,7 +5,7 @@ pub use http_client_resolver::*;
 pub mod http;
 #[cfg(feature = "with-ssh")]
 pub mod ssh;
-#[cfg(feature = "unix-socket")]
+#[cfg(unix)]
 pub mod unix_socket;
 
 pub mod https;
