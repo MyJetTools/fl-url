@@ -35,7 +35,16 @@ impl<
                 let result = my_http_client
                     .do_request(request.clone(), request_timeout)
                     .await?;
-                Ok(MyHttpResponse::Response(result))
+
+                match result {
+                    my_http_client::http1_hyper::HyperHttpResponse::Response(response) => {
+                        Ok(MyHttpResponse::Response(response))
+                    }
+                    my_http_client::http1_hyper::HyperHttpResponse::WebSocketUpgrade {
+                        response,
+                        web_socket: _,
+                    } => Ok(MyHttpResponse::Response(response)),
+                }
             }
 
             MyHttpClientWrapper::H2(my_http_client) => {
