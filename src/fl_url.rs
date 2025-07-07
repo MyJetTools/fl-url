@@ -402,6 +402,10 @@ impl FlUrl {
                     .await?
                 }
             }
+            #[cfg(not(unix))]
+            Scheme::UnixSocket => {
+                panic!("OS does not support unix socket");
+            }
         };
 
         Ok(response)
