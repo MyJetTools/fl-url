@@ -1,22 +1,17 @@
 use std::fmt::Display;
 
-use http::header::CONTENT_TYPE;
 use rust_extensions::StrOrString;
 
-use crate::{FlUrl, FlUrlError, FlUrlResponse};
-
 pub struct FormDataBuilder {
-    fl_url: FlUrl,
     // files: Vec<MultipartFile>,
     boundary: String,
-    buffer: Vec<u8>,
+    pub(crate) buffer: Vec<u8>,
 }
 
 impl FormDataBuilder {
-    pub fn new(fl_url: FlUrl) -> Self {
+    pub fn new() -> Self {
         let boundary = format!("----DataFormBoundary{}", rand_string(16));
         Self {
-            fl_url,
             boundary,
             buffer: vec![], //files: vec![],
         }
@@ -69,6 +64,7 @@ impl FormDataBuilder {
         self
     }
 
+    /*
     fn get_result(mut self) -> (Vec<u8>, FlUrl) {
         use std::io::Write;
 
@@ -84,10 +80,12 @@ impl FormDataBuilder {
         (self.buffer, self.fl_url)
     }
 
-    fn get_content_type(&self) -> String {
+     */
+    pub fn get_content_type(&self) -> String {
         format!("multipart/form-data; boundary={}", self.boundary)
     }
 
+    /*
     pub async fn post(self) -> Result<FlUrlResponse, FlUrlError> {
         let (body, fl_url) = self.get_result();
 
@@ -98,6 +96,7 @@ impl FormDataBuilder {
         let (body, fl_url) = self.get_result();
         fl_url.put(body.into()).await
     }
+     */
 }
 
 // Simple random string generator for boundary (for demonstration)

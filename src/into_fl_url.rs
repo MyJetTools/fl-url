@@ -20,8 +20,8 @@ pub trait IntoFlUrl {
     fn append_raw_ending_to_url<'s>(self, raw: impl Into<StrOrString<'s>>) -> FlUrl;
 
     async fn get(self) -> Result<FlUrlResponse, FlUrlError>;
-    async fn post(self, body: Option<Vec<u8>>) -> Result<FlUrlResponse, FlUrlError>;
-    async fn put(self, body: Option<Vec<u8>>) -> Result<FlUrlResponse, FlUrlError>;
+    async fn post(self, body: FlUrlBody) -> Result<FlUrlResponse, FlUrlError>;
+    async fn put(self, body: FlUrlBody) -> Result<FlUrlResponse, FlUrlError>;
     #[deprecated(note = "Use 'post' instead")]
     async fn post_json<'s, T: serde::Serialize + Send + Sync + 'static>(
         self,
@@ -65,7 +65,7 @@ impl<'g> IntoFlUrl for &'g str {
         FlUrl::new(self).head().await
     }
 
-    async fn post(self, body: Option<Vec<u8>>) -> Result<FlUrlResponse, FlUrlError> {
+    async fn post(self, body: FlUrlBody) -> Result<FlUrlResponse, FlUrlError> {
         FlUrl::new(self).post(body).await
     }
 
@@ -74,10 +74,10 @@ impl<'g> IntoFlUrl for &'g str {
         json: &'s T,
     ) -> Result<FlUrlResponse, FlUrlError> {
         let body = FlUrlBody::new_as_json(json);
-        FlUrl::new(self).post(body.into()).await
+        FlUrl::new(self).post(body).await
     }
 
-    async fn put(self, body: Option<Vec<u8>>) -> Result<FlUrlResponse, FlUrlError> {
+    async fn put(self, body: FlUrlBody) -> Result<FlUrlResponse, FlUrlError> {
         FlUrl::new(self).put(body).await
     }
 
@@ -120,7 +120,7 @@ impl<'g> IntoFlUrl for &'g String {
         FlUrl::new(self).head().await
     }
 
-    async fn post(self, body: Option<Vec<u8>>) -> Result<FlUrlResponse, FlUrlError> {
+    async fn post(self, body: FlUrlBody) -> Result<FlUrlResponse, FlUrlError> {
         FlUrl::new(self).post(body).await
     }
 
@@ -129,10 +129,10 @@ impl<'g> IntoFlUrl for &'g String {
         json: &'s T,
     ) -> Result<FlUrlResponse, FlUrlError> {
         let body = FlUrlBody::new_as_json(json);
-        FlUrl::new(self).post(body.into()).await
+        FlUrl::new(self).post(body).await
     }
 
-    async fn put(self, body: Option<Vec<u8>>) -> Result<FlUrlResponse, FlUrlError> {
+    async fn put(self, body: FlUrlBody) -> Result<FlUrlResponse, FlUrlError> {
         FlUrl::new(self).put(body).await
     }
 
@@ -175,7 +175,7 @@ impl IntoFlUrl for String {
         FlUrl::new(self).head().await
     }
 
-    async fn post(self, body: Option<Vec<u8>>) -> Result<FlUrlResponse, FlUrlError> {
+    async fn post(self, body: FlUrlBody) -> Result<FlUrlResponse, FlUrlError> {
         FlUrl::new(self).post(body).await
     }
 
@@ -184,10 +184,10 @@ impl IntoFlUrl for String {
         json: &'s T,
     ) -> Result<FlUrlResponse, FlUrlError> {
         let body = FlUrlBody::new_as_json(json);
-        FlUrl::new(self).post(body.into()).await
+        FlUrl::new(self).post(body).await
     }
 
-    async fn put(self, body: Option<Vec<u8>>) -> Result<FlUrlResponse, FlUrlError> {
+    async fn put(self, body: FlUrlBody) -> Result<FlUrlResponse, FlUrlError> {
         FlUrl::new(self).put(body).await
     }
 

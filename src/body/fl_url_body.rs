@@ -1,14 +1,17 @@
+use rust_extensions::StrOrString;
 use serde::Serialize;
 
-use crate::body::UrlEncodedBody;
+use crate::body::{FormDataBuilder, UrlEncodedBody};
 
 pub enum FlUrlBody {
     Json(Vec<u8>),
-    FormData(UrlEncodedBody),
+    UrlEncoded(UrlEncodedBody),
+    FormData(FormDataBuilder),
     Raw {
         data: Vec<u8>,
         content_type: Option<&'static str>,
     },
+    Empty,
 }
 
 impl FlUrlBody {
@@ -21,34 +24,43 @@ impl FlUrlBody {
         FlUrlBody::Json(json_data)
     }
 
-    pub fn get_content_type(&self) -> Option<&'static str> {
+    pub fn get_content_type(&self) -> Option<StrOrString<'static>> {
         match self {
-            FlUrlBody::Json(_) => "application/json".into(),
-            FlUrlBody::FormData(_) => "application/x-www-form-urlencoded".into(),
-            FlUrlBody::Raw { content_type, .. } => *content_type,
+            FlUrlBody::Json(_) => Some("application/json".into()),
+            FlUrlBody::UrlEncoded(_) => Some("application/x-www-form-urlencoded".into()),
+            FlUrlBody::FormData(body) => Some(body.get_content_type().into()),
+            FlUrlBody::Raw { content_type, .. } => {
+                let content_type = (*content_type)?;
+                Some(content_type.into())
+            }
+            FlUrlBody::Empty => None,
         }
     }
 
     pub fn into_vec(self) -> Vec<u8> {
         match self {
             FlUrlBody::Json(data) => data,
-            FlUrlBody::FormData(form_data) => form_data.data.into_bytes(),
+            FlUrlBody::UrlEncoded(body) => body.data.into_bytes(),
+            FlUrlBody::FormData(body) => body.buffer,
             FlUrlBody::Raw { data, .. } => data,
+            FlUrlBody::Empty => Vec::new(),
         }
     }
 
     pub fn as_slice(&self) -> &[u8] {
         match self {
             FlUrlBody::Json(data) => data.as_slice(),
-            FlUrlBody::FormData(form_data) => form_data.data.as_bytes(),
+            FlUrlBody::UrlEncoded(form_data) => form_data.data.as_bytes(),
+            FlUrlBody::FormData(body) => body.buffer.as_slice(),
             FlUrlBody::Raw { data, .. } => data.as_slice(),
+            FlUrlBody::Empty => &[],
         }
     }
 }
 
 impl Into<FlUrlBody> for UrlEncodedBody {
     fn into(self) -> FlUrlBody {
-        FlUrlBody::FormData(self)
+        FlUrlBody::UrlEncoded(self)
     }
 }
 

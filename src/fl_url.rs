@@ -21,7 +21,6 @@ use crate::http_connectors::*;
 
 use crate::http_clients_cache::*;
 
-use crate::FormDataBuilder;
 use crate::HttpClientResolver;
 
 use crate::FlUrlError;
@@ -459,19 +458,14 @@ impl FlUrl {
     fn compile_request(
         &mut self,
         method: Method,
-        body: Option<FlUrlBody>,
+        body: FlUrlBody,
     ) -> my_http_client::http::request::Request<Full<Bytes>> {
-        let mut body = match body {
-            Some(body) => {
-                if let Some(content_type) = body.get_content_type() {
-                    self.headers
-                        .add(hyper::header::CONTENT_TYPE.as_str(), content_type);
-                }
+        if let Some(content_type) = body.get_content_type() {
+            self.headers
+                .add(hyper::header::CONTENT_TYPE.as_str(), content_type.as_str());
+        }
 
-                body.into_vec()
-            }
-            None => vec![],
-        };
+        let mut body = body.into_vec();
 
         if self.compress_body {
             body = self.compress_body(body);
@@ -529,7 +523,7 @@ impl FlUrl {
     }
 
     pub async fn get(mut self) -> Result<FlUrlResponse, FlUrlError> {
-        let request = self.compile_request(Method::GET, None);
+        let request = self.compile_request(Method::GET, FlUrlBody::Empty);
         self.execute(request).await
     }
 
@@ -537,33 +531,29 @@ impl FlUrl {
         mut self,
         request_debug_string: &mut String,
     ) -> Result<FlUrlResponse, FlUrlError> {
-        self.compile_debug_info_with_body(request_debug_string, "GET", None);
+        self.compile_debug_info_with_body(request_debug_string, "GET", &FlUrlBody::Empty);
 
-        let request = self.compile_request(Method::GET, None);
+        let request = self.compile_request(Method::GET, FlUrlBody::Empty);
         self.execute(request).await
     }
 
     pub async fn head(mut self) -> Result<FlUrlResponse, FlUrlError> {
-        let request = self.compile_request(Method::HEAD, None);
+        let request = self.compile_request(Method::HEAD, FlUrlBody::Empty);
         self.execute(request).await
     }
 
-    pub async fn post(
-        mut self,
-        body: Option<impl Into<FlUrlBody>>,
-    ) -> Result<FlUrlResponse, FlUrlError> {
-        let body = body.map(|b| b.into());
-        let request = self.compile_request(Method::POST, body);
+    pub async fn post(mut self, body: impl Into<FlUrlBody>) -> Result<FlUrlResponse, FlUrlError> {
+        let request = self.compile_request(Method::POST, body.into());
         self.execute(request).await
     }
 
     pub async fn post_with_debug(
         mut self,
-        body: Option<impl Into<FlUrlBody>>,
+        body: impl Into<FlUrlBody>,
         request_debug_string: &mut String,
     ) -> Result<FlUrlResponse, FlUrlError> {
-        let body = body.map(|b| b.into());
-        self.compile_debug_info_with_body(request_debug_string, "POST", body.as_ref());
+        let body = body.into();
+        self.compile_debug_info_with_body(request_debug_string, "POST", &body);
 
         let request = self.compile_request(Method::POST, body);
         self.execute(request).await
@@ -587,23 +577,21 @@ impl FlUrl {
     ) -> Result<FlUrlResponse, FlUrlError> {
         let body = FlUrlBody::new_as_json(json);
 
-        self.compile_debug_info_with_body(request_debug_string, "POST", Some(&body));
+        self.compile_debug_info_with_body(request_debug_string, "POST", &body);
 
-        let request = self.compile_request(Method::POST, body.into());
+        let request = self.compile_request(Method::POST, body);
 
         self.execute(request).await
     }
 
-    pub fn with_form_data(self) -> FormDataBuilder {
-        FormDataBuilder::new(self)
-    }
+    /*
+       pub fn with_form_data(self) -> FormDataBuilder {
+           FormDataBuilder::new(self)
+       }
+    */
 
-    pub async fn patch(
-        mut self,
-        body: Option<impl Into<FlUrlBody>>,
-    ) -> Result<FlUrlResponse, FlUrlError> {
-        let body = body.map(|b| b.into());
-        let request = self.compile_request(Method::PATCH, body);
+    pub async fn patch(mut self, body: impl Into<FlUrlBody>) -> Result<FlUrlResponse, FlUrlError> {
+        let request = self.compile_request(Method::PATCH, body.into());
         self.execute(request).await
     }
 
@@ -618,9 +606,8 @@ impl FlUrl {
         self.execute(request).await
     }
 
-    pub async fn put(mut self, body: Option<Vec<u8>>) -> Result<FlUrlResponse, FlUrlError> {
-        let body = body.map(|b| b.into());
-        let request = self.compile_request(Method::PUT, body);
+    pub async fn put(mut self, body: impl Into<FlUrlBody>) -> Result<FlUrlResponse, FlUrlError> {
+        let request = self.compile_request(Method::PUT, body.into());
         self.execute(request).await
     }
 
@@ -635,7 +622,7 @@ impl FlUrl {
     }
 
     pub async fn delete(mut self) -> Result<FlUrlResponse, FlUrlError> {
-        let request = self.compile_request(Method::DELETE, None);
+        let request = self.compile_request(Method::DELETE, FlUrlBody::Empty);
         self.execute(request).await
     }
 
@@ -643,8 +630,8 @@ impl FlUrl {
         mut self,
         request_debug_string: &mut String,
     ) -> Result<FlUrlResponse, FlUrlError> {
-        self.compile_debug_info_with_body(request_debug_string, "DELETE", None);
-        let request = self.compile_request(Method::DELETE, None);
+        self.compile_debug_info_with_body(request_debug_string, "DELETE", &FlUrlBody::Empty);
+        let request = self.compile_request(Method::DELETE, FlUrlBody::Empty);
         self.execute(request).await
     }
     fn compile_debug_info(&self, out: &mut String) {
@@ -657,7 +644,7 @@ impl FlUrl {
         &self,
         request_debug_string: &mut String,
         method: &str,
-        body: Option<&FlUrlBody>,
+        body: &FlUrlBody,
     ) {
         request_debug_string.push_str("[");
         request_debug_string.push_str(method);
@@ -665,18 +652,19 @@ impl FlUrl {
 
         self.compile_debug_info(request_debug_string);
 
-        if let Some(body) = body {
-            let body = body.as_slice();
-            match std::str::from_utf8(body) {
-                Ok(body) => {
-                    request_debug_string.push_str("Body: ");
-                    request_debug_string.push_str(body);
-                }
-                Err(_) => {
-                    request_debug_string.push_str("Body: ");
-                    request_debug_string.push_str(body.len().to_string().as_str());
-                    request_debug_string.push_str("non string bytes");
-                }
+        let body = body.as_slice();
+        if body.len() == 0 {
+            return;
+        }
+        match std::str::from_utf8(body) {
+            Ok(body) => {
+                request_debug_string.push_str("Body: ");
+                request_debug_string.push_str(body);
+            }
+            Err(_) => {
+                request_debug_string.push_str("Body: ");
+                request_debug_string.push_str(body.len().to_string().as_str());
+                request_debug_string.push_str("non string bytes");
             }
         }
     }

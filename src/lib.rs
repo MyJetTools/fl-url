@@ -39,9 +39,6 @@ pub mod ssh;
 #[cfg(feature = "with-ssh")]
 pub extern crate my_ssh;
 
-mod form_data_builder;
-pub use form_data_builder::*;
-
 lazy_static::lazy_static! {
     static ref CLIENTS_CACHED: Arc<HttpClientsCache> =  Arc::new(HttpClientsCache::new());
 }
