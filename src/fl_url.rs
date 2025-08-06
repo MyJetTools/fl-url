@@ -567,6 +567,7 @@ impl FlUrl {
         mut self,
         json: &impl serde::Serialize,
     ) -> Result<FlUrlResponse, FlUrlError> {
+        let json = serde_json::to_vec(json).expect("Failed to serialize to JSON");
         let body = FlUrlBody::new_as_json(json);
         let request = self.compile_request(Method::POST, body, None);
 
@@ -604,6 +605,7 @@ impl FlUrl {
         mut self,
         json: &impl serde::Serialize,
     ) -> Result<FlUrlResponse, FlUrlError> {
+        let json = serde_json::to_vec(json).expect("Failed to serialize to JSON");
         let body = FlUrlBody::new_as_json(json);
         let request = self.compile_request(Method::PATCH, body, None);
 
@@ -620,6 +622,7 @@ impl FlUrl {
         mut self,
         json: &impl serde::Serialize,
     ) -> Result<FlUrlResponse, FlUrlError> {
+        let json = serde_json::to_vec(json).expect("Failed to serialize to JSON");
         let body = FlUrlBody::new_as_json(json);
         let request = self.compile_request(Method::PUT, body, None);
         self.execute(request).await

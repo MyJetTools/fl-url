@@ -73,8 +73,8 @@ impl<'g> IntoFlUrl for &'g str {
         self,
         json: &'s T,
     ) -> Result<FlUrlResponse, FlUrlError> {
-        let body = FlUrlBody::new_as_json(json);
-        FlUrl::new(self).post(body).await
+        let json = serde_json::to_vec(json).expect("Failed to serialize to JSON");
+        FlUrl::new(self).post(json).await
     }
 
     async fn put(self, body: FlUrlBody) -> Result<FlUrlResponse, FlUrlError> {
@@ -128,8 +128,8 @@ impl<'g> IntoFlUrl for &'g String {
         self,
         json: &'s T,
     ) -> Result<FlUrlResponse, FlUrlError> {
-        let body = FlUrlBody::new_as_json(json);
-        FlUrl::new(self).post(body).await
+        let json = serde_json::to_vec(json).expect("Failed to serialize to JSON");
+        FlUrl::new(self).post(json).await
     }
 
     async fn put(self, body: FlUrlBody) -> Result<FlUrlResponse, FlUrlError> {
@@ -183,6 +183,7 @@ impl IntoFlUrl for String {
         self,
         json: &'s T,
     ) -> Result<FlUrlResponse, FlUrlError> {
+        let json = serde_json::to_vec(json).expect("Failed to serialize to JSON");
         let body = FlUrlBody::new_as_json(json);
         FlUrl::new(self).post(body).await
     }
