@@ -3,6 +3,11 @@ pub struct UrlEncodedBody {
 }
 
 impl UrlEncodedBody {
+    pub fn new() -> Self {
+        UrlEncodedBody {
+            data: String::new(),
+        }
+    }
     pub fn append(mut self, key: &str, value: &str) -> Self {
         if !self.data.is_empty() {
             self.data.push('&');
