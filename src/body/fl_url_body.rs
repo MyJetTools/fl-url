@@ -19,12 +19,7 @@ impl FlUrlBody {
         FlUrlBody::Raw { data, content_type }
     }
 
-    pub fn new_as_json<T: Serialize>(value: T) -> Self {
-        let json_data = serde_json::to_vec(&value).expect("Failed to serialize to JSON");
-        FlUrlBody::Json(json_data)
-    }
-
-    pub fn new_as_json_bytes(value: Vec<u8>) -> Self {
+    pub fn new_as_json(value: Vec<u8>) -> Self {
         FlUrlBody::Json(value)
     }
 
