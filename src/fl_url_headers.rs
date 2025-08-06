@@ -1,4 +1,3 @@
-use hyper::header::CONTENT_TYPE;
 use my_http_client::{HeaderValuePosition, MyHttpClientHeadersBuilder};
 
 pub struct FlUrlHeaders {
@@ -19,11 +18,12 @@ impl FlUrlHeaders {
         }
     }
 
-    pub fn add_json_content_type(&mut self) {
-        self.headers
-            .add_header(CONTENT_TYPE.as_str(), "application/json");
-    }
-
+    /*
+       pub fn add_json_content_type(&mut self) {
+           self.headers
+               .add_header(CONTENT_TYPE.as_str(), "application/json");
+       }
+    */
     pub fn add(&mut self, name: &str, value: &str) {
         if rust_extensions::str_utils::compare_strings_case_insensitive(name, "connection") {
             self.has_connection_header = true;

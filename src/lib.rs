@@ -22,6 +22,8 @@ pub extern crate hyper;
 mod response_body;
 pub use response_body::*;
 
+pub mod body;
+
 mod http_connectors;
 
 mod errors;

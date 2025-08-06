@@ -16,6 +16,7 @@ use std::time::Duration;
 use tokio::net::TcpStream;
 
 use super::FlUrlResponse;
+use crate::body::FlUrlBody;
 use crate::http_connectors::*;
 
 use crate::http_clients_cache::*;
@@ -458,9 +459,19 @@ impl FlUrl {
     fn compile_request(
         &mut self,
         method: Method,
-        body: Option<Vec<u8>>,
+        body: Option<FlUrlBody>,
     ) -> my_http_client::http::request::Request<Full<Bytes>> {
-        let mut body = body.unwrap_or_default();
+        let mut body = match body {
+            Some(body) => {
+                if let Some(content_type) = body.get_content_type() {
+                    self.headers
+                        .add(hyper::header::CONTENT_TYPE.as_str(), content_type);
+                }
+
+                body.into_vec()
+            }
+            None => vec![],
+        };
 
         if self.compress_body {
             body = self.compress_body(body);
@@ -537,29 +548,33 @@ impl FlUrl {
         self.execute(request).await
     }
 
-    pub async fn post(mut self, body: Option<Vec<u8>>) -> Result<FlUrlResponse, FlUrlError> {
+    pub async fn post(
+        mut self,
+        body: Option<impl Into<FlUrlBody>>,
+    ) -> Result<FlUrlResponse, FlUrlError> {
+        let body = body.map(|b| b.into());
         let request = self.compile_request(Method::POST, body);
         self.execute(request).await
     }
 
     pub async fn post_with_debug(
         mut self,
-        body: Option<Vec<u8>>,
+        body: Option<impl Into<FlUrlBody>>,
         request_debug_string: &mut String,
     ) -> Result<FlUrlResponse, FlUrlError> {
+        let body = body.map(|b| b.into());
         self.compile_debug_info_with_body(request_debug_string, "POST", body.as_ref());
 
         let request = self.compile_request(Method::POST, body);
         self.execute(request).await
     }
 
+    #[deprecated(note = "Use `post` instead")]
     pub async fn post_json(
         mut self,
         json: &impl serde::Serialize,
     ) -> Result<FlUrlResponse, FlUrlError> {
-        let body = serde_json::to_vec(json).unwrap();
-        self.headers.add_json_content_type();
-
+        let body = FlUrlBody::new_as_json(json);
         let request = self.compile_request(Method::POST, body.into());
 
         self.execute(request).await
@@ -570,11 +585,10 @@ impl FlUrl {
         json: &impl serde::Serialize,
         request_debug_string: &mut String,
     ) -> Result<FlUrlResponse, FlUrlError> {
-        let body = serde_json::to_vec(json).unwrap();
+        let body = FlUrlBody::new_as_json(json);
 
         self.compile_debug_info_with_body(request_debug_string, "POST", Some(&body));
 
-        self.headers.add_json_content_type();
         let request = self.compile_request(Method::POST, body.into());
 
         self.execute(request).await
@@ -584,33 +598,38 @@ impl FlUrl {
         FormDataBuilder::new(self)
     }
 
-    pub async fn patch(mut self, body: Option<Vec<u8>>) -> Result<FlUrlResponse, FlUrlError> {
+    pub async fn patch(
+        mut self,
+        body: Option<impl Into<FlUrlBody>>,
+    ) -> Result<FlUrlResponse, FlUrlError> {
+        let body = body.map(|b| b.into());
         let request = self.compile_request(Method::PATCH, body);
         self.execute(request).await
     }
 
+    #[deprecated(note = "Use `patch` instead")]
     pub async fn patch_json(
         mut self,
         json: &impl serde::Serialize,
     ) -> Result<FlUrlResponse, FlUrlError> {
-        let body = serde_json::to_vec(json).unwrap();
-        self.headers.add_json_content_type();
+        let body = FlUrlBody::new_as_json(json);
         let request = self.compile_request(Method::PATCH, body.into());
 
         self.execute(request).await
     }
 
     pub async fn put(mut self, body: Option<Vec<u8>>) -> Result<FlUrlResponse, FlUrlError> {
+        let body = body.map(|b| b.into());
         let request = self.compile_request(Method::PUT, body);
         self.execute(request).await
     }
 
+    #[deprecated(note = "Use `put` instead")]
     pub async fn put_json(
         mut self,
         json: &impl serde::Serialize,
     ) -> Result<FlUrlResponse, FlUrlError> {
-        let body = serde_json::to_vec(json).unwrap();
-        self.headers.add_json_content_type();
+        let body = FlUrlBody::new_as_json(json);
         let request = self.compile_request(Method::PUT, body.into());
         self.execute(request).await
     }
@@ -638,7 +657,7 @@ impl FlUrl {
         &self,
         request_debug_string: &mut String,
         method: &str,
-        body: Option<&Vec<u8>>,
+        body: Option<&FlUrlBody>,
     ) {
         request_debug_string.push_str("[");
         request_debug_string.push_str(method);
@@ -647,7 +666,8 @@ impl FlUrl {
         self.compile_debug_info(request_debug_string);
 
         if let Some(body) = body {
-            match std::str::from_utf8(&body) {
+            let body = body.as_slice();
+            match std::str::from_utf8(body) {
                 Ok(body) => {
                     request_debug_string.push_str("Body: ");
                     request_debug_string.push_str(body);
