@@ -1,6 +1,6 @@
 use rust_extensions::StrOrString;
 
-use crate::{FlUrl, FlUrlError, FlUrlResponse};
+use crate::{body::FlUrlBody, FlUrl, FlUrlError, FlUrlResponse};
 
 #[async_trait::async_trait]
 pub trait IntoFlUrl {
@@ -22,6 +22,7 @@ pub trait IntoFlUrl {
     async fn get(self) -> Result<FlUrlResponse, FlUrlError>;
     async fn post(self, body: Option<Vec<u8>>) -> Result<FlUrlResponse, FlUrlError>;
     async fn put(self, body: Option<Vec<u8>>) -> Result<FlUrlResponse, FlUrlError>;
+    #[deprecated(note = "Use 'post' instead")]
     async fn post_json<'s, T: serde::Serialize + Send + Sync + 'static>(
         self,
         json: &'s T,
@@ -72,7 +73,8 @@ impl<'g> IntoFlUrl for &'g str {
         self,
         json: &'s T,
     ) -> Result<FlUrlResponse, FlUrlError> {
-        FlUrl::new(self).post_json(json).await
+        let body = FlUrlBody::new_as_json(json);
+        FlUrl::new(self).post(body.into()).await
     }
 
     async fn put(self, body: Option<Vec<u8>>) -> Result<FlUrlResponse, FlUrlError> {
@@ -126,7 +128,8 @@ impl<'g> IntoFlUrl for &'g String {
         self,
         json: &'s T,
     ) -> Result<FlUrlResponse, FlUrlError> {
-        FlUrl::new(self).post_json(json).await
+        let body = FlUrlBody::new_as_json(json);
+        FlUrl::new(self).post(body.into()).await
     }
 
     async fn put(self, body: Option<Vec<u8>>) -> Result<FlUrlResponse, FlUrlError> {
@@ -180,7 +183,8 @@ impl IntoFlUrl for String {
         self,
         json: &'s T,
     ) -> Result<FlUrlResponse, FlUrlError> {
-        FlUrl::new(self).post_json(json).await
+        let body = FlUrlBody::new_as_json(json);
+        FlUrl::new(self).post(body.into()).await
     }
 
     async fn put(self, body: Option<Vec<u8>>) -> Result<FlUrlResponse, FlUrlError> {
