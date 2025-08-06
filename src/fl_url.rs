@@ -660,9 +660,9 @@ impl FlUrl {
             return;
         }
         match std::str::from_utf8(body) {
-            Ok(body) => {
+            Ok(body_as_str) => {
                 request_debug_string.push_str("Body: ");
-                request_debug_string.push_str(body);
+                request_debug_string.push_str(body_as_str);
             }
             Err(_) => {
                 request_debug_string.push_str("Body: ");

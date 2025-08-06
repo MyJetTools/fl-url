@@ -24,6 +24,10 @@ impl FlUrlBody {
         FlUrlBody::Json(json_data)
     }
 
+    pub fn new_as_json_bytes(value: Vec<u8>) -> Self {
+        FlUrlBody::Json(value)
+    }
+
     pub fn get_content_type(&self) -> Option<StrOrString<'static>> {
         match self {
             FlUrlBody::Json(_) => Some("application/json".into()),
