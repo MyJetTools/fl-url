@@ -1,12 +1,12 @@
 use rust_extensions::StrOrString;
 use serde::Serialize;
 
-use crate::body::{FormDataBuilder, UrlEncodedBody};
+use crate::body::{FormDataBody, UrlEncodedBody};
 
 pub enum FlUrlBody {
     Json(Vec<u8>),
     UrlEncoded(UrlEncodedBody),
-    FormData(FormDataBuilder),
+    FormData(FormDataBody),
     Raw {
         data: Vec<u8>,
         content_type: Option<&'static str>,

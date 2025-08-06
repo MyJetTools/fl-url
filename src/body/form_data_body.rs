@@ -2,13 +2,13 @@ use std::fmt::Display;
 
 use rust_extensions::StrOrString;
 
-pub struct FormDataBuilder {
+pub struct FormDataBody {
     // files: Vec<MultipartFile>,
     boundary: String,
     pub(crate) buffer: Vec<u8>,
 }
 
-impl FormDataBuilder {
+impl FormDataBody {
     pub fn new() -> Self {
         let boundary = format!("----DataFormBoundary{}", rand_string(16));
         Self {
@@ -64,39 +64,9 @@ impl FormDataBuilder {
         self
     }
 
-    /*
-    fn get_result(mut self) -> (Vec<u8>, FlUrl) {
-        use std::io::Write;
-
-        let content_type = self.get_content_type();
-        write!(&mut self.buffer, "--{}--\r\n", self.boundary).unwrap();
-
-        self.fl_url
-            .headers
-            .add(CONTENT_TYPE.as_str(), &content_type);
-
-        println!("{:?}", std::str::from_utf8(self.buffer.as_slice()));
-
-        (self.buffer, self.fl_url)
-    }
-
-     */
     pub fn get_content_type(&self) -> String {
         format!("multipart/form-data; boundary={}", self.boundary)
     }
-
-    /*
-    pub async fn post(self) -> Result<FlUrlResponse, FlUrlError> {
-        let (body, fl_url) = self.get_result();
-
-        fl_url.post(body.into()).await
-    }
-
-    pub async fn put(self) -> Result<FlUrlResponse, FlUrlError> {
-        let (body, fl_url) = self.get_result();
-        fl_url.put(body.into()).await
-    }
-     */
 }
 
 // Simple random string generator for boundary (for demonstration)
