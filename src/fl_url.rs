@@ -567,33 +567,11 @@ impl FlUrl {
         mut self,
         json: &impl serde::Serialize,
     ) -> Result<FlUrlResponse, FlUrlError> {
-        let json = serde_json::to_vec(json).expect("Failed to serialize to JSON");
-        let body = FlUrlBody::new_as_json(json);
+        let body = FlUrlBody::as_json(json);
         let request = self.compile_request(Method::POST, body, None);
 
         self.execute(request).await
     }
-
-    /*
-       pub async fn post_json_with_debug(
-           mut self,
-           json: &impl serde::Serialize,
-           request_debug_string: &mut String,
-       ) -> Result<FlUrlResponse, FlUrlError> {
-           let body = FlUrlBody::new_as_json(json);
-
-           self.compile_debug_info_with_body(request_debug_string, "POST", &body);
-
-           let request = self.compile_request(Method::POST, body);
-
-           self.execute(request).await
-       }
-    */
-    /*
-       pub fn with_form_data(self) -> FormDataBuilder {
-           FormDataBuilder::new(self)
-       }
-    */
 
     pub async fn patch(mut self, body: impl Into<FlUrlBody>) -> Result<FlUrlResponse, FlUrlError> {
         let request = self.compile_request(Method::PATCH, body.into(), None);
@@ -605,8 +583,7 @@ impl FlUrl {
         mut self,
         json: &impl serde::Serialize,
     ) -> Result<FlUrlResponse, FlUrlError> {
-        let json = serde_json::to_vec(json).expect("Failed to serialize to JSON");
-        let body = FlUrlBody::new_as_json(json);
+        let body = FlUrlBody::as_json(json);
         let request = self.compile_request(Method::PATCH, body, None);
 
         self.execute(request).await
@@ -622,8 +599,7 @@ impl FlUrl {
         mut self,
         json: &impl serde::Serialize,
     ) -> Result<FlUrlResponse, FlUrlError> {
-        let json = serde_json::to_vec(json).expect("Failed to serialize to JSON");
-        let body = FlUrlBody::new_as_json(json);
+        let body = FlUrlBody::as_json(json);
         let request = self.compile_request(Method::PUT, body, None);
         self.execute(request).await
     }

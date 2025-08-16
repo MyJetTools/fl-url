@@ -1,5 +1,4 @@
 use rust_extensions::StrOrString;
-use serde::Serialize;
 
 use crate::body::{FormDataBody, UrlEncodedBody};
 
@@ -15,12 +14,17 @@ pub enum FlUrlBody {
 }
 
 impl FlUrlBody {
+    pub fn empty() -> Self {
+        FlUrlBody::Empty
+    }
+
     pub fn from_raw_data(data: Vec<u8>, content_type: Option<&'static str>) -> Self {
         FlUrlBody::Raw { data, content_type }
     }
 
-    pub fn new_as_json(value: Vec<u8>) -> Self {
-        FlUrlBody::Json(value)
+    pub fn as_json(value: &impl serde::Serialize) -> Self {
+        let payload = serde_json::to_vec(value).expect("Failed to serialize to JSON");
+        FlUrlBody::Json(payload)
     }
 
     pub fn get_content_type(&self) -> Option<StrOrString<'static>> {
@@ -63,9 +67,8 @@ impl Into<FlUrlBody> for UrlEncodedBody {
     }
 }
 
-impl<T: Serialize> From<T> for FlUrlBody {
-    fn from(value: T) -> Self {
-        let json_data = serde_json::to_vec(&value).expect("Failed to serialize to JSON");
-        FlUrlBody::Json(json_data)
+impl Into<FlUrlBody> for FormDataBody {
+    fn into(self) -> FlUrlBody {
+        FlUrlBody::FormData(self)
     }
 }

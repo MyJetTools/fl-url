@@ -88,7 +88,7 @@ impl MyHttpClientConnector<TlsStream<TcpStream>> for HttpsConnector {
         }
     }
 
-    fn get_remote_endpoint(&self) -> RemoteEndpoint {
+    fn get_remote_endpoint<'s>(&'s self) -> RemoteEndpoint<'s> {
         self.remote_host.to_ref()
     }
 
