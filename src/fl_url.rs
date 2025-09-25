@@ -494,11 +494,11 @@ impl FlUrl {
                     .unwrap();
                 my_http_client::http::request::Builder::new()
                     .version(Version::HTTP_2)
-                    .method(method)
+                    .method(method.clone())
                     .uri(uri)
             }
             _ => my_http_client::http::request::Builder::new()
-                .method(method)
+                .method(method.clone())
                 .uri(path_and_query),
         };
 
@@ -522,7 +522,18 @@ impl FlUrl {
             }
         }
 
-        let result = result.body(Full::new(body.into())).unwrap();
+        let result = match result.body(Full::new(body.into())) {
+            Ok(result) => result,
+            Err(err) => {
+                panic!(
+                    "[{}]. '{}' '{}' Invalid getting fl_url body: {}",
+                    method.as_str(),
+                    self.url.get_host_port(),
+                    self.url.get_path_and_query(),
+                    err
+                );
+            }
+        };
 
         result
     }
