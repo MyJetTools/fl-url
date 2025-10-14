@@ -10,7 +10,7 @@ use crate::{
     fl_url::FlUrlMode, http_connectors::HttpConnector, my_http_client_wrapper::MyHttpClientWrapper,
 };
 
-use super::{HttpClientResolver, HttpClientsCache};
+use super::{FlUrlHttpClientsCache, HttpClientResolver};
 
 pub struct HttpClientCreator;
 
@@ -45,7 +45,7 @@ impl HttpClientResolver<TcpStream, HttpConnector> for HttpClientCreator {
 }
 
 #[async_trait::async_trait]
-impl HttpClientResolver<TcpStream, HttpConnector> for HttpClientsCache {
+impl HttpClientResolver<TcpStream, HttpConnector> for FlUrlHttpClientsCache {
     async fn get_http_client(
         &self,
         mode: FlUrlMode,

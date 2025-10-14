@@ -10,7 +10,7 @@ use my_tls::ClientCertificate;
 use rust_extensions::ShortString;
 use url_utils::UrlBuilder;
 
-use super::{HttpClientResolver, HttpClientsCache};
+use super::{HttpClientResolver, FlUrlHttpClientsCache};
 
 use rust_extensions::remote_endpoint::RemoteEndpoint;
 
@@ -45,7 +45,7 @@ impl HttpClientResolver<UnixSocketStream, UnixSocketConnector> for UnixSocketHtt
 }
 
 #[async_trait::async_trait]
-impl HttpClientResolver<UnixSocketStream, UnixSocketConnector> for HttpClientsCache {
+impl HttpClientResolver<UnixSocketStream, UnixSocketConnector> for FlUrlHttpClientsCache {
     async fn get_http_client(
         &self,
         mode: FlUrlMode,

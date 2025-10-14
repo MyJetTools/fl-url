@@ -60,7 +60,7 @@ pub struct FlUrl {
     pub not_used_connection_timeout: Duration,
     pub request_timeout: Duration,
     pub do_not_reuse_connection: bool,
-    pub clients_cache: Option<Arc<HttpClientsCache>>,
+    pub clients_cache: Option<Arc<FlUrlHttpClientsCache>>,
     pub compress_body: bool,
     pub print_input_request: bool,
     mode: FlUrlMode,
@@ -154,7 +154,7 @@ impl FlUrl {
         self
     }
 
-    pub fn with_clients_cache(mut self, clients_cache: Arc<HttpClientsCache>) -> Self {
+    pub fn with_clients_cache(mut self, clients_cache: Arc<FlUrlHttpClientsCache>) -> Self {
         self.clients_cache = Some(clients_cache);
         self
     }
@@ -432,7 +432,7 @@ impl FlUrl {
         )
         .await
     }
-    pub(crate) fn get_clients_cache(&self) -> Arc<HttpClientsCache> {
+    pub(crate) fn get_clients_cache(&self) -> Arc<FlUrlHttpClientsCache> {
         match self.clients_cache.as_ref() {
             Some(cache) => cache.clone(),
             None => crate::CLIENTS_CACHED.clone(),
