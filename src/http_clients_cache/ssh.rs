@@ -10,7 +10,7 @@ use crate::{
     my_http_client_wrapper::MyHttpClientWrapper,
 };
 
-use super::{HttpClientResolver, HttpClientsCache};
+use super::{FlUrlHttpClientsCache, HttpClientResolver};
 
 pub struct SshHttpClientCreator;
 
@@ -51,7 +51,7 @@ impl HttpClientResolver<my_ssh::SshAsyncChannel, SshHttpConnector> for SshHttpCl
 }
 
 #[async_trait::async_trait]
-impl HttpClientResolver<my_ssh::SshAsyncChannel, SshHttpConnector> for HttpClientsCache {
+impl HttpClientResolver<my_ssh::SshAsyncChannel, SshHttpConnector> for FlUrlHttpClientsCache {
     async fn get_http_client(
         &self,
         mode: FlUrlMode,
