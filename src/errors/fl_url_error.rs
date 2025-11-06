@@ -16,6 +16,7 @@ pub enum FlUrlError {
     #[cfg(feature = "with-ssh")]
     SshSessionError(my_ssh::SshSessionError),
     ReadingHyperBodyError(String),
+    InvalidUrl(String),
 }
 
 impl FlUrlError {

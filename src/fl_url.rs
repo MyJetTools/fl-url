@@ -52,7 +52,7 @@ impl Default for FlUrlMode {
 }
 
 pub struct FlUrl {
-    pub url: UrlBuilder,
+    pub url_builder: UrlBuilder,
     pub headers: FlUrlHeaders,
     pub client_cert: Option<my_tls::ClientCertificate>,
     pub accept_invalid_certificate: bool,
@@ -75,13 +75,17 @@ pub struct FlUrl {
 
 impl FlUrl {
     pub fn new<'s>(url: impl Into<StrOrString<'s>>) -> Self {
+        return Self::try_new(url).unwrap();
+    }
+
+    pub fn try_new<'s>(url: impl Into<StrOrString<'s>>) -> Result<Self, FlUrlError> {
         let url: StrOrString<'s> = url.into();
 
         #[cfg(feature = "with-ssh")]
         let (url, credentials) = {
             let endpoint =
                 rust_extensions::remote_endpoint::RemoteEndpointHostString::try_parse(url.as_str())
-                    .unwrap();
+                    .map_err(|err| FlUrlError::InvalidUrl(err))?;
 
             match endpoint {
                 rust_extensions::remote_endpoint::RemoteEndpointHostString::Direct(
@@ -114,10 +118,10 @@ impl FlUrl {
             }
         };
 
-        Self {
+        let result = Self {
             headers: FlUrlHeaders::new(),
             client_cert: None,
-            url,
+            url_builder: url,
             accept_invalid_certificate: false,
             do_not_reuse_connection: false,
             clients_cache: None,
@@ -131,7 +135,9 @@ impl FlUrl {
             #[cfg(feature = "with-ssh")]
             ssh_security_credentials_resolver: None,
             mode: Default::default(),
-        }
+        };
+
+        Ok(result)
     }
 
     #[cfg(feature = "with-ssh")]
@@ -262,7 +268,7 @@ impl FlUrl {
         if self.client_cert.is_some() {
             panic!("Client certificate is already set");
         }
-        if !self.url.get_scheme().is_https() {
+        if !self.url_builder.get_scheme().is_https() {
             panic!("Client certificate can only be used with https");
         }
 
@@ -276,7 +282,8 @@ impl FlUrl {
     }
 
     pub fn append_path_segment<'s>(mut self, path_segment: impl Into<StrOrString<'s>>) -> Self {
-        self.url.append_path_segment(path_segment.into().as_str());
+        self.url_builder
+            .append_path_segment(path_segment.into().as_str());
         self
     }
 
@@ -289,10 +296,11 @@ impl FlUrl {
 
         if let Some(value) = value {
             let value = value.into();
-            self.url
+            self.url_builder
                 .append_query_param(param_name.as_str(), Some(value.as_str()));
         } else {
-            self.url.append_query_param(param_name.as_str(), None);
+            self.url_builder
+                .append_query_param(param_name.as_str(), None);
         };
 
         self
@@ -312,7 +320,7 @@ impl FlUrl {
 
     pub fn append_raw_ending_to_url<'r>(mut self, raw: impl Into<StrOrString<'r>>) -> Self {
         let raw: StrOrString<'r> = raw.into();
-        self.url.append_raw_ending(raw.as_str());
+        self.url_builder.append_raw_ending(raw.as_str());
         self
     }
 
@@ -327,7 +335,7 @@ impl FlUrl {
             }
         }
 
-        let response = match self.url.get_scheme() {
+        let response = match self.url_builder.get_scheme() {
             Scheme::Ws => {
                 panic!("WebSocket Ws scheme is not supported")
             }
@@ -476,18 +484,18 @@ impl FlUrl {
             body = self.compress_body(body);
         }
 
-        let path_and_query = self.url.get_path_and_query();
+        let path_and_query = self.url_builder.get_path_and_query();
 
         let mut result = match self.mode {
             FlUrlMode::H2 => {
-                let scheme = if self.url.get_scheme().is_https() {
+                let scheme = if self.url_builder.get_scheme().is_https() {
                     "https"
                 } else {
                     "http"
                 };
 
                 let uri = Uri::builder()
-                    .authority(self.url.get_host_port())
+                    .authority(self.url_builder.get_host_port())
                     .path_and_query(path_and_query)
                     .scheme(scheme)
                     .build()
@@ -508,11 +516,11 @@ impl FlUrl {
 
         if !self.headers.has_host_header() {
             if !self.mode.is_h2() {
-                result = result.header(hyper::header::HOST.as_str(), self.url.get_host());
+                result = result.header(hyper::header::HOST.as_str(), self.url_builder.get_host());
             }
         }
 
-        if self.url.is_unix_socket() {
+        if self.url_builder.is_unix_socket() {
             result = result.header(hyper::header::ACCEPT, "*/*");
         } else {
             if !self.headers.has_connection_header {
@@ -528,8 +536,8 @@ impl FlUrl {
                 panic!(
                     "[{}]. '{}' '{}' Invalid getting fl_url body: {}",
                     method.as_str(),
-                    self.url.get_host_port(),
-                    self.url.get_path_and_query(),
+                    self.url_builder.get_host_port(),
+                    self.url_builder.get_path_and_query(),
                     err
                 );
             }
@@ -630,7 +638,7 @@ impl FlUrl {
     }
     fn compile_debug_info(&self, out: &mut String) {
         out.push_str("PathAndQuery: '");
-        out.push_str(self.url.get_path_and_query().as_str());
+        out.push_str(self.url_builder.get_path_and_query().as_str());
         out.push_str("'; Headers: '");
         out.push_str(self.headers.headers.as_str());
     }
@@ -690,7 +698,7 @@ impl FlUrl {
             let http_client = http_client_resolver
                 .get_http_client(
                     self.mode,
-                    &self.url,
+                    &self.url_builder,
                     self.headers.get_host_header_value(),
                     client_cert.as_ref(),
                     #[cfg(feature = "with-ssh")]
@@ -702,7 +710,7 @@ impl FlUrl {
 
             match response {
                 Ok(response) => {
-                    let response = FlUrlResponse::from_http1_response(self.url, response);
+                    let response = FlUrlResponse::from_http1_response(self.url_builder, response);
 
                     if response.drop_connection() {
                         http_client_resolver
@@ -718,7 +726,7 @@ impl FlUrl {
                 Err(err) => {
                     http_client_resolver
                         .drop_http_client(
-                            &self.url,
+                            &self.url_builder,
                             #[cfg(feature = "with-ssh")]
                             ssh_credentials.as_ref(),
                         )
