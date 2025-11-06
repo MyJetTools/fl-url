@@ -105,7 +105,7 @@ impl FlUrl {
         let url = {
             let endpoint =
                 rust_extensions::remote_endpoint::RemoteEndpointHostString::try_parse(url.as_str())
-                    .unwrap();
+                    .map_err(|err| FlUrlError::InvalidUrl(err))?;
 
             match endpoint {
                 rust_extensions::remote_endpoint::RemoteEndpointHostString::Direct(
