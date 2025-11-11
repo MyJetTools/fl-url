@@ -19,6 +19,7 @@ pub use into_fl_url::*;
 //mod url_builder_owned;
 //pub use url_builder_owned::*;
 pub extern crate hyper;
+pub extern crate url_utils;
 mod response_body;
 pub use response_body::*;
 
