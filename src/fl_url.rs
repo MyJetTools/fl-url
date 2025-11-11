@@ -468,7 +468,7 @@ impl FlUrl {
         method: Method,
         body: FlUrlBody,
         debug: Option<&mut String>,
-    ) -> my_http_client::http::request::Request<Full<Bytes>> {
+    ) -> Result<my_http_client::http::request::Request<Full<Bytes>>, FlUrlError> {
         if let Some(content_type) = body.get_content_type() {
             self.headers
                 .add(hyper::header::CONTENT_TYPE.as_str(), content_type.as_str());
@@ -533,21 +533,21 @@ impl FlUrl {
         let result = match result.body(Full::new(body.into())) {
             Ok(result) => result,
             Err(err) => {
-                panic!(
+                return Err(FlUrlError::ReadingHyperBodyError(format!(
                     "[{}]. '{}' '{}' Invalid getting fl_url body: {}",
                     method.as_str(),
                     self.url_builder.get_host_port(),
                     self.url_builder.get_path_and_query(),
                     err
-                );
+                )));
             }
         };
 
-        result
+        Ok(result)
     }
 
     pub async fn get(mut self) -> Result<FlUrlResponse, FlUrlError> {
-        let request = self.compile_request(Method::GET, FlUrlBody::Empty, None);
+        let request = self.compile_request(Method::GET, FlUrlBody::Empty, None)?;
         self.execute(request).await
     }
 
@@ -556,17 +556,17 @@ impl FlUrl {
         request_debug_string: &mut String,
     ) -> Result<FlUrlResponse, FlUrlError> {
         let request =
-            self.compile_request(Method::GET, FlUrlBody::Empty, Some(request_debug_string));
+            self.compile_request(Method::GET, FlUrlBody::Empty, Some(request_debug_string))?;
         self.execute(request).await
     }
 
     pub async fn head(mut self) -> Result<FlUrlResponse, FlUrlError> {
-        let request = self.compile_request(Method::HEAD, FlUrlBody::Empty, None);
+        let request = self.compile_request(Method::HEAD, FlUrlBody::Empty, None)?;
         self.execute(request).await
     }
 
     pub async fn post(mut self, body: impl Into<FlUrlBody>) -> Result<FlUrlResponse, FlUrlError> {
-        let request = self.compile_request(Method::POST, body.into(), None);
+        let request = self.compile_request(Method::POST, body.into(), None)?;
         self.execute(request).await
     }
 
@@ -577,7 +577,7 @@ impl FlUrl {
     ) -> Result<FlUrlResponse, FlUrlError> {
         let body = body.into();
 
-        let request = self.compile_request(Method::POST, body, Some(request_debug_string));
+        let request = self.compile_request(Method::POST, body, Some(request_debug_string))?;
         self.execute(request).await
     }
 
@@ -587,13 +587,13 @@ impl FlUrl {
         json: &impl serde::Serialize,
     ) -> Result<FlUrlResponse, FlUrlError> {
         let body = FlUrlBody::as_json(json);
-        let request = self.compile_request(Method::POST, body, None);
+        let request = self.compile_request(Method::POST, body, None)?;
 
         self.execute(request).await
     }
 
     pub async fn patch(mut self, body: impl Into<FlUrlBody>) -> Result<FlUrlResponse, FlUrlError> {
-        let request = self.compile_request(Method::PATCH, body.into(), None);
+        let request = self.compile_request(Method::PATCH, body.into(), None)?;
         self.execute(request).await
     }
 
@@ -603,13 +603,13 @@ impl FlUrl {
         json: &impl serde::Serialize,
     ) -> Result<FlUrlResponse, FlUrlError> {
         let body = FlUrlBody::as_json(json);
-        let request = self.compile_request(Method::PATCH, body, None);
+        let request = self.compile_request(Method::PATCH, body, None)?;
 
         self.execute(request).await
     }
 
     pub async fn put(mut self, body: impl Into<FlUrlBody>) -> Result<FlUrlResponse, FlUrlError> {
-        let request = self.compile_request(Method::PUT, body.into(), None);
+        let request = self.compile_request(Method::PUT, body.into(), None)?;
         self.execute(request).await
     }
 
@@ -619,12 +619,12 @@ impl FlUrl {
         json: &impl serde::Serialize,
     ) -> Result<FlUrlResponse, FlUrlError> {
         let body = FlUrlBody::as_json(json);
-        let request = self.compile_request(Method::PUT, body, None);
+        let request = self.compile_request(Method::PUT, body, None)?;
         self.execute(request).await
     }
 
     pub async fn delete(mut self) -> Result<FlUrlResponse, FlUrlError> {
-        let request = self.compile_request(Method::DELETE, FlUrlBody::Empty, None);
+        let request = self.compile_request(Method::DELETE, FlUrlBody::Empty, None)?;
         self.execute(request).await
     }
 
@@ -633,7 +633,7 @@ impl FlUrl {
         request_debug_string: &mut String,
     ) -> Result<FlUrlResponse, FlUrlError> {
         let request =
-            self.compile_request(Method::DELETE, FlUrlBody::Empty, Some(request_debug_string));
+            self.compile_request(Method::DELETE, FlUrlBody::Empty, Some(request_debug_string))?;
         self.execute(request).await
     }
     fn compile_debug_info(&self, out: &mut String) {
