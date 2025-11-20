@@ -1,11 +1,8 @@
 use std::time::Duration;
 
-use bytes::Bytes;
-use http_body_util::Full;
-use my_http_client::{
-    http1::{MyHttpRequest, MyHttpResponse},
-    MyHttpClientConnector, MyHttpClientError,
-};
+use my_http_client::{http1::MyHttpResponse, MyHttpClientConnector, MyHttpClientError};
+
+use crate::compiled_http_request::CompiledHttpRequest;
 
 pub enum MyHttpClientWrapper<
     TStream: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + Sync + 'static,
@@ -23,18 +20,17 @@ impl<
 {
     pub async fn do_request(
         &self,
-        request: &my_http_client::http::request::Request<Full<Bytes>>,
+        request: &CompiledHttpRequest,
         request_timeout: Duration,
     ) -> Result<MyHttpResponse<TStream>, MyHttpClientError> {
         match self {
             MyHttpClientWrapper::MyHttpClient(my_http_client) => {
-                let request = MyHttpRequest::from_hyper_request(request.clone()).await;
+                let request = request.unwrap_as_my_http_client_request();
                 my_http_client.do_request(&request, request_timeout).await
             }
             MyHttpClientWrapper::Hyper(my_http_client) => {
-                let result = my_http_client
-                    .do_request(request.clone(), request_timeout)
-                    .await?;
+                let request = request.unwrap_as_hyper();
+                let result = my_http_client.do_request(request, request_timeout).await?;
 
                 match result {
                     my_http_client::http1_hyper::HyperHttpResponse::Response(response) => {
@@ -50,10 +46,8 @@ impl<
             MyHttpClientWrapper::H2(my_http_client) => {
                 //let req = req.to_hyper_h2_request(is_https);
 
-                //println!("H2 request: {:?}", req);
-                let result = my_http_client
-                    .do_request(request.clone(), request_timeout)
-                    .await?;
+                let request = request.unwrap_as_hyper();
+                let result = my_http_client.do_request(request, request_timeout).await?;
                 Ok(MyHttpResponse::Response(result))
             }
         }

@@ -4,6 +4,7 @@ use hyper::Method;
 
 use hyper::Uri;
 use hyper::Version;
+use my_http_client::http1::MyHttpRequestBuilder;
 use my_http_client::MyHttpClientConnector;
 use my_tls::tokio_rustls::client::TlsStream;
 
@@ -17,6 +18,7 @@ use tokio::net::TcpStream;
 
 use super::FlUrlResponse;
 use crate::body::FlUrlBody;
+use crate::compiled_http_request::CompiledHttpRequest;
 use crate::http_connectors::*;
 
 use crate::http_clients_cache::*;
@@ -324,10 +326,7 @@ impl FlUrl {
         self
     }
 
-    async fn execute(
-        self,
-        request: my_http_client::http::request::Request<Full<Bytes>>,
-    ) -> Result<FlUrlResponse, FlUrlError> {
+    async fn execute(self, request: CompiledHttpRequest) -> Result<FlUrlResponse, FlUrlError> {
         #[cfg(feature = "with-ssh")]
         {
             if self.ssh_credentials.is_some() {
@@ -468,6 +467,27 @@ impl FlUrl {
         method: Method,
         body: FlUrlBody,
         debug: Option<&mut String>,
+    ) -> Result<CompiledHttpRequest, FlUrlError> {
+        let result = match self.mode {
+            FlUrlMode::H2 => {
+                CompiledHttpRequest::Hyper(self.compile_hyper_request(method, body, debug)?)
+            }
+            FlUrlMode::Http1NoHyper => CompiledHttpRequest::MyHttpClient(
+                self.compile_non_hyper_request(method, body, debug)?,
+            ),
+            FlUrlMode::Http1Hyper => {
+                CompiledHttpRequest::Hyper(self.compile_hyper_request(method, body, debug)?)
+            }
+        };
+
+        Ok(result)
+    }
+
+    fn compile_hyper_request(
+        &mut self,
+        method: Method,
+        body: FlUrlBody,
+        debug: Option<&mut String>,
     ) -> Result<my_http_client::http::request::Request<Full<Bytes>>, FlUrlError> {
         if let Some(content_type) = body.get_content_type() {
             self.headers.add("Content-Type", content_type.as_str());
@@ -543,6 +563,51 @@ impl FlUrl {
         };
 
         Ok(result)
+    }
+
+    fn compile_non_hyper_request(
+        &mut self,
+        method: Method,
+        body: FlUrlBody,
+        debug: Option<&mut String>,
+    ) -> Result<my_http_client::http1::MyHttpRequest, FlUrlError> {
+        if let Some(content_type) = body.get_content_type() {
+            self.headers.add("Content-Type", content_type.as_str());
+        }
+
+        let mut body = body.into_vec();
+
+        if let Some(debug) = debug {
+            self.compile_debug_info_with_body(debug, method.as_str(), &body);
+        }
+
+        if self.compress_body {
+            body = self.compress_body(body);
+        }
+
+        let path_and_query = self.url_builder.get_path_and_query();
+
+        let mut builder = MyHttpRequestBuilder::new(method, &path_and_query);
+
+        if !self.headers.has_host_header() {
+            builder.append_header("Host", self.url_builder.get_host());
+        }
+
+        if self.url_builder.is_unix_socket() {
+            builder.append_header("Accept", "*/*");
+        } else {
+            if !self.headers.has_connection_header {
+                if !self.do_not_reuse_connection {
+                    builder.append_header("Connection", "keep-alive");
+                }
+            }
+        }
+
+        for header in self.headers.iter() {
+            builder.append_header(header.0, header.1);
+        }
+
+        Ok(builder.build_with_body(body))
     }
 
     pub async fn get(mut self) -> Result<FlUrlResponse, FlUrlError> {
@@ -664,7 +729,7 @@ impl FlUrl {
             Err(_) => {
                 request_debug_string.push_str("Body: ");
                 request_debug_string.push_str(body.len().to_string().as_str());
-                request_debug_string.push_str("non string bytes");
+                request_debug_string.push_str(" non string bytes");
             }
         }
     }
@@ -682,12 +747,12 @@ impl FlUrl {
         THttpClientResolver: HttpClientResolver<TStream, TConnector>,
     >(
         mut self,
-        request: &my_http_client::http::request::Request<Full<Bytes>>,
+        request: &CompiledHttpRequest,
         http_client_resolver: &THttpClientResolver,
         #[cfg(feature = "with-ssh")] ssh_credentials: Option<Arc<my_ssh::SshCredentials>>,
     ) -> Result<FlUrlResponse, FlUrlError> {
         if self.print_input_request {
-            println!("{:?}", request.headers());
+            request.print_http_headers();
         }
         let mut attempt_no = 0;
 
