@@ -44,12 +44,13 @@ impl FlUrlBody {
         match self {
             FlUrlBody::Json(data) => data,
             FlUrlBody::UrlEncoded(body) => body.data.into_bytes(),
-            FlUrlBody::FormData(body) => body.buffer,
+            FlUrlBody::FormData(body) => body.finalize().buffer,
             FlUrlBody::Raw { data, .. } => data,
             FlUrlBody::Empty => Vec::new(),
         }
     }
 
+    /*
     pub fn as_slice(&self) -> &[u8] {
         match self {
             FlUrlBody::Json(data) => data.as_slice(),
@@ -59,6 +60,7 @@ impl FlUrlBody {
             FlUrlBody::Empty => &[],
         }
     }
+     */
 }
 
 impl Into<FlUrlBody> for UrlEncodedBody {
