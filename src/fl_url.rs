@@ -421,7 +421,7 @@ impl FlUrl {
     #[cfg(feature = "with-ssh")]
     async fn execute_ssh(
         mut self,
-        request: my_http_client::http::request::Request<Full<Bytes>>,
+        request: CompiledHttpRequest,
     ) -> Result<FlUrlResponse, FlUrlError> {
         let mut ssh_credentials = self.ssh_credentials.take().unwrap();
 
