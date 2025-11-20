@@ -470,8 +470,7 @@ impl FlUrl {
         debug: Option<&mut String>,
     ) -> Result<my_http_client::http::request::Request<Full<Bytes>>, FlUrlError> {
         if let Some(content_type) = body.get_content_type() {
-            self.headers
-                .add(hyper::header::CONTENT_TYPE.as_str(), content_type.as_str());
+            self.headers.add("Content-Type", content_type.as_str());
         }
 
         let mut body = body.into_vec();
