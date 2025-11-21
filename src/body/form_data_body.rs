@@ -27,7 +27,7 @@ impl FormDataBody {
         let name = name.into();
         write!(
             &mut self.buffer,
-            "{}\r\nContent-Disposition: form-data; name=\"{}\"\r\n\r\n{}\r\n",
+            "--{}\r\nContent-Disposition: form-data; name=\"{}\"\r\n\r\n{}\r\n",
             self.boundary, name, value
         )
         .unwrap();
@@ -49,7 +49,7 @@ impl FormDataBody {
         let content_type = content_type.into();
         write!(
             &mut self.buffer,
-            "{}\r\nContent-Disposition: form-data; name=\"{}\"; filename=\"{}\"\r\nContent-Type:{}\r\n\r\n",
+            "--{}\r\nContent-Disposition: form-data; name=\"{}\"; filename=\"{}\"\r\nContent-Type:{}\r\n\r\n",
             self.boundary,
             name,
             file_name.as_str(),
@@ -65,6 +65,7 @@ impl FormDataBody {
     pub fn into_bytes(self) -> Vec<u8> {
         let mut result = self.buffer;
 
+        result.extend_from_slice(b"--");
         result.extend_from_slice(self.boundary.as_bytes());
         result.extend_from_slice(b"--");
 
