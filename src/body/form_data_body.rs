@@ -58,7 +58,7 @@ impl FormDataBody {
         .unwrap();
 
         self.buffer.extend_from_slice(content);
-        self.buffer.extend_from_slice(b"\r\n--");
+        self.buffer.extend_from_slice(b"--");
         self.buffer.extend_from_slice(self.boundary.as_bytes());
         self.buffer.extend_from_slice(b"\r\n");
         self
@@ -66,16 +66,6 @@ impl FormDataBody {
 
     pub fn get_content_type(&self) -> String {
         format!("multipart/form-data; boundary={}", self.boundary)
-    }
-
-    /// Finalizes the form data by adding the closing boundary marker.
-    /// This must be called before converting to bytes.
-    pub(crate) fn finalize(mut self) -> Self {
-        // Add the final closing boundary: --{boundary}--\r\n
-        self.buffer.extend_from_slice(b"--");
-        self.buffer.extend_from_slice(self.boundary.as_bytes());
-        self.buffer.extend_from_slice(b"--\r\n");
-        self
     }
 }
 

@@ -44,7 +44,7 @@ impl FlUrlBody {
         match self {
             FlUrlBody::Json(data) => data,
             FlUrlBody::UrlEncoded(body) => body.data.into_bytes(),
-            FlUrlBody::FormData(body) => body.finalize().buffer,
+            FlUrlBody::FormData(body) => body.buffer,
             FlUrlBody::Raw { data, .. } => data,
             FlUrlBody::Empty => Vec::new(),
         }
