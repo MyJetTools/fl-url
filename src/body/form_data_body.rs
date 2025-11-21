@@ -5,12 +5,12 @@ use rust_extensions::StrOrString;
 pub struct FormDataBody {
     // files: Vec<MultipartFile>,
     boundary: String,
-    pub(crate) buffer: Vec<u8>,
+    buffer: Vec<u8>,
 }
 
 impl FormDataBody {
     pub fn new() -> Self {
-        let boundary = format!("----DataFormBoundary{}", rand_string(16));
+        let boundary = format!("------DataFormBoundary{}", rand_string(16));
         Self {
             boundary,
             buffer: vec![], //files: vec![],
@@ -27,7 +27,7 @@ impl FormDataBody {
         let name = name.into();
         write!(
             &mut self.buffer,
-            "--{}\r\nContent-Disposition: form-data; name=\"{}\"\r\n\r\n{}\r\n",
+            "{}\r\nContent-Disposition: form-data; name=\"{}\"\r\n\r\n{}\r\n",
             self.boundary, name, value
         )
         .unwrap();
@@ -49,7 +49,7 @@ impl FormDataBody {
         let content_type = content_type.into();
         write!(
             &mut self.buffer,
-            "--{}\r\nContent-Disposition: form-data; name=\"{}\"; filename=\"{}\"\r\nContent-Type:{}\r\n\r\n",
+            "{}\r\nContent-Disposition: form-data; name=\"{}\"; filename=\"{}\"\r\nContent-Type:{}\r\n\r\n",
             self.boundary,
             name,
             file_name.as_str(),
@@ -58,10 +58,17 @@ impl FormDataBody {
         .unwrap();
 
         self.buffer.extend_from_slice(content);
-        self.buffer.extend_from_slice(b"--");
-        self.buffer.extend_from_slice(self.boundary.as_bytes());
-        self.buffer.extend_from_slice(b"\r\n");
+        self.buffer.extend_from_slice("\r\n".as_bytes());
         self
+    }
+
+    pub fn into_bytes(self) -> Vec<u8> {
+        let mut result = self.buffer;
+
+        result.extend_from_slice(self.boundary.as_bytes());
+        result.extend_from_slice(b"--");
+
+        result
     }
 
     pub fn get_content_type(&self) -> String {
@@ -73,4 +80,29 @@ impl FormDataBody {
 fn rand_string(len: usize) -> String {
     use rand::distr::Alphanumeric;
     rand::distr::SampleString::sample_string(&Alphanumeric, &mut rand::rng(), len)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::body::FormDataBody;
+
+    #[test]
+    fn test_form_data_body() {
+        let form_data = FormDataBody::new().append_form_data_field("test", "my value");
+
+        let result = form_data.into_bytes();
+
+        println!("{}", std::str::from_utf8(result.as_slice()).unwrap());
+    }
+
+    #[test]
+    fn test_form_data_body_2() {
+        let form_data = FormDataBody::new()
+            .append_form_data_field("test", "my value")
+            .append_form_data_file("name", "file.txt", "text", "123".as_bytes());
+
+        let result = form_data.into_bytes();
+
+        println!("{}", std::str::from_utf8(result.as_slice()).unwrap());
+    }
 }
