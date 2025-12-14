@@ -43,5 +43,5 @@ pub extern crate my_ssh;
 mod compiled_http_request;
 
 lazy_static::lazy_static! {
-    static ref CLIENTS_CACHED: Arc<FlUrlHttpClientsCache> =  Arc::new(FlUrlHttpClientsCache::new());
+    static ref CLIENTS_CACHED: Arc<FlUrlHttpConnectionsCache> =  Arc::new(FlUrlHttpConnectionsCache::new());
 }

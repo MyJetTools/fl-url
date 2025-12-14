@@ -7,7 +7,7 @@ use url_utils::UrlBuilder;
 use crate::{fl_url::FlUrlMode, my_http_client_wrapper::MyHttpClientWrapper};
 
 #[async_trait::async_trait]
-pub trait HttpClientResolver<
+pub trait HttpConnectionResolver<
     TStream: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + Sync + 'static,
     TConnector: MyHttpClientConnector<TStream> + Send + Sync + 'static,
 >

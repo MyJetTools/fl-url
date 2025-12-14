@@ -10,14 +10,14 @@ use crate::{
     fl_url::FlUrlMode, http_connectors::HttpConnector, my_http_client_wrapper::MyHttpClientWrapper,
 };
 
-use super::{FlUrlHttpClientsCache, HttpClientResolver};
+use super::{FlUrlHttpConnectionsCache, HttpConnectionResolver};
 
-pub struct HttpClientCreator;
+pub struct HttpConnectionCreator;
 
 const HTTP_DEFAULT_PORT: u16 = 80;
 
 #[async_trait::async_trait]
-impl HttpClientResolver<TcpStream, HttpConnector> for HttpClientCreator {
+impl HttpConnectionResolver<TcpStream, HttpConnector> for HttpConnectionCreator {
     async fn get_http_client(
         &self,
         mode: FlUrlMode,
@@ -45,7 +45,7 @@ impl HttpClientResolver<TcpStream, HttpConnector> for HttpClientCreator {
 }
 
 #[async_trait::async_trait]
-impl HttpClientResolver<TcpStream, HttpConnector> for FlUrlHttpClientsCache {
+impl HttpConnectionResolver<TcpStream, HttpConnector> for FlUrlHttpConnectionsCache {
     async fn get_http_client(
         &self,
         mode: FlUrlMode,
@@ -64,7 +64,7 @@ impl HttpClientResolver<TcpStream, HttpConnector> for FlUrlHttpClientsCache {
             return existing_connection.clone();
         }
 
-        let new_one = HttpClientCreator
+        let new_one = HttpConnectionCreator
             .get_http_client(
                 mode,
                 url_builder,

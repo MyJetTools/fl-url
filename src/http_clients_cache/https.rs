@@ -10,14 +10,14 @@ use crate::{
     fl_url::FlUrlMode, http_connectors::HttpsConnector, my_http_client_wrapper::MyHttpClientWrapper,
 };
 
-use super::{HttpClientResolver, FlUrlHttpClientsCache};
+use super::{FlUrlHttpConnectionsCache, HttpConnectionResolver};
 
 pub struct HttpsClientCreator;
 
 const HTTPS_DEFAULT_PORT: u16 = 443;
 
 #[async_trait::async_trait]
-impl HttpClientResolver<TlsStream<TcpStream>, HttpsConnector> for HttpsClientCreator {
+impl HttpConnectionResolver<TlsStream<TcpStream>, HttpsConnector> for HttpsClientCreator {
     async fn get_http_client(
         &self,
         mode: FlUrlMode,
@@ -60,7 +60,7 @@ impl HttpClientResolver<TlsStream<TcpStream>, HttpsConnector> for HttpsClientCre
 }
 
 #[async_trait::async_trait]
-impl HttpClientResolver<TlsStream<TcpStream>, HttpsConnector> for FlUrlHttpClientsCache {
+impl HttpConnectionResolver<TlsStream<TcpStream>, HttpsConnector> for FlUrlHttpConnectionsCache {
     async fn get_http_client(
         &self,
         mode: FlUrlMode,

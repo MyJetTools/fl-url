@@ -23,7 +23,7 @@ use crate::http_connectors::*;
 
 use crate::http_clients_cache::*;
 
-use crate::HttpClientResolver;
+use crate::HttpConnectionResolver;
 
 use crate::FlUrlError;
 
@@ -62,7 +62,7 @@ pub struct FlUrl {
     pub not_used_connection_timeout: Duration,
     pub request_timeout: Duration,
     pub do_not_reuse_connection: bool,
-    pub clients_cache: Option<Arc<FlUrlHttpClientsCache>>,
+    pub clients_cache: Option<Arc<FlUrlHttpConnectionsCache>>,
     pub compress_body: bool,
     pub print_input_request: bool,
     mode: FlUrlMode,
@@ -162,7 +162,7 @@ impl FlUrl {
         self
     }
 
-    pub fn with_clients_cache(mut self, clients_cache: Arc<FlUrlHttpClientsCache>) -> Self {
+    pub fn with_clients_cache(mut self, clients_cache: Arc<FlUrlHttpConnectionsCache>) -> Self {
         self.clients_cache = Some(clients_cache);
         self
     }
@@ -346,7 +346,7 @@ impl FlUrl {
                 if self.do_not_reuse_connection {
                     self.execute_with_retry::<TcpStream, HttpConnector, _>(
                         &request,
-                        &http::HttpClientCreator,
+                        &http::HttpConnectionCreator,
                         #[cfg(feature = "with-ssh")]
                         None,
                     )
@@ -439,7 +439,7 @@ impl FlUrl {
         )
         .await
     }
-    pub(crate) fn get_clients_cache(&self) -> Arc<FlUrlHttpClientsCache> {
+    pub(crate) fn get_clients_cache(&self) -> Arc<FlUrlHttpConnectionsCache> {
         match self.clients_cache.as_ref() {
             Some(cache) => cache.clone(),
             None => crate::CLIENTS_CACHED.clone(),
@@ -744,7 +744,7 @@ impl FlUrl {
     async fn execute_with_retry<
         TStream: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + Sync + 'static,
         TConnector: MyHttpClientConnector<TStream> + Send + Sync + 'static,
-        THttpClientResolver: HttpClientResolver<TStream, TConnector>,
+        THttpClientResolver: HttpConnectionResolver<TStream, TConnector>,
     >(
         mut self,
         request: &CompiledHttpRequest,
