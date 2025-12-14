@@ -10,13 +10,13 @@ use crate::{
     my_http_client_wrapper::MyHttpClientWrapper,
 };
 
-use super::{FlUrlHttpClientsCache, HttpClientResolver};
+use super::*;
 
 pub struct SshHttpClientCreator;
 
 #[async_trait::async_trait]
-impl HttpClientResolver<my_ssh::SshAsyncChannel, SshHttpConnector> for SshHttpClientCreator {
-    async fn get_http_client(
+impl HttpConnectionResolver<my_ssh::SshAsyncChannel, SshHttpConnector> for SshHttpClientCreator {
+    async fn get_http_connection(
         &self,
         mode: FlUrlMode,
         url_builder: &UrlBuilder,
@@ -42,7 +42,7 @@ impl HttpClientResolver<my_ssh::SshAsyncChannel, SshHttpConnector> for SshHttpCl
         }
     }
 
-    async fn drop_http_client(
+    async fn drop_http_connection(
         &self,
         _url_builder: &UrlBuilder,
         #[cfg(feature = "with-ssh")] _ssh_credentials: Option<&Arc<my_ssh::SshCredentials>>,
@@ -51,8 +51,10 @@ impl HttpClientResolver<my_ssh::SshAsyncChannel, SshHttpConnector> for SshHttpCl
 }
 
 #[async_trait::async_trait]
-impl HttpClientResolver<my_ssh::SshAsyncChannel, SshHttpConnector> for FlUrlHttpClientsCache {
-    async fn get_http_client(
+impl HttpConnectionResolver<my_ssh::SshAsyncChannel, SshHttpConnector>
+    for FlUrlHttpConnectionsCache
+{
+    async fn get_http_connection(
         &self,
         mode: FlUrlMode,
         url_builder: &UrlBuilder,
@@ -69,7 +71,7 @@ impl HttpClientResolver<my_ssh::SshAsyncChannel, SshHttpConnector> for FlUrlHttp
         }
 
         let new_one = SshHttpClientCreator
-            .get_http_client(
+            .get_http_connection(
                 mode,
                 url_builder,
                 host_header,
@@ -85,7 +87,7 @@ impl HttpClientResolver<my_ssh::SshAsyncChannel, SshHttpConnector> for FlUrlHttp
         new_one
     }
 
-    async fn drop_http_client(
+    async fn drop_http_connection(
         &self,
         url_builder: &UrlBuilder,
         ssh_credentials: Option<&Arc<my_ssh::SshCredentials>>,
