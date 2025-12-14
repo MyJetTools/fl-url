@@ -836,11 +836,11 @@ impl FlUrl {
         }
     }
 
-    pub async fn warm_up_connection(mut self) -> Result<Self, FlUrlError> {
+    pub async fn warm_up_connection(mut self) -> Self {
         match self.url_builder.get_scheme() {
             Scheme::Https => {}
             _ => {
-                return Ok(self);
+                return self;
             }
         }
 
@@ -862,7 +862,7 @@ impl FlUrl {
 
         self.https_warmed_up_connection = Some(warmed_connection);
 
-        Ok(self)
+        self
     }
 }
 
