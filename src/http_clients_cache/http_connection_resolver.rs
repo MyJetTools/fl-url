@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
 use my_http_client::MyHttpClientConnector;
-use my_tls::ClientCertificate;
-use url_utils::UrlBuilder;
 
-use crate::{fl_url::FlUrlMode, my_http_client_wrapper::MyHttpClientWrapper};
+use crate::my_http_client_wrapper::MyHttpClientWrapper;
+
+use super::*;
 
 #[async_trait::async_trait]
 pub trait HttpConnectionResolver<
@@ -14,17 +14,8 @@ pub trait HttpConnectionResolver<
 {
     async fn get_http_connection(
         &self,
-        mode: FlUrlMode,
-        url_builder: &UrlBuilder,
-        host_header: Option<&str>,
-        client_certificate: Option<&ClientCertificate>,
-
-        #[cfg(feature = "with-ssh")] ssh_credentials: Option<&Arc<my_ssh::SshCredentials>>,
+        params: &ConnectionData<'_>,
     ) -> Arc<MyHttpClientWrapper<TStream, TConnector>>;
 
-    async fn drop_http_connection(
-        &self,
-        url_builder: &UrlBuilder,
-        #[cfg(feature = "with-ssh")] ssh_credentials: Option<&Arc<my_ssh::SshCredentials>>,
-    );
+    async fn put_connection_back(&self, connection: Arc<MyHttpClientWrapper<TStream, TConnector>>);
 }

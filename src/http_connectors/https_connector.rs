@@ -10,7 +10,7 @@ use tokio::net::TcpStream;
 
 pub struct HttpsConnector {
     pub remote_host: RemoteEndpointOwned,
-    pub domain: Option<String>,
+    pub server_name: String,
     pub client_certificate: Option<ClientCertificate>,
     h2: bool,
 }
@@ -18,13 +18,13 @@ pub struct HttpsConnector {
 impl HttpsConnector {
     pub fn new(
         remote_host: RemoteEndpointOwned,
-        domain: Option<String>,
+        server_name: String,
         client_certificate: Option<ClientCertificate>,
         h2: bool,
     ) -> Self {
         Self {
             remote_host,
-            domain,
+            server_name,
             client_certificate,
             h2,
         }
@@ -67,17 +67,12 @@ impl MyHttpClientConnector<TlsStream<TcpStream>> for HttpsConnector {
 
         let connector = TlsConnector::from(Arc::new(client_config));
 
-        let domain = if let Some(domain) = self.domain.as_ref() {
-            my_tls::tokio_rustls::rustls::pki_types::ServerName::try_from(domain.to_string())
-                .unwrap()
-        } else {
-            my_tls::tokio_rustls::rustls::pki_types::ServerName::try_from(
-                self.remote_host.get_host().to_string(),
-            )
-            .unwrap()
-        };
+        let server_name = my_tls::tokio_rustls::rustls::pki_types::ServerName::try_from(
+            self.server_name.to_string(),
+        )
+        .unwrap();
 
-        match connector.connect(domain, tcp_stream).await {
+        match connector.connect(server_name, tcp_stream).await {
             Ok(tls_stream) => Ok(tls_stream),
             Err(err) => Err(
                 my_http_client::MyHttpClientError::CanNotConnectToRemoteHost(format!(

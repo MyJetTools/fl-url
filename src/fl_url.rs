@@ -65,6 +65,7 @@ pub struct FlUrl {
     pub connections_cache: Option<Arc<FlUrlHttpConnectionsCache>>,
     pub compress_body: bool,
     pub print_input_request: bool,
+    https_warmed_up_connection: Option<WarmedHttpsConnection>,
     mode: FlUrlMode,
     #[cfg(feature = "with-ssh")]
     ssh_credentials: Option<my_ssh::SshCredentials>,
@@ -130,6 +131,7 @@ impl FlUrl {
             not_used_connection_timeout: Duration::from_secs(30),
             max_retries: 0,
             request_timeout: Duration::from_secs(10),
+            https_warmed_up_connection: None,
             print_input_request: false,
             compress_body: false,
             #[cfg(feature = "with-ssh")]
@@ -326,12 +328,10 @@ impl FlUrl {
         self
     }
 
-    async fn execute(self, request: CompiledHttpRequest) -> Result<FlUrlResponse, FlUrlError> {
+    async fn execute(mut self, request: CompiledHttpRequest) -> Result<FlUrlResponse, FlUrlError> {
         #[cfg(feature = "with-ssh")]
-        {
-            if self.ssh_credentials.is_some() {
-                return self.execute_ssh(request).await;
-            }
+        if let Some(ssh_credentials) = self.ssh_credentials.take() {
+            return self.execute_ssh(request, ssh_credentials).await;
         }
 
         let response = match self.url_builder.get_scheme() {
@@ -344,18 +344,20 @@ impl FlUrl {
             }
             Scheme::Http => {
                 if self.do_not_reuse_connection {
-                    self.execute_with_retry::<TcpStream, HttpConnector, _>(
+                    self.execute_with_retry::<TcpStream, HttpConnector>(
                         &request,
-                        &http::HttpConnectionCreator,
+                        &crate::http_clients_cache::creators::HttpConnectionCreator,
+                        crate::consts::HTTP_DEFAULT_PORT.into(),
                         #[cfg(feature = "with-ssh")]
                         None,
                     )
                     .await?
                 } else {
-                    let clients_cache = self.get_clients_cache();
-                    self.execute_with_retry::<TcpStream, HttpConnector, _>(
+                    let clients_cache = self.get_connections_cache();
+                    self.execute_with_retry::<TcpStream, HttpConnector>(
                         &request,
                         clients_cache.as_ref(),
+                        crate::consts::HTTP_DEFAULT_PORT.into(),
                         #[cfg(feature = "with-ssh")]
                         None,
                     )
@@ -363,24 +365,37 @@ impl FlUrl {
                 }
             }
             Scheme::Https => {
-                if self.do_not_reuse_connection {
-                    self.execute_with_retry::<TlsStream<TcpStream>, HttpsConnector, _>(
+                if let Some(warmed_connection) = self.https_warmed_up_connection.take() {
+                    self.execute_with_retry::<TlsStream<TcpStream>, HttpsConnector>(
                         &request,
-                        &https::HttpsClientCreator,
+                        &warmed_connection,
+                        crate::consts::HTTPS_DEFAULT_PORT.into(),
                         #[cfg(feature = "with-ssh")]
                         None,
                     )
                     .await?
                 } else {
-                    let clients_cache = self.get_clients_cache();
+                    if self.do_not_reuse_connection {
+                        self.execute_with_retry::<TlsStream<TcpStream>, HttpsConnector>(
+                            &request,
+                            &crate::http_clients_cache::creators::HttpsConnectionCreator,
+                            crate::consts::HTTPS_DEFAULT_PORT.into(),
+                            #[cfg(feature = "with-ssh")]
+                            None,
+                        )
+                        .await?
+                    } else {
+                        let clients_cache = self.get_connections_cache();
 
-                    self.execute_with_retry::<TlsStream<TcpStream>, HttpsConnector, _>(
-                        &request,
-                        clients_cache.as_ref(),
-                        #[cfg(feature = "with-ssh")]
-                        None,
-                    )
-                    .await?
+                        self.execute_with_retry::<TlsStream<TcpStream>, HttpsConnector>(
+                            &request,
+                            clients_cache.as_ref(),
+                            crate::consts::HTTPS_DEFAULT_PORT.into(),
+                            #[cfg(feature = "with-ssh")]
+                            None,
+                        )
+                        .await?
+                    }
                 }
             }
             #[cfg(not(unix))]
@@ -390,19 +405,21 @@ impl FlUrl {
             #[cfg(unix)]
             Scheme::UnixSocket => {
                 if self.do_not_reuse_connection {
-                    self.execute_with_retry::<UnixSocketStream, UnixSocketConnector, _>(
+                    self.execute_with_retry::<UnixSocketStream, UnixSocketConnector>(
                         &request,
-                        &unix_socket::UnixSocketHttpClientCreator,
+                        &crate::http_clients_cache::creators::UnixSocketHttpClientCreator,
+                        None,
                         #[cfg(feature = "with-ssh")]
                         None,
                     )
                     .await?
                 } else {
-                    let clients_cache = self.get_clients_cache();
+                    let clients_cache = self.get_connections_cache();
 
-                    self.execute_with_retry::<UnixSocketStream, UnixSocketConnector, _>(
+                    self.execute_with_retry::<UnixSocketStream, UnixSocketConnector>(
                         &request,
                         clients_cache.as_ref(),
+                        None,
                         #[cfg(feature = "with-ssh")]
                         None,
                     )
@@ -422,24 +439,24 @@ impl FlUrl {
     async fn execute_ssh(
         mut self,
         request: CompiledHttpRequest,
+        mut ssh_credentials: my_ssh::SshCredentials,
     ) -> Result<FlUrlResponse, FlUrlError> {
-        let mut ssh_credentials = self.ssh_credentials.take().unwrap();
-
         if let Some(private_key_resolver) = self.ssh_security_credentials_resolver.take() {
             ssh_credentials = private_key_resolver
                 .update_credentials(&ssh_credentials)
                 .await;
         }
 
-        let clients_cache = self.get_clients_cache();
-        self.execute_with_retry::<my_ssh::SshAsyncChannel, SshHttpConnector, _>(
+        let clients_cache = self.get_connections_cache();
+        self.execute_with_retry::<my_ssh::SshAsyncChannel, SshHttpConnector>(
             &request,
             clients_cache.as_ref(),
+            crate::consts::HTTP_DEFAULT_PORT.into(),
             Some(Arc::new(ssh_credentials)),
         )
         .await
     }
-    pub(crate) fn get_clients_cache(&self) -> Arc<FlUrlHttpConnectionsCache> {
+    pub(crate) fn get_connections_cache(&self) -> Arc<FlUrlHttpConnectionsCache> {
         match self.connections_cache.as_ref() {
             Some(cache) => cache.clone(),
             None => crate::CLIENTS_CACHED.clone(),
@@ -741,62 +758,75 @@ impl FlUrl {
         result
     }
 
+    async fn get_params<'s>(
+        &'s mut self,
+        default_port: Option<u16>,
+        #[cfg(feature = "with-ssh")] ssh_credentials: Option<Arc<my_ssh::SshCredentials>>,
+    ) -> ConnectionData<'s> {
+        let remote_endpoint = self.url_builder.get_remote_endpoint(default_port);
+
+        #[cfg(feature = "with-ssh")]
+        let ssh_session = match ssh_credentials.clone() {
+            Some(ssh_credentials) => {
+                let ssh_credentials = Arc::new(ssh_credentials);
+                let ssh_session = my_ssh::SSH_SESSIONS_POOL
+                    .get_or_create(&ssh_credentials)
+                    .await;
+
+                Some(ssh_session)
+            }
+            None => None,
+        };
+
+        ConnectionData {
+            mode: self.mode,
+            remote_endpoint,
+            server_name: self.headers.get_host_header_value(),
+            client_certificate: self.client_cert.as_ref(),
+            #[cfg(feature = "with-ssh")]
+            ssh_session,
+        }
+    }
+
     async fn execute_with_retry<
         TStream: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + Sync + 'static,
         TConnector: MyHttpClientConnector<TStream> + Send + Sync + 'static,
-        THttpClientResolver: HttpConnectionResolver<TStream, TConnector>,
     >(
         mut self,
         request: &CompiledHttpRequest,
-        http_client_resolver: &THttpClientResolver,
+        http_connection_resolver: &impl HttpConnectionResolver<TStream, TConnector>,
+        default_port: Option<u16>,
         #[cfg(feature = "with-ssh")] ssh_credentials: Option<Arc<my_ssh::SshCredentials>>,
     ) -> Result<FlUrlResponse, FlUrlError> {
         if self.print_input_request {
             request.print_http_headers();
         }
         let mut attempt_no = 0;
-
-        let client_cert = self.client_cert.take();
+        let max_retries = self.max_retries;
+        let request_timeout = self.request_timeout;
+        let params = self
+            .get_params(
+                default_port,
+                #[cfg(feature = "with-ssh")]
+                ssh_credentials,
+            )
+            .await;
 
         loop {
-            let http_client = http_client_resolver
-                .get_http_connection(
-                    self.mode,
-                    &self.url_builder,
-                    self.headers.get_host_header_value(),
-                    client_cert.as_ref(),
-                    #[cfg(feature = "with-ssh")]
-                    ssh_credentials.as_ref(),
-                )
-                .await;
+            let connection = http_connection_resolver.get_http_connection(&params).await;
 
-            let response = http_client.do_request(request, self.request_timeout).await;
+            let response = connection.do_request(request, request_timeout).await;
 
             match response {
                 Ok(response) => {
+                    http_connection_resolver
+                        .put_connection_back(connection)
+                        .await;
                     let response = FlUrlResponse::from_http1_response(self.url_builder, response);
-
-                    if response.drop_connection() {
-                        http_client_resolver
-                            .drop_http_connection(
-                                &response.url,
-                                #[cfg(feature = "with-ssh")]
-                                ssh_credentials.as_ref(),
-                            )
-                            .await;
-                    }
                     return Ok(response);
                 }
                 Err(err) => {
-                    http_client_resolver
-                        .drop_http_connection(
-                            &self.url_builder,
-                            #[cfg(feature = "with-ssh")]
-                            ssh_credentials.as_ref(),
-                        )
-                        .await;
-
-                    if attempt_no >= self.max_retries {
+                    if attempt_no >= max_retries {
                         return Err(FlUrlError::MyHttpClientError(err));
                     }
 
@@ -804,6 +834,35 @@ impl FlUrl {
                 }
             }
         }
+    }
+
+    pub async fn warm_up_connection(mut self) -> Result<Self, FlUrlError> {
+        match self.url_builder.get_scheme() {
+            Scheme::Https => {}
+            _ => {
+                return Ok(self);
+            }
+        }
+
+        let params = self
+            .get_params(
+                crate::consts::HTTP_DEFAULT_PORT.into(),
+                #[cfg(feature = "with-ssh")]
+                None,
+            )
+            .await;
+
+        let warmed_connection = crate::http_clients_cache::WarmedHttpsConnection::new(&params);
+
+        let warmed_connection_cloned = warmed_connection.clone();
+
+        tokio::spawn(async move {
+            warmed_connection_cloned.connect().await.unwrap();
+        });
+
+        self.https_warmed_up_connection = Some(warmed_connection);
+
+        Ok(self)
     }
 }
 
