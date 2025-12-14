@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use my_http_client::MyHttpClientConnector;
 
-use rust_extensions::remote_endpoint::RemoteEndpoint;
+use rust_extensions::{date_time::DateTimeAsMicroseconds, remote_endpoint::RemoteEndpoint};
 use tokio::{net::TcpStream, sync::Mutex};
 
 use my_tls::tokio_rustls::client::TlsStream;
@@ -12,15 +12,22 @@ use crate::{
     FlUrlMode,
 };
 
+pub struct ConnectionItem<
+    TStream: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + Sync + 'static,
+    TConnector: MyHttpClientConnector<TStream> + Send + Sync + 'static,
+> {
+    pub last_update: DateTimeAsMicroseconds,
+    pub connection: Arc<MyHttpClientWrapper<TStream, TConnector>>,
+}
+
 pub struct FlUrlHttpConnectionsCacheInner {
     max_connections: usize,
-    http: HashMap<String, Vec<Arc<MyHttpClientWrapper<TcpStream, HttpConnector>>>>,
-    https: HashMap<String, Vec<Arc<MyHttpClientWrapper<TlsStream<TcpStream>, HttpsConnector>>>>,
+    http: HashMap<String, Vec<ConnectionItem<TcpStream, HttpConnector>>>,
+    https: HashMap<String, Vec<ConnectionItem<TlsStream<TcpStream>, HttpsConnector>>>,
     #[cfg(unix)]
-    unix_socket:
-        HashMap<String, Vec<Arc<MyHttpClientWrapper<UnixSocketStream, UnixSocketConnector>>>>,
+    unix_socket: HashMap<String, Vec<ConnectionItem<UnixSocketStream, UnixSocketConnector>>>,
     #[cfg(feature = "with-ssh")]
-    ssh: HashMap<String, Vec<Arc<MyHttpClientWrapper<my_ssh::SshAsyncChannel, SshHttpConnector>>>>,
+    ssh: HashMap<String, Vec<ConnectionItem<my_ssh::SshAsyncChannel, SshHttpConnector>>>,
 }
 
 impl Default for FlUrlHttpConnectionsCacheInner {
@@ -222,20 +229,31 @@ fn get_connection<
     TStream: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + Sync + 'static,
     TConnector: MyHttpClientConnector<TStream> + Send + Sync + 'static,
 >(
-    connections: &mut HashMap<String, Vec<Arc<MyHttpClientWrapper<TStream, TConnector>>>>,
+    connections: &mut HashMap<String, Vec<ConnectionItem<TStream, TConnector>>>,
     hash_map_key: &str,
     create_connection: impl Fn() -> Arc<MyHttpClientWrapper<TStream, TConnector>>,
 ) -> Arc<MyHttpClientWrapper<TStream, TConnector>> {
+    let now = DateTimeAsMicroseconds::now();
+
     if let Some(http_connections) = connections.get_mut(hash_map_key) {
-        if http_connections.len() > 0 {
+        while http_connections.len() > 0 {
             let result = http_connections.remove(0);
-            return result;
+
+            if now.duration_since(result.last_update).get_full_seconds() < 120 {
+                return result.connection;
+            }
         }
     }
 
     let new_one = create_connection();
 
-    connections.insert(hash_map_key.to_string(), vec![new_one.clone()]);
+    connections.insert(
+        hash_map_key.to_string(),
+        vec![ConnectionItem {
+            last_update: DateTimeAsMicroseconds::now(),
+            connection: new_one.clone(),
+        }],
+    );
 
     new_one
 }
@@ -244,18 +262,22 @@ fn put_connection_back<
     TStream: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + Sync + 'static,
     TConnector: MyHttpClientConnector<TStream> + Send + Sync + 'static,
 >(
-    connections: &mut HashMap<String, Vec<Arc<MyHttpClientWrapper<TStream, TConnector>>>>,
+    connections: &mut HashMap<String, Vec<ConnectionItem<TStream, TConnector>>>,
     max_connections: usize,
     connection: Arc<MyHttpClientWrapper<TStream, TConnector>>,
 ) {
-    match connections.get_mut(&connection.key) {
+    let item = ConnectionItem {
+        last_update: DateTimeAsMicroseconds::now(),
+        connection,
+    };
+    match connections.get_mut(&item.connection.key) {
         Some(connections) => {
             if connections.len() < max_connections {
-                connections.push(connection);
+                connections.push(item);
             }
         }
         None => {
-            connections.insert(connection.key.to_string(), vec![connection]);
+            connections.insert(item.connection.key.to_string(), vec![item]);
         }
     }
 }
@@ -264,15 +286,20 @@ fn add_connection<
     TStream: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + Sync + 'static,
     TConnector: MyHttpClientConnector<TStream> + Send + Sync + 'static,
 >(
-    connections: &mut HashMap<String, Vec<Arc<MyHttpClientWrapper<TStream, TConnector>>>>,
+    connections: &mut HashMap<String, Vec<ConnectionItem<TStream, TConnector>>>,
     connection: Arc<MyHttpClientWrapper<TStream, TConnector>>,
 ) {
-    match connections.get_mut(&connection.key) {
+    let item = ConnectionItem {
+        last_update: DateTimeAsMicroseconds::now(),
+        connection,
+    };
+
+    match connections.get_mut(&item.connection.key) {
         Some(connections) => {
-            connections.push(connection);
+            connections.push(item);
         }
         None => {
-            connections.insert(connection.key.to_string(), vec![connection]);
+            connections.insert(item.connection.key.to_string(), vec![item]);
         }
     }
 }
