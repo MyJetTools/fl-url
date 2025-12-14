@@ -240,6 +240,7 @@ fn get_connection<
             let result = http_connections.remove(0);
 
             if now.duration_since(result.last_update).get_full_seconds() < 120 {
+                println!("Reusing connection {}", hash_map_key);
                 return result.connection;
             }
         }
