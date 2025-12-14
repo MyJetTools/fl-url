@@ -9,6 +9,7 @@ use my_http_client::MyHttpClientConnector;
 use my_tls::tokio_rustls::client::TlsStream;
 
 use rust_extensions::remote_endpoint::Scheme;
+use rust_extensions::StopWatch;
 use rust_extensions::StrOrString;
 
 use std::io::Write;
@@ -859,7 +860,10 @@ impl FlUrl {
 
         tokio::spawn(async move {
             println!("Warming up {}", host);
+            let sw = StopWatch::new();
             warmed_connection_cloned.connect().await.unwrap();
+
+            println!("Connect took: {:?}", sw.duration());
         });
 
         self.https_warmed_up_connection = Some(warmed_connection);
