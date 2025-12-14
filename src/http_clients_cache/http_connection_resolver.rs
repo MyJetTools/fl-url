@@ -12,7 +12,7 @@ pub trait HttpConnectionResolver<
     TConnector: MyHttpClientConnector<TStream> + Send + Sync + 'static,
 >
 {
-    async fn get_http_client(
+    async fn get_http_connection(
         &self,
         mode: FlUrlMode,
         url_builder: &UrlBuilder,
@@ -22,7 +22,7 @@ pub trait HttpConnectionResolver<
         #[cfg(feature = "with-ssh")] ssh_credentials: Option<&Arc<my_ssh::SshCredentials>>,
     ) -> Arc<MyHttpClientWrapper<TStream, TConnector>>;
 
-    async fn drop_http_client(
+    async fn drop_http_connection(
         &self,
         url_builder: &UrlBuilder,
         #[cfg(feature = "with-ssh")] ssh_credentials: Option<&Arc<my_ssh::SshCredentials>>,

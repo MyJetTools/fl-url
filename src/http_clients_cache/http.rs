@@ -18,7 +18,7 @@ const HTTP_DEFAULT_PORT: u16 = 80;
 
 #[async_trait::async_trait]
 impl HttpConnectionResolver<TcpStream, HttpConnector> for HttpConnectionCreator {
-    async fn get_http_client(
+    async fn get_http_connection(
         &self,
         mode: FlUrlMode,
         url_builder: &UrlBuilder,
@@ -36,7 +36,7 @@ impl HttpConnectionResolver<TcpStream, HttpConnector> for HttpConnectionCreator 
         }
     }
 
-    async fn drop_http_client(
+    async fn drop_http_connection(
         &self,
         _url_builder: &UrlBuilder,
         #[cfg(feature = "with-ssh")] _ssh_credentials: Option<&Arc<my_ssh::SshCredentials>>,
@@ -46,7 +46,7 @@ impl HttpConnectionResolver<TcpStream, HttpConnector> for HttpConnectionCreator 
 
 #[async_trait::async_trait]
 impl HttpConnectionResolver<TcpStream, HttpConnector> for FlUrlHttpConnectionsCache {
-    async fn get_http_client(
+    async fn get_http_connection(
         &self,
         mode: FlUrlMode,
         url_builder: &UrlBuilder,
@@ -65,7 +65,7 @@ impl HttpConnectionResolver<TcpStream, HttpConnector> for FlUrlHttpConnectionsCa
         }
 
         let new_one = HttpConnectionCreator
-            .get_http_client(
+            .get_http_connection(
                 mode,
                 url_builder,
                 host_header,
@@ -82,7 +82,7 @@ impl HttpConnectionResolver<TcpStream, HttpConnector> for FlUrlHttpConnectionsCa
         new_one
     }
 
-    async fn drop_http_client(
+    async fn drop_http_connection(
         &self,
         url_builder: &UrlBuilder,
         #[cfg(feature = "with-ssh")] _ssh_credentials: Option<&Arc<my_ssh::SshCredentials>>,

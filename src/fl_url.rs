@@ -62,7 +62,7 @@ pub struct FlUrl {
     pub not_used_connection_timeout: Duration,
     pub request_timeout: Duration,
     pub do_not_reuse_connection: bool,
-    pub clients_cache: Option<Arc<FlUrlHttpConnectionsCache>>,
+    pub connections_cache: Option<Arc<FlUrlHttpConnectionsCache>>,
     pub compress_body: bool,
     pub print_input_request: bool,
     mode: FlUrlMode,
@@ -122,11 +122,11 @@ impl FlUrl {
 
         let result = Self {
             headers: FlUrlHeaders::new(),
-            client_cert: None,
+            client_cert: Default::default(),
             url_builder: url,
             accept_invalid_certificate: false,
             do_not_reuse_connection: false,
-            clients_cache: None,
+            connections_cache: Default::default(),
             not_used_connection_timeout: Duration::from_secs(30),
             max_retries: 0,
             request_timeout: Duration::from_secs(10),
@@ -162,8 +162,8 @@ impl FlUrl {
         self
     }
 
-    pub fn with_clients_cache(mut self, clients_cache: Arc<FlUrlHttpConnectionsCache>) -> Self {
-        self.clients_cache = Some(clients_cache);
+    pub fn set_connections_cache(mut self, clients_cache: Arc<FlUrlHttpConnectionsCache>) -> Self {
+        self.connections_cache = Some(clients_cache);
         self
     }
 
@@ -440,7 +440,7 @@ impl FlUrl {
         .await
     }
     pub(crate) fn get_clients_cache(&self) -> Arc<FlUrlHttpConnectionsCache> {
-        match self.clients_cache.as_ref() {
+        match self.connections_cache.as_ref() {
             Some(cache) => cache.clone(),
             None => crate::CLIENTS_CACHED.clone(),
         }
@@ -760,7 +760,7 @@ impl FlUrl {
 
         loop {
             let http_client = http_client_resolver
-                .get_http_client(
+                .get_http_connection(
                     self.mode,
                     &self.url_builder,
                     self.headers.get_host_header_value(),
@@ -778,7 +778,7 @@ impl FlUrl {
 
                     if response.drop_connection() {
                         http_client_resolver
-                            .drop_http_client(
+                            .drop_http_connection(
                                 &response.url,
                                 #[cfg(feature = "with-ssh")]
                                 ssh_credentials.as_ref(),
@@ -789,7 +789,7 @@ impl FlUrl {
                 }
                 Err(err) => {
                     http_client_resolver
-                        .drop_http_client(
+                        .drop_http_connection(
                             &self.url_builder,
                             #[cfg(feature = "with-ssh")]
                             ssh_credentials.as_ref(),
