@@ -837,6 +837,7 @@ impl FlUrl {
     }
 
     pub async fn warm_up_connection(mut self) -> Self {
+        let host = self.url_builder.get_host().to_string();
         match self.url_builder.get_scheme() {
             Scheme::Https => {}
             _ => {
@@ -857,6 +858,7 @@ impl FlUrl {
         let warmed_connection_cloned = warmed_connection.clone();
 
         tokio::spawn(async move {
+            println!("Warming up {}", host);
             warmed_connection_cloned.connect().await.unwrap();
         });
 
