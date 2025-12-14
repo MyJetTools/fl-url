@@ -9,7 +9,6 @@ use my_http_client::MyHttpClientConnector;
 use my_tls::tokio_rustls::client::TlsStream;
 
 use rust_extensions::remote_endpoint::Scheme;
-use rust_extensions::StopWatch;
 use rust_extensions::StrOrString;
 
 use std::io::Write;
@@ -66,7 +65,6 @@ pub struct FlUrl {
     pub connections_cache: Option<Arc<FlUrlHttpConnectionsCache>>,
     pub compress_body: bool,
     pub print_input_request: bool,
-    https_warmed_up_connection: Option<WarmedHttpsConnection>,
     mode: FlUrlMode,
     #[cfg(feature = "with-ssh")]
     ssh_credentials: Option<my_ssh::SshCredentials>,
@@ -132,7 +130,6 @@ impl FlUrl {
             not_used_connection_timeout: Duration::from_secs(30),
             max_retries: 0,
             request_timeout: Duration::from_secs(10),
-            https_warmed_up_connection: None,
             print_input_request: false,
             compress_body: false,
             #[cfg(feature = "with-ssh")]
@@ -366,37 +363,26 @@ impl FlUrl {
                 }
             }
             Scheme::Https => {
-                if let Some(warmed_connection) = self.https_warmed_up_connection.take() {
+                if self.do_not_reuse_connection {
                     self.execute_with_retry::<TlsStream<TcpStream>, HttpsConnector>(
                         &request,
-                        &warmed_connection,
+                        &crate::http_clients_cache::creators::HttpsConnectionCreator,
                         crate::consts::HTTPS_DEFAULT_PORT.into(),
                         #[cfg(feature = "with-ssh")]
                         None,
                     )
                     .await?
                 } else {
-                    if self.do_not_reuse_connection {
-                        self.execute_with_retry::<TlsStream<TcpStream>, HttpsConnector>(
-                            &request,
-                            &crate::http_clients_cache::creators::HttpsConnectionCreator,
-                            crate::consts::HTTPS_DEFAULT_PORT.into(),
-                            #[cfg(feature = "with-ssh")]
-                            None,
-                        )
-                        .await?
-                    } else {
-                        let clients_cache = self.get_connections_cache();
+                    let clients_cache = self.get_connections_cache();
 
-                        self.execute_with_retry::<TlsStream<TcpStream>, HttpsConnector>(
-                            &request,
-                            clients_cache.as_ref(),
-                            crate::consts::HTTPS_DEFAULT_PORT.into(),
-                            #[cfg(feature = "with-ssh")]
-                            None,
-                        )
-                        .await?
-                    }
+                    self.execute_with_retry::<TlsStream<TcpStream>, HttpsConnector>(
+                        &request,
+                        clients_cache.as_ref(),
+                        crate::consts::HTTPS_DEFAULT_PORT.into(),
+                        #[cfg(feature = "with-ssh")]
+                        None,
+                    )
+                    .await?
                 }
             }
             #[cfg(not(unix))]
@@ -835,40 +821,6 @@ impl FlUrl {
                 }
             }
         }
-    }
-
-    pub async fn warm_up_connection(mut self) -> Self {
-        let host = self.url_builder.get_host().to_string();
-        match self.url_builder.get_scheme() {
-            Scheme::Https => {}
-            _ => {
-                return self;
-            }
-        }
-
-        let params = self
-            .get_params(
-                crate::consts::HTTP_DEFAULT_PORT.into(),
-                #[cfg(feature = "with-ssh")]
-                None,
-            )
-            .await;
-
-        let warmed_connection = crate::http_clients_cache::WarmedHttpsConnection::new(&params);
-
-        let warmed_connection_cloned = warmed_connection.clone();
-
-        tokio::spawn(async move {
-            println!("Warming up {}", host);
-            let sw = StopWatch::new();
-            warmed_connection_cloned.connect().await.unwrap();
-
-            println!("Connect took: {:?}", sw.duration());
-        });
-
-        self.https_warmed_up_connection = Some(warmed_connection);
-
-        self
     }
 }
 
