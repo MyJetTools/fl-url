@@ -65,6 +65,8 @@ pub struct FlUrl {
     pub connections_cache: Option<Arc<FlUrlHttpConnectionsCache>>,
     pub compress_body: bool,
     pub print_input_request: bool,
+    // If we reuse connection and it has not been used more seconds than this parameter - it disposed
+    pub reuse_connection_timeout_sec: i64,
     mode: FlUrlMode,
     #[cfg(feature = "with-ssh")]
     ssh_credentials: Option<my_ssh::SshCredentials>,
@@ -137,6 +139,7 @@ impl FlUrl {
             #[cfg(feature = "with-ssh")]
             ssh_security_credentials_resolver: None,
             mode: Default::default(),
+            reuse_connection_timeout_sec: 120,
         };
 
         Ok(result)
@@ -745,11 +748,11 @@ impl FlUrl {
         result
     }
 
-    async fn get_params<'s>(
-        &'s mut self,
+    async fn get_connection_params<'s>(
+        &'s self,
         default_port: Option<u16>,
         #[cfg(feature = "with-ssh")] ssh_credentials: Option<Arc<my_ssh::SshCredentials>>,
-    ) -> ConnectionData<'s> {
+    ) -> ConnectionParams<'s> {
         let remote_endpoint = self.url_builder.get_remote_endpoint(default_port);
 
         #[cfg(feature = "with-ssh")]
@@ -765,13 +768,14 @@ impl FlUrl {
             None => None,
         };
 
-        ConnectionData {
+        ConnectionParams {
             mode: self.mode,
             remote_endpoint,
-            server_name: self.headers.get_host_header_value(),
+            host_header: self.headers.get_host_header_value(),
             client_certificate: self.client_cert.as_ref(),
             #[cfg(feature = "with-ssh")]
             ssh_session,
+            reuse_connection_timeout_seconds: self.reuse_connection_timeout_sec,
         }
     }
 
@@ -779,7 +783,7 @@ impl FlUrl {
         TStream: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + Sync + 'static,
         TConnector: MyHttpClientConnector<TStream> + Send + Sync + 'static,
     >(
-        mut self,
+        self,
         request: &CompiledHttpRequest,
         http_connection_resolver: &impl HttpConnectionResolver<TStream, TConnector>,
         default_port: Option<u16>,
@@ -791,8 +795,8 @@ impl FlUrl {
         let mut attempt_no = 0;
         let max_retries = self.max_retries;
         let request_timeout = self.request_timeout;
-        let params = self
-            .get_params(
+        let params: ConnectionParams<'_> = self
+            .get_connection_params(
                 default_port,
                 #[cfg(feature = "with-ssh")]
                 ssh_credentials,

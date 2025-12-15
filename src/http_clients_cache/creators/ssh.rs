@@ -4,14 +4,14 @@ use my_http_client::{http1::MyHttpClient, http1_hyper::MyHttpHyperClient, http2:
 
 use crate::{
     fl_url::FlUrlMode, http_connectors::SshHttpConnector,
-    my_http_client_wrapper::MyHttpClientWrapper, ConnectionData, FlUrlHttpConnectionsCache,
+    my_http_client_wrapper::MyHttpClientWrapper, ConnectionParams, FlUrlHttpConnectionsCache,
     HttpConnectionResolver,
 };
 
 pub struct SshConnectionCreator;
 impl SshConnectionCreator {
     pub fn create_connection(
-        params: &ConnectionData<'_>,
+        params: &ConnectionParams<'_>,
         key: String,
     ) -> Arc<MyHttpClientWrapper<my_ssh::SshAsyncChannel, SshHttpConnector>> {
         let Some(ssh_session) = params.ssh_session.clone() else {
@@ -44,7 +44,7 @@ impl SshConnectionCreator {
 impl HttpConnectionResolver<my_ssh::SshAsyncChannel, SshHttpConnector> for SshConnectionCreator {
     async fn get_http_connection(
         &self,
-        params: &ConnectionData<'_>,
+        params: &ConnectionParams<'_>,
     ) -> Arc<MyHttpClientWrapper<my_ssh::SshAsyncChannel, SshHttpConnector>> {
         let Some(ssh_session) = params.ssh_session.clone() else {
             panic!("ssh_session is null");
@@ -70,7 +70,7 @@ impl HttpConnectionResolver<my_ssh::SshAsyncChannel, SshHttpConnector>
 {
     async fn get_http_connection(
         &self,
-        params: &ConnectionData<'_>,
+        params: &ConnectionParams<'_>,
     ) -> Arc<MyHttpClientWrapper<my_ssh::SshAsyncChannel, SshHttpConnector>> {
         self.get_ssh_connection(params).await
     }

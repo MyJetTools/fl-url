@@ -13,7 +13,7 @@ pub struct UnixSocketHttpClientCreator;
 
 impl UnixSocketHttpClientCreator {
     pub fn create_connection(
-        params: &ConnectionData<'_>,
+        params: &ConnectionParams<'_>,
         key: String,
     ) -> Arc<MyHttpClientWrapper<UnixSocketStream, UnixSocketConnector>> {
         let connector = UnixSocketConnector::new(params.remote_endpoint.to_owned());
@@ -39,7 +39,7 @@ impl UnixSocketHttpClientCreator {
 impl HttpConnectionResolver<UnixSocketStream, UnixSocketConnector> for UnixSocketHttpClientCreator {
     async fn get_http_connection(
         &self,
-        params: &ConnectionData<'_>,
+        params: &ConnectionParams<'_>,
     ) -> Arc<MyHttpClientWrapper<UnixSocketStream, UnixSocketConnector>> {
         let key = super::super::utils::get_unix_socket_connection_key(params.remote_endpoint);
         Self::create_connection(params, key)
@@ -56,7 +56,7 @@ impl HttpConnectionResolver<UnixSocketStream, UnixSocketConnector> for UnixSocke
 impl HttpConnectionResolver<UnixSocketStream, UnixSocketConnector> for FlUrlHttpConnectionsCache {
     async fn get_http_connection(
         &self,
-        params: &ConnectionData<'_>,
+        params: &ConnectionParams<'_>,
     ) -> Arc<MyHttpClientWrapper<UnixSocketStream, UnixSocketConnector>> {
         self.get_unix_socket_connection(params).await
     }

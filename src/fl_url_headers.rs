@@ -42,8 +42,8 @@ impl FlUrlHeaders {
     }
 
     pub fn get_host_header_value(&self) -> Option<&str> {
-        let host_value_post = self.host_header_value.as_ref()?;
-        let result = self.headers.get_value(host_value_post);
+        let host_value_pos = self.host_header_value.as_ref()?;
+        let result = self.headers.get_value(host_value_pos);
         Some(result)
     }
 

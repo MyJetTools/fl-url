@@ -2,15 +2,12 @@ use std::{collections::HashMap, sync::Arc};
 
 use my_http_client::MyHttpClientConnector;
 
-use rust_extensions::{date_time::DateTimeAsMicroseconds, remote_endpoint::RemoteEndpoint};
+use rust_extensions::date_time::DateTimeAsMicroseconds;
 use tokio::{net::TcpStream, sync::Mutex};
 
 use my_tls::tokio_rustls::client::TlsStream;
 
-use crate::{
-    http_connectors::*, my_http_client_wrapper::MyHttpClientWrapper, ConnectionData, FlUrlError,
-    FlUrlMode,
-};
+use crate::{http_connectors::*, my_http_client_wrapper::MyHttpClientWrapper, ConnectionParams};
 
 pub struct ConnectionItem<
     TStream: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + Sync + 'static,
@@ -56,7 +53,7 @@ impl FlUrlHttpConnectionsCache {
 
     pub async fn get_http_connection(
         &self,
-        params: &ConnectionData<'_>,
+        params: &ConnectionParams<'_>,
     ) -> Arc<MyHttpClientWrapper<TcpStream, HttpConnector>> {
         //let remote_endpoint = url_builder.get_remote_endpoint(HTTP_DEFAULT_PORT.into())
 
@@ -64,12 +61,17 @@ impl FlUrlHttpConnectionsCache {
 
         let mut write_access = self.inner.lock().await;
 
-        get_connection(&mut write_access.http, connection_key.as_str(), || {
-            super::creators::HttpConnectionCreator::create_connection(
-                params,
-                connection_key.to_string(),
-            )
-        })
+        get_connection(
+            &mut write_access.http,
+            connection_key.as_str(),
+            params.reuse_connection_timeout_seconds,
+            || {
+                super::creators::HttpConnectionCreator::create_connection(
+                    params,
+                    connection_key.to_string(),
+                )
+            },
+        )
     }
 
     pub async fn put_http_connection_back(
@@ -83,7 +85,7 @@ impl FlUrlHttpConnectionsCache {
 
     pub async fn get_https_connection(
         &self,
-        params: &ConnectionData<'_>,
+        params: &ConnectionParams<'_>,
     ) -> Arc<MyHttpClientWrapper<TlsStream<TcpStream>, HttpsConnector>> {
         //let remote_endpoint = url_builder.get_remote_endpoint(HTTP_DEFAULT_PORT.into())
 
@@ -91,12 +93,17 @@ impl FlUrlHttpConnectionsCache {
 
         let mut write_access = self.inner.lock().await;
 
-        get_connection(&mut write_access.https, connection_key.as_str(), || {
-            super::creators::HttpsConnectionCreator::create_connection(
-                params,
-                connection_key.to_string(),
-            )
-        })
+        get_connection(
+            &mut write_access.https,
+            connection_key.as_str(),
+            params.reuse_connection_timeout_seconds,
+            || {
+                super::creators::HttpsConnectionCreator::create_connection(
+                    params,
+                    connection_key.to_string(),
+                )
+            },
+        )
     }
 
     pub async fn put_https_connection_back(
@@ -111,7 +118,7 @@ impl FlUrlHttpConnectionsCache {
     #[cfg(feature = "with-ssh")]
     pub async fn get_ssh_connection(
         &self,
-        params: &ConnectionData<'_>,
+        params: &ConnectionParams<'_>,
     ) -> Arc<MyHttpClientWrapper<my_ssh::SshAsyncChannel, SshHttpConnector>> {
         let Some(ssh_session) = params.ssh_session.clone() else {
             panic!("ssh_credentials is none");
@@ -124,12 +131,17 @@ impl FlUrlHttpConnectionsCache {
 
         let mut write_access = self.inner.lock().await;
 
-        get_connection(&mut write_access.ssh, connection_key.as_str(), || {
-            super::creators::SshConnectionCreator::create_connection(
-                params,
-                connection_key.to_string(),
-            )
-        })
+        get_connection(
+            &mut write_access.ssh,
+            connection_key.as_str(),
+            params.reuse_connection_timeout_seconds,
+            || {
+                super::creators::SshConnectionCreator::create_connection(
+                    params,
+                    connection_key.to_string(),
+                )
+            },
+        )
     }
 
     #[cfg(feature = "with-ssh")]
@@ -145,7 +157,7 @@ impl FlUrlHttpConnectionsCache {
     #[cfg(unix)]
     pub async fn get_unix_socket_connection(
         &self,
-        params: &ConnectionData<'_>,
+        params: &ConnectionParams<'_>,
     ) -> Arc<MyHttpClientWrapper<UnixSocketStream, UnixSocketConnector>> {
         //let remote_endpoint = url_builder.get_remote_endpoint(HTTP_DEFAULT_PORT.into())
 
@@ -156,6 +168,7 @@ impl FlUrlHttpConnectionsCache {
         get_connection(
             &mut write_access.unix_socket,
             connection_key.as_str(),
+            params.reuse_connection_timeout_seconds,
             || {
                 super::creators::UnixSocketHttpClientCreator::create_connection(
                     params,
@@ -174,55 +187,6 @@ impl FlUrlHttpConnectionsCache {
         let max_connections = write_access.max_connections;
         put_connection_back(&mut write_access.unix_socket, max_connections, connection);
     }
-
-    pub async fn warm_connection(&self, url: &str, mode: FlUrlMode) -> Result<(), FlUrlError> {
-        let remote_endpoint = match RemoteEndpoint::try_parse(url) {
-            Ok(remote_end_point) => remote_end_point,
-            Err(err) => {
-                return Err(FlUrlError::InvalidUrl(err));
-            }
-        };
-
-        let Some(scheme) = remote_endpoint.get_scheme() else {
-            return Err(FlUrlError::InvalidUrl(format!(
-                "Url '{}' does not have a scheme",
-                url
-            )));
-        };
-
-        match scheme {
-            rust_extensions::remote_endpoint::Scheme::Http => {
-                let key = super::utils::get_http_connection_key(remote_endpoint);
-
-                let params = ConnectionData::new(mode, remote_endpoint);
-                let connection = super::creators::HttpConnectionCreator::create_connection(
-                    &params,
-                    key.to_string(),
-                );
-
-                connection.connect().await?;
-
-                let mut write_access = self.inner.lock().await;
-                add_connection(&mut write_access.http, connection);
-            }
-            rust_extensions::remote_endpoint::Scheme::Https => {}
-            rust_extensions::remote_endpoint::Scheme::Ws => {
-                return Err(FlUrlError::InvalidUrl(format!(
-                    "Web socket scheme is not supported of {}",
-                    url,
-                )))
-            }
-            rust_extensions::remote_endpoint::Scheme::Wss => {
-                return Err(FlUrlError::InvalidUrl(format!(
-                    "Web socket scheme is not supported of {}",
-                    url,
-                )))
-            }
-            rust_extensions::remote_endpoint::Scheme::UnixSocket => {}
-        }
-
-        Ok(())
-    }
 }
 
 fn get_connection<
@@ -231,6 +195,7 @@ fn get_connection<
 >(
     connections: &mut HashMap<String, Vec<ConnectionItem<TStream, TConnector>>>,
     hash_map_key: &str,
+    connection_timeout_seconds: i64,
     create_connection: impl Fn() -> Arc<MyHttpClientWrapper<TStream, TConnector>>,
 ) -> Arc<MyHttpClientWrapper<TStream, TConnector>> {
     let now = DateTimeAsMicroseconds::now();
@@ -239,8 +204,9 @@ fn get_connection<
         while http_connections.len() > 0 {
             let result = http_connections.remove(0);
 
-            if now.duration_since(result.last_update).get_full_seconds() < 120 {
-                println!("Reusing connection {}", hash_map_key);
+            if now.duration_since(result.last_update).get_full_seconds()
+                < connection_timeout_seconds
+            {
                 return result.connection;
             }
         }
@@ -276,28 +242,6 @@ fn put_connection_back<
             if connections.len() < max_connections {
                 connections.push(item);
             }
-        }
-        None => {
-            connections.insert(item.connection.key.to_string(), vec![item]);
-        }
-    }
-}
-
-fn add_connection<
-    TStream: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + Sync + 'static,
-    TConnector: MyHttpClientConnector<TStream> + Send + Sync + 'static,
->(
-    connections: &mut HashMap<String, Vec<ConnectionItem<TStream, TConnector>>>,
-    connection: Arc<MyHttpClientWrapper<TStream, TConnector>>,
-) {
-    let item = ConnectionItem {
-        last_update: DateTimeAsMicroseconds::now(),
-        connection,
-    };
-
-    match connections.get_mut(&item.connection.key) {
-        Some(connections) => {
-            connections.push(item);
         }
         None => {
             connections.insert(item.connection.key.to_string(), vec![item]);

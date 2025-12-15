@@ -14,7 +14,7 @@ pub trait HttpConnectionResolver<
 {
     async fn get_http_connection(
         &self,
-        params: &ConnectionData<'_>,
+        params: &ConnectionParams<'_>,
     ) -> Arc<MyHttpClientWrapper<TStream, TConnector>>;
 
     async fn put_connection_back(&self, connection: Arc<MyHttpClientWrapper<TStream, TConnector>>);

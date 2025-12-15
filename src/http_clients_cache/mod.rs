@@ -8,5 +8,3 @@ pub mod creators;
 mod connection_data;
 pub mod utils;
 pub use connection_data::*;
-mod warmed_https_connection;
-pub use warmed_https_connection::*;

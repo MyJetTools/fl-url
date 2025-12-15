@@ -15,14 +15,10 @@ pub struct HttpsConnectionCreator;
 
 impl HttpsConnectionCreator {
     pub fn create_connection(
-        params: &ConnectionData<'_>,
+        params: &ConnectionParams<'_>,
         key: String,
     ) -> Arc<MyHttpClientWrapper<TlsStream<TcpStream>, HttpsConnector>> {
-        let server_name = if let Some(server_name) = params.server_name {
-            server_name.to_string()
-        } else {
-            params.remote_endpoint.get_host().to_string()
-        };
+        let server_name = params.get_server_name().to_string();
 
         let connector = HttpsConnector::new(
             params.remote_endpoint.to_owned(),
@@ -52,7 +48,7 @@ impl HttpsConnectionCreator {
 impl HttpConnectionResolver<TlsStream<TcpStream>, HttpsConnector> for HttpsConnectionCreator {
     async fn get_http_connection(
         &self,
-        params: &ConnectionData<'_>,
+        params: &ConnectionParams<'_>,
     ) -> Arc<MyHttpClientWrapper<TlsStream<TcpStream>, HttpsConnector>> {
         let key = super::super::utils::get_http_connection_key(params.remote_endpoint);
         Self::create_connection(params, key.to_string())
@@ -69,7 +65,7 @@ impl HttpConnectionResolver<TlsStream<TcpStream>, HttpsConnector> for HttpsConne
 impl HttpConnectionResolver<TlsStream<TcpStream>, HttpsConnector> for FlUrlHttpConnectionsCache {
     async fn get_http_connection(
         &self,
-        params: &ConnectionData<'_>,
+        params: &ConnectionParams<'_>,
     ) -> Arc<MyHttpClientWrapper<TlsStream<TcpStream>, HttpsConnector>> {
         self.get_https_connection(params).await
     }

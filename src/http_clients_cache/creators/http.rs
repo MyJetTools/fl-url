@@ -5,7 +5,7 @@ use tokio::net::TcpStream;
 
 use crate::{
     fl_url::FlUrlMode, http_connectors::HttpConnector, my_http_client_wrapper::MyHttpClientWrapper,
-    ConnectionData, FlUrlHttpConnectionsCache,
+    ConnectionParams, FlUrlHttpConnectionsCache,
 };
 
 use super::super::HttpConnectionResolver;
@@ -14,7 +14,7 @@ pub struct HttpConnectionCreator;
 
 impl HttpConnectionCreator {
     pub fn create_connection(
-        params: &ConnectionData<'_>,
+        params: &ConnectionParams<'_>,
         key: String,
     ) -> Arc<MyHttpClientWrapper<TcpStream, HttpConnector>> {
         let http_connector =
@@ -41,7 +41,7 @@ impl HttpConnectionCreator {
 impl HttpConnectionResolver<TcpStream, HttpConnector> for HttpConnectionCreator {
     async fn get_http_connection(
         &self,
-        params: &ConnectionData<'_>,
+        params: &ConnectionParams<'_>,
     ) -> Arc<MyHttpClientWrapper<TcpStream, HttpConnector>> {
         let key = super::super::utils::get_http_connection_key(params.remote_endpoint);
         Self::create_connection(params, key.to_string())
@@ -58,7 +58,7 @@ impl HttpConnectionResolver<TcpStream, HttpConnector> for HttpConnectionCreator 
 impl HttpConnectionResolver<TcpStream, HttpConnector> for FlUrlHttpConnectionsCache {
     async fn get_http_connection(
         &self,
-        params: &ConnectionData<'_>,
+        params: &ConnectionParams<'_>,
     ) -> Arc<MyHttpClientWrapper<TcpStream, HttpConnector>> {
         self.get_http_connection(params).await
     }
