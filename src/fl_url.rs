@@ -329,10 +329,12 @@ impl FlUrl {
         self
     }
 
-    async fn execute(mut self, request: CompiledHttpRequest) -> Result<FlUrlResponse, FlUrlError> {
+    async fn execute(self, request: CompiledHttpRequest) -> Result<FlUrlResponse, FlUrlError> {
         #[cfg(feature = "with-ssh")]
-        if let Some(ssh_credentials) = self.ssh_credentials.take() {
-            return self.execute_ssh(request, ssh_credentials).await;
+        if self.ssh_credentials.is_some() {
+            let mut self_mut = self;
+            let ssh_credentials = self_mut.ssh_credentials.take().unwrap();
+            return self_mut.execute_ssh(request, ssh_credentials).await;
         }
 
         let response = match self.url_builder.get_scheme() {
