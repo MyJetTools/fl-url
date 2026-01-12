@@ -33,6 +33,7 @@ impl Default for FlUrlHttpConnectionsCacheInner {
             max_connections: 5,
             http: Default::default(),
             https: Default::default(),
+            #[cfg(unix)]
             unix_socket: Default::default(),
             #[cfg(feature = "with-ssh")]
             ssh: Default::default(),
