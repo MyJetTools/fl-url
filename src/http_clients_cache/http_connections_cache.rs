@@ -1,9 +1,11 @@
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
+use ahash::AHashMap;
 use my_http_client::MyHttpClientConnector;
 
+use parking_lot::Mutex;
 use rust_extensions::date_time::DateTimeAsMicroseconds;
-use tokio::{net::TcpStream, sync::Mutex};
+use tokio::net::TcpStream;
 
 use my_tls::tokio_rustls::client::TlsStream;
 
@@ -19,12 +21,12 @@ pub struct ConnectionItem<
 
 pub struct FlUrlHttpConnectionsCacheInner {
     max_connections: usize,
-    http: HashMap<String, Vec<ConnectionItem<TcpStream, HttpConnector>>>,
-    https: HashMap<String, Vec<ConnectionItem<TlsStream<TcpStream>, HttpsConnector>>>,
+    http: AHashMap<String, Vec<ConnectionItem<TcpStream, HttpConnector>>>,
+    https: AHashMap<String, Vec<ConnectionItem<TlsStream<TcpStream>, HttpsConnector>>>,
     #[cfg(unix)]
-    unix_socket: HashMap<String, Vec<ConnectionItem<UnixSocketStream, UnixSocketConnector>>>,
+    unix_socket: AHashMap<String, Vec<ConnectionItem<UnixSocketStream, UnixSocketConnector>>>,
     #[cfg(feature = "with-ssh")]
-    ssh: HashMap<String, Vec<ConnectionItem<my_ssh::SshAsyncChannel, SshHttpConnector>>>,
+    ssh: AHashMap<String, Vec<ConnectionItem<my_ssh::SshAsyncChannel, SshHttpConnector>>>,
 }
 
 impl Default for FlUrlHttpConnectionsCacheInner {
@@ -60,7 +62,7 @@ impl FlUrlHttpConnectionsCache {
 
         let connection_key = super::utils::get_http_connection_key(params.remote_endpoint);
 
-        let mut write_access = self.inner.lock().await;
+        let mut write_access = self.inner.lock();
 
         get_connection(
             &mut write_access.http,
@@ -79,7 +81,7 @@ impl FlUrlHttpConnectionsCache {
         &self,
         connection: Arc<MyHttpClientWrapper<TcpStream, HttpConnector>>,
     ) {
-        let mut write_access = self.inner.lock().await;
+        let mut write_access = self.inner.lock();
         let max_connections = write_access.max_connections;
         put_connection_back(&mut write_access.http, max_connections, connection);
     }
@@ -92,7 +94,7 @@ impl FlUrlHttpConnectionsCache {
 
         let connection_key = super::utils::get_http_connection_key(params.remote_endpoint);
 
-        let mut write_access = self.inner.lock().await;
+        let mut write_access = self.inner.lock();
 
         get_connection(
             &mut write_access.https,
@@ -111,7 +113,7 @@ impl FlUrlHttpConnectionsCache {
         &self,
         connection: Arc<MyHttpClientWrapper<TlsStream<TcpStream>, HttpsConnector>>,
     ) {
-        let mut write_access = self.inner.lock().await;
+        let mut write_access = self.inner.lock();
         let max_connections = write_access.max_connections;
         put_connection_back(&mut write_access.https, max_connections, connection);
     }
@@ -130,7 +132,7 @@ impl FlUrlHttpConnectionsCache {
             params.remote_endpoint,
         );
 
-        let mut write_access = self.inner.lock().await;
+        let mut write_access = self.inner.lock();
 
         get_connection(
             &mut write_access.ssh,
@@ -150,7 +152,7 @@ impl FlUrlHttpConnectionsCache {
         &self,
         connection: Arc<MyHttpClientWrapper<my_ssh::SshAsyncChannel, SshHttpConnector>>,
     ) {
-        let mut write_access = self.inner.lock().await;
+        let mut write_access = self.inner.lock();
         let max_connections = write_access.max_connections;
         put_connection_back(&mut write_access.ssh, max_connections, connection);
     }
@@ -164,7 +166,7 @@ impl FlUrlHttpConnectionsCache {
 
         let connection_key = super::utils::get_unix_socket_connection_key(params.remote_endpoint);
 
-        let mut write_access = self.inner.lock().await;
+        let mut write_access = self.inner.lock();
 
         get_connection(
             &mut write_access.unix_socket,
@@ -184,7 +186,7 @@ impl FlUrlHttpConnectionsCache {
         &self,
         connection: Arc<MyHttpClientWrapper<UnixSocketStream, UnixSocketConnector>>,
     ) {
-        let mut write_access = self.inner.lock().await;
+        let mut write_access = self.inner.lock();
         let max_connections = write_access.max_connections;
         put_connection_back(&mut write_access.unix_socket, max_connections, connection);
     }
@@ -194,7 +196,7 @@ fn get_connection<
     TStream: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + Sync + 'static,
     TConnector: MyHttpClientConnector<TStream> + Send + Sync + 'static,
 >(
-    connections: &mut HashMap<String, Vec<ConnectionItem<TStream, TConnector>>>,
+    connections: &mut AHashMap<String, Vec<ConnectionItem<TStream, TConnector>>>,
     hash_map_key: &str,
     connection_timeout_seconds: i64,
     create_connection: impl Fn() -> Arc<MyHttpClientWrapper<TStream, TConnector>>,
@@ -230,7 +232,7 @@ fn put_connection_back<
     TStream: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + Sync + 'static,
     TConnector: MyHttpClientConnector<TStream> + Send + Sync + 'static,
 >(
-    connections: &mut HashMap<String, Vec<ConnectionItem<TStream, TConnector>>>,
+    connections: &mut AHashMap<String, Vec<ConnectionItem<TStream, TConnector>>>,
     max_connections: usize,
     connection: Arc<MyHttpClientWrapper<TStream, TConnector>>,
 ) {
