@@ -68,9 +68,9 @@ pub struct FlUrl {
     // If we reuse connection and it has not been used more seconds than this parameter - it disposed
     pub reuse_connection_timeout_sec: i64,
     mode: FlUrlMode,
-    #[cfg(feature = "with-ssh")]
+    #[cfg(all(unix, feature = "with-ssh"))]
     ssh_credentials: Option<my_ssh::SshCredentials>,
-    #[cfg(feature = "with-ssh")]
+    #[cfg(all(unix, feature = "with-ssh"))]
     ssh_security_credentials_resolver:
         Option<Arc<dyn my_ssh::ssh_settings::SshSecurityCredentialsResolver + Send + Sync>>,
 
@@ -85,7 +85,7 @@ impl FlUrl {
     pub fn try_new<'s>(url: impl Into<StrOrString<'s>>) -> Result<Self, FlUrlError> {
         let url: StrOrString<'s> = url.into();
 
-        #[cfg(feature = "with-ssh")]
+        #[cfg(all(unix, feature = "with-ssh"))]
         let (url, credentials) = {
             let endpoint =
                 rust_extensions::remote_endpoint::RemoteEndpointHostString::try_parse(url.as_str())
@@ -105,7 +105,7 @@ impl FlUrl {
             }
         };
 
-        #[cfg(not(feature = "with-ssh"))]
+        #[cfg(not(all(unix, feature = "with-ssh")))]
         let url = {
             let endpoint =
                 rust_extensions::remote_endpoint::RemoteEndpointHostString::try_parse(url.as_str())
@@ -134,9 +134,9 @@ impl FlUrl {
             request_timeout: Duration::from_secs(10),
             print_input_request: false,
             compress_body: false,
-            #[cfg(feature = "with-ssh")]
+            #[cfg(all(unix, feature = "with-ssh"))]
             ssh_credentials: credentials,
-            #[cfg(feature = "with-ssh")]
+            #[cfg(all(unix, feature = "with-ssh"))]
             ssh_security_credentials_resolver: None,
             mode: Default::default(),
             reuse_connection_timeout_sec: 120,
@@ -145,7 +145,7 @@ impl FlUrl {
         Ok(result)
     }
 
-    #[cfg(feature = "with-ssh")]
+    #[cfg(all(unix, feature = "with-ssh"))]
     pub fn via_ssh(&self) -> bool {
         self.ssh_credentials.is_some()
     }
@@ -180,7 +180,7 @@ impl FlUrl {
         self
     }
 
-    #[cfg(feature = "with-ssh")]
+    #[cfg(all(unix, feature = "with-ssh"))]
     pub fn set_ssh_security_credentials_resolver(
         mut self,
         resolver: Arc<dyn my_ssh::ssh_settings::SshSecurityCredentialsResolver + Send + Sync>,
@@ -189,7 +189,7 @@ impl FlUrl {
         self
     }
 
-    #[cfg(feature = "with-ssh")]
+    #[cfg(all(unix, feature = "with-ssh"))]
     pub fn set_ssh_password<'s>(mut self, password: impl Into<StrOrString<'s>>) -> Self {
         let ssh_credentials = self.ssh_credentials.take();
         if ssh_credentials.is_none() {
@@ -210,13 +210,13 @@ impl FlUrl {
         self
     }
 
-    #[cfg(feature = "with-ssh")]
+    #[cfg(all(unix, feature = "with-ssh"))]
     pub fn set_ssh_credentials(mut self, ssh_credentials: my_ssh::SshCredentials) -> Self {
         self.ssh_credentials = Some(ssh_credentials);
         self
     }
 
-    #[cfg(feature = "with-ssh")]
+    #[cfg(all(unix, feature = "with-ssh"))]
     pub fn set_ssh_private_key<'s>(
         mut self,
         private_key: String,
@@ -240,7 +240,7 @@ impl FlUrl {
         self
     }
 
-    #[cfg(feature = "with-ssh")]
+    #[cfg(all(unix, feature = "with-ssh"))]
     pub fn set_ssh_user_password<'s>(mut self, password: String) -> Self {
         let ssh_credentials = self.ssh_credentials.take();
         if ssh_credentials.is_none() {
@@ -330,7 +330,7 @@ impl FlUrl {
     }
 
     async fn execute(self, request: CompiledHttpRequest) -> Result<FlUrlResponse, FlUrlError> {
-        #[cfg(feature = "with-ssh")]
+        #[cfg(all(unix, feature = "with-ssh"))]
         if self.ssh_credentials.is_some() {
             let mut self_mut = self;
             let ssh_credentials = self_mut.ssh_credentials.take().unwrap();
@@ -351,7 +351,7 @@ impl FlUrl {
                         &request,
                         &crate::http_clients_cache::creators::HttpConnectionCreator,
                         crate::consts::HTTP_DEFAULT_PORT.into(),
-                        #[cfg(feature = "with-ssh")]
+                        #[cfg(all(unix, feature = "with-ssh"))]
                         None,
                     )
                     .await?
@@ -361,7 +361,7 @@ impl FlUrl {
                         &request,
                         clients_cache.as_ref(),
                         crate::consts::HTTP_DEFAULT_PORT.into(),
-                        #[cfg(feature = "with-ssh")]
+                        #[cfg(all(unix, feature = "with-ssh"))]
                         None,
                     )
                     .await?
@@ -373,7 +373,7 @@ impl FlUrl {
                         &request,
                         &crate::http_clients_cache::creators::HttpsConnectionCreator,
                         crate::consts::HTTPS_DEFAULT_PORT.into(),
-                        #[cfg(feature = "with-ssh")]
+                        #[cfg(all(unix, feature = "with-ssh"))]
                         None,
                     )
                     .await?
@@ -384,7 +384,7 @@ impl FlUrl {
                         &request,
                         clients_cache.as_ref(),
                         crate::consts::HTTPS_DEFAULT_PORT.into(),
-                        #[cfg(feature = "with-ssh")]
+                        #[cfg(all(unix, feature = "with-ssh"))]
                         None,
                     )
                     .await?
@@ -401,7 +401,7 @@ impl FlUrl {
                         &request,
                         &crate::http_clients_cache::creators::UnixSocketHttpClientCreator,
                         None,
-                        #[cfg(feature = "with-ssh")]
+                        #[cfg(all(unix, feature = "with-ssh"))]
                         None,
                     )
                     .await?
@@ -412,22 +412,18 @@ impl FlUrl {
                         &request,
                         clients_cache.as_ref(),
                         None,
-                        #[cfg(feature = "with-ssh")]
+                        #[cfg(all(unix, feature = "with-ssh"))]
                         None,
                     )
                     .await?
                 }
-            }
-            #[cfg(not(unix))]
-            Scheme::UnixSocket => {
-                panic!("OS does not support unix socket");
             }
         };
 
         Ok(response)
     }
 
-    #[cfg(feature = "with-ssh")]
+    #[cfg(all(unix, feature = "with-ssh"))]
     async fn execute_ssh(
         mut self,
         request: CompiledHttpRequest,
@@ -753,11 +749,11 @@ impl FlUrl {
     async fn get_connection_params<'s>(
         &'s self,
         default_port: Option<u16>,
-        #[cfg(feature = "with-ssh")] ssh_credentials: Option<Arc<my_ssh::SshCredentials>>,
+        #[cfg(all(unix, feature = "with-ssh"))] ssh_credentials: Option<Arc<my_ssh::SshCredentials>>,
     ) -> ConnectionParams<'s> {
         let remote_endpoint = self.url_builder.get_remote_endpoint(default_port);
 
-        #[cfg(feature = "with-ssh")]
+        #[cfg(all(unix, feature = "with-ssh"))]
         let ssh_session = match ssh_credentials.clone() {
             Some(ssh_credentials) => {
                 let ssh_credentials = Arc::new(ssh_credentials);
@@ -775,7 +771,7 @@ impl FlUrl {
             remote_endpoint,
             host_header: self.headers.get_host_header_value(),
             client_certificate: self.client_cert.as_ref(),
-            #[cfg(feature = "with-ssh")]
+            #[cfg(all(unix, feature = "with-ssh"))]
             ssh_session,
             reuse_connection_timeout_seconds: self.reuse_connection_timeout_sec,
         }
@@ -789,7 +785,7 @@ impl FlUrl {
         request: &CompiledHttpRequest,
         http_connection_resolver: &impl HttpConnectionResolver<TStream, TConnector>,
         default_port: Option<u16>,
-        #[cfg(feature = "with-ssh")] ssh_credentials: Option<Arc<my_ssh::SshCredentials>>,
+        #[cfg(all(unix, feature = "with-ssh"))] ssh_credentials: Option<Arc<my_ssh::SshCredentials>>,
     ) -> Result<FlUrlResponse, FlUrlError> {
         if self.print_input_request {
             request.print_http_headers();
@@ -800,7 +796,7 @@ impl FlUrl {
         let params: ConnectionParams<'_> = self
             .get_connection_params(
                 default_port,
-                #[cfg(feature = "with-ssh")]
+                #[cfg(all(unix, feature = "with-ssh"))]
                 ssh_credentials,
             )
             .await;

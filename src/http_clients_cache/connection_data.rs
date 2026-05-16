@@ -1,4 +1,4 @@
-#[cfg(feature = "with-ssh")]
+#[cfg(all(unix, feature = "with-ssh"))]
 use std::sync::Arc;
 
 use my_tls::ClientCertificate;
@@ -13,7 +13,7 @@ pub struct ConnectionParams<'s> {
     pub host_header: Option<&'s str>,
     pub client_certificate: Option<&'s ClientCertificate>,
     pub reuse_connection_timeout_seconds: i64,
-    #[cfg(feature = "with-ssh")]
+    #[cfg(all(unix, feature = "with-ssh"))]
     pub ssh_session: Option<Arc<my_ssh::SshSession>>,
 }
 

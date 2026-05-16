@@ -17,10 +17,23 @@ jobs:
         with:
           toolchain: stable
 
-      - name: Build with all features     
+      - name: Build with all features
         run: |
           cargo build --all-features
 
-      - name: Test out our build     
+      - name: Test out our build
         run: |
           cargo test
+
+  build-windows:
+
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - uses: actions-rust-lang/setup-rust-toolchain@v1.15.2
+        with:
+          toolchain: stable
+
+      - name: Build on Windows (without unix-only with-ssh feature)
+        run: cargo build --no-default-features

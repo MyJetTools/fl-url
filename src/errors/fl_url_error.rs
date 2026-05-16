@@ -13,7 +13,7 @@ pub enum FlUrlError {
     RustTlsError(my_tls::tokio_rustls::rustls::Error),
     CanNotConvertToUtf8(std::str::Utf8Error),
     MyHttpClientError(my_http_client::MyHttpClientError),
-    #[cfg(feature = "with-ssh")]
+    #[cfg(all(unix, feature = "with-ssh"))]
     SshSessionError(my_ssh::SshSessionError),
     ReadingHyperBodyError(String),
     InvalidUrl(String),
@@ -44,7 +44,7 @@ impl From<MyHttpClientError> for FlUrlError {
     }
 }
 
-#[cfg(feature = "with-ssh")]
+#[cfg(all(unix, feature = "with-ssh"))]
 impl FlUrlError {
     pub fn is_ssh_session_error(&self) -> bool {
         match self {
@@ -54,7 +54,7 @@ impl FlUrlError {
     }
 }
 
-#[cfg(feature = "with-ssh")]
+#[cfg(all(unix, feature = "with-ssh"))]
 impl From<my_ssh::SshSessionError> for FlUrlError {
     fn from(src: my_ssh::SshSessionError) -> Self {
         Self::SshSessionError(src)

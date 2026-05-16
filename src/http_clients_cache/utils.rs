@@ -8,7 +8,7 @@ pub fn get_unix_socket_connection_key(remote_endpoint: RemoteEndpoint) -> String
     remote_endpoint.get_host().to_string()
 }
 
-#[cfg(feature = "with-ssh")]
+#[cfg(all(unix, feature = "with-ssh"))]
 pub fn get_ssh_connection_key(
     ssh_credentials: &my_ssh::SshCredentials,
     remote_endpoint: RemoteEndpoint,

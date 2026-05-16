@@ -3,9 +3,9 @@ pub use http::*;
 mod https;
 pub use https::*;
 
-#[cfg(feature = "with-ssh")]
+#[cfg(all(unix, feature = "with-ssh"))]
 mod ssh;
-#[cfg(feature = "with-ssh")]
+#[cfg(all(unix, feature = "with-ssh"))]
 pub use ssh::*;
 
 #[cfg(unix)]

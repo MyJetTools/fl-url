@@ -35,10 +35,10 @@ pub extern crate my_tls;
 mod fl_url_headers;
 pub use fl_url_headers::*;
 
-#[cfg(feature = "with-ssh")]
+#[cfg(all(unix, feature = "with-ssh"))]
 pub mod ssh;
 
-#[cfg(feature = "with-ssh")]
+#[cfg(all(unix, feature = "with-ssh"))]
 pub extern crate my_ssh;
 
 mod compiled_http_request;

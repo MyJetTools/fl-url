@@ -25,7 +25,7 @@ pub struct FlUrlHttpConnectionsCacheInner {
     https: AHashMap<String, Vec<ConnectionItem<TlsStream<TcpStream>, HttpsConnector>>>,
     #[cfg(unix)]
     unix_socket: AHashMap<String, Vec<ConnectionItem<UnixSocketStream, UnixSocketConnector>>>,
-    #[cfg(feature = "with-ssh")]
+    #[cfg(all(unix, feature = "with-ssh"))]
     ssh: AHashMap<String, Vec<ConnectionItem<my_ssh::SshAsyncChannel, SshHttpConnector>>>,
 }
 
@@ -37,7 +37,7 @@ impl Default for FlUrlHttpConnectionsCacheInner {
             https: Default::default(),
             #[cfg(unix)]
             unix_socket: Default::default(),
-            #[cfg(feature = "with-ssh")]
+            #[cfg(all(unix, feature = "with-ssh"))]
             ssh: Default::default(),
         }
     }
@@ -118,7 +118,7 @@ impl FlUrlHttpConnectionsCache {
         put_connection_back(&mut write_access.https, max_connections, connection);
     }
 
-    #[cfg(feature = "with-ssh")]
+    #[cfg(all(unix, feature = "with-ssh"))]
     pub async fn get_ssh_connection(
         &self,
         params: &ConnectionParams<'_>,
@@ -147,7 +147,7 @@ impl FlUrlHttpConnectionsCache {
         )
     }
 
-    #[cfg(feature = "with-ssh")]
+    #[cfg(all(unix, feature = "with-ssh"))]
     pub async fn put_ssh_connection_back(
         &self,
         connection: Arc<MyHttpClientWrapper<my_ssh::SshAsyncChannel, SshHttpConnector>>,
