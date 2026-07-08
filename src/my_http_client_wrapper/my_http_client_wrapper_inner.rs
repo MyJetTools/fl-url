@@ -47,7 +47,7 @@ impl<
                 //let req = req.to_hyper_h2_request(is_https);
 
                 let request = request.unwrap_as_hyper();
-                let result = my_http_client.do_request(request, request_timeout).await?;
+                let result = my_http_client.do_request(&request, request_timeout).await?;
                 Ok(MyHttpResponse::Response(result))
             }
         }
