@@ -61,9 +61,12 @@ pub struct FlUrl {
     // If we are trying to reuse connection, but it was not used for this time, we will drop it
     pub not_used_connection_timeout: Duration,
     pub request_timeout: Duration,
+    // Bounds how long reading the response body may take. `None` = unbounded.
+    pub response_body_timeout: Option<Duration>,
     pub do_not_reuse_connection: bool,
     pub connections_cache: Option<Arc<FlUrlHttpConnectionsCache>>,
     pub compress_body: bool,
+    pub decompress_gzip_response: bool,
     pub print_input_request: bool,
     // If we reuse connection and it has not been used more seconds than this parameter - it disposed
     pub reuse_connection_timeout_sec: i64,
@@ -118,7 +121,11 @@ impl FlUrl {
                 rust_extensions::remote_endpoint::RemoteEndpointHostString::ViaSsh {
                     ssh_remote_host: _,
                     remote_host_behind_ssh: _,
-                } => panic!("To use ssh you need to enable with-ssh feature"),
+                } => {
+                    return Err(FlUrlError::UnsupportedScheme(
+                        "To use ssh you need to enable the 'with-ssh' feature".to_string(),
+                    ))
+                }
             }
         };
 
@@ -132,8 +139,10 @@ impl FlUrl {
             not_used_connection_timeout: Duration::from_secs(30),
             max_retries: 0,
             request_timeout: Duration::from_secs(10),
+            response_body_timeout: None,
             print_input_request: false,
             compress_body: false,
+            decompress_gzip_response: false,
             #[cfg(all(unix, feature = "with-ssh"))]
             ssh_credentials: credentials,
             #[cfg(all(unix, feature = "with-ssh"))]
@@ -155,8 +164,24 @@ impl FlUrl {
         self
     }
 
+    /// Advertises gzip support to the server (`Accept-Encoding: gzip`) and
+    /// transparently decompresses a gzip-encoded response body on buffered
+    /// reads (`get_body_as_slice`, `get_json`, `get_body_as_str`, `receive_body`).
+    /// Streamed bodies (`get_body_as_stream`) are NOT decompressed.
+    pub fn accept_gzip(mut self) -> Self {
+        if !self.headers.has_header("Accept-Encoding") {
+            self.headers.add("Accept-Encoding", "gzip");
+        }
+        self.decompress_gzip_response = true;
+        self
+    }
+
     pub fn set_not_used_connection_timeout(mut self, timeout: Duration) -> Self {
         self.not_used_connection_timeout = timeout;
+        // Round up and clamp to at least 1s: as_secs() truncation would turn a
+        // sub-second timeout into 0, which evicts the whole per-key pool on
+        // every checkout (pooling silently disabled).
+        self.reuse_connection_timeout_sec = (timeout.as_secs_f64().ceil() as i64).max(1);
         self
     }
 
@@ -170,6 +195,11 @@ impl FlUrl {
         self
     }
 
+    /// Retries the request up to `max_retries` extra times on failure. Only
+    /// IDEMPOTENT methods are replayed (a POST that may have reached the server
+    /// is never re-sent). Note that my-http-client performs its own internal
+    /// reconnect/retry cycles per attempt, so each outer retry is a full fresh
+    /// cycle on top of those — keep this number small.
     pub fn with_retries(mut self, max_retries: usize) -> Self {
         self.max_retries = max_retries;
         self
@@ -264,6 +294,14 @@ impl FlUrl {
         self
     }
 
+    /// Bounds how long reading the response body may take. Applies both to
+    /// buffered reads (`get_body_as_slice`, `get_json`, …) and to each chunk of
+    /// a streamed body. Unbounded by default.
+    pub fn set_response_body_timeout(mut self, timeout: Duration) -> Self {
+        self.response_body_timeout = Some(timeout);
+        self
+    }
+
     pub fn do_not_reuse_connection(mut self) -> Self {
         self.do_not_reuse_connection = true;
         self
@@ -339,17 +377,21 @@ impl FlUrl {
 
         let response = match self.url_builder.get_scheme() {
             Scheme::Ws => {
-                panic!("WebSocket Ws scheme is not supported")
+                return Err(FlUrlError::UnsupportedScheme(
+                    "WebSocket 'ws' scheme is not supported".to_string(),
+                ))
             }
 
             Scheme::Wss => {
-                panic!("WebSocket Wss scheme is not supported")
+                return Err(FlUrlError::UnsupportedScheme(
+                    "WebSocket 'wss' scheme is not supported".to_string(),
+                ))
             }
             Scheme::Http => {
                 if self.do_not_reuse_connection {
                     self.execute_with_retry::<TcpStream, HttpConnector>(
                         &request,
-                        &crate::http_clients_cache::creators::HttpConnectionCreator,
+                        Arc::new(crate::http_clients_cache::creators::HttpConnectionCreator),
                         crate::consts::HTTP_DEFAULT_PORT.into(),
                         #[cfg(all(unix, feature = "with-ssh"))]
                         None,
@@ -359,7 +401,7 @@ impl FlUrl {
                     let clients_cache = self.get_connections_cache();
                     self.execute_with_retry::<TcpStream, HttpConnector>(
                         &request,
-                        clients_cache.as_ref(),
+                        clients_cache,
                         crate::consts::HTTP_DEFAULT_PORT.into(),
                         #[cfg(all(unix, feature = "with-ssh"))]
                         None,
@@ -371,7 +413,7 @@ impl FlUrl {
                 if self.do_not_reuse_connection {
                     self.execute_with_retry::<TlsStream<TcpStream>, HttpsConnector>(
                         &request,
-                        &crate::http_clients_cache::creators::HttpsConnectionCreator,
+                        Arc::new(crate::http_clients_cache::creators::HttpsConnectionCreator),
                         crate::consts::HTTPS_DEFAULT_PORT.into(),
                         #[cfg(all(unix, feature = "with-ssh"))]
                         None,
@@ -382,7 +424,7 @@ impl FlUrl {
 
                     self.execute_with_retry::<TlsStream<TcpStream>, HttpsConnector>(
                         &request,
-                        clients_cache.as_ref(),
+                        clients_cache,
                         crate::consts::HTTPS_DEFAULT_PORT.into(),
                         #[cfg(all(unix, feature = "with-ssh"))]
                         None,
@@ -392,14 +434,16 @@ impl FlUrl {
             }
             #[cfg(not(unix))]
             Scheme::UnixSocket => {
-                panic!("OS does not support unix sockets")
+                return Err(FlUrlError::UnsupportedScheme(
+                    "This OS does not support unix sockets".to_string(),
+                ))
             }
             #[cfg(unix)]
             Scheme::UnixSocket => {
                 if self.do_not_reuse_connection {
                     self.execute_with_retry::<UnixSocketStream, UnixSocketConnector>(
                         &request,
-                        &crate::http_clients_cache::creators::UnixSocketHttpClientCreator,
+                        Arc::new(crate::http_clients_cache::creators::UnixSocketHttpClientCreator),
                         None,
                         #[cfg(all(unix, feature = "with-ssh"))]
                         None,
@@ -410,7 +454,7 @@ impl FlUrl {
 
                     self.execute_with_retry::<UnixSocketStream, UnixSocketConnector>(
                         &request,
-                        clients_cache.as_ref(),
+                        clients_cache,
                         None,
                         #[cfg(all(unix, feature = "with-ssh"))]
                         None,
@@ -435,10 +479,21 @@ impl FlUrl {
                 .await;
         }
 
+        if self.do_not_reuse_connection {
+            return self
+                .execute_with_retry::<my_ssh::SshAsyncChannel, SshHttpConnector>(
+                    &request,
+                    Arc::new(crate::http_clients_cache::creators::SshConnectionCreator),
+                    crate::consts::HTTP_DEFAULT_PORT.into(),
+                    Some(Arc::new(ssh_credentials)),
+                )
+                .await;
+        }
+
         let clients_cache = self.get_connections_cache();
         self.execute_with_retry::<my_ssh::SshAsyncChannel, SshHttpConnector>(
             &request,
-            clients_cache.as_ref(),
+            clients_cache,
             crate::consts::HTTP_DEFAULT_PORT.into(),
             Some(Arc::new(ssh_credentials)),
         )
@@ -458,13 +513,25 @@ impl FlUrl {
             return body;
         }
 
-        self.headers.add("Content-Encoding", "gzip");
+        if !self.headers.has_header("Content-Encoding") {
+            self.headers.add("Content-Encoding", "gzip");
+        }
 
         let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
         encoder.write_all(body.as_slice()).unwrap();
         let result = encoder.finish().unwrap();
 
         result
+    }
+
+    fn get_path_and_query_with_leading_slash(&self) -> String {
+        let mut path_and_query = self.url_builder.get_path_and_query();
+        // A URL with a query but no path yields "?a=b"; the request target must
+        // start with "/", so we normalize it here.
+        if path_and_query.starts_with('?') {
+            path_and_query.insert(0, '/');
+        }
+        path_and_query
     }
 
     fn compile_request(
@@ -474,15 +541,18 @@ impl FlUrl {
         debug: Option<&mut String>,
     ) -> Result<CompiledHttpRequest, FlUrlError> {
         let result = match self.mode {
-            FlUrlMode::H2 => {
-                CompiledHttpRequest::Hyper(self.compile_hyper_request(method, body, debug)?)
-            }
-            FlUrlMode::Http1NoHyper => CompiledHttpRequest::MyHttpClient(
-                self.compile_non_hyper_request(method, body, debug)?,
+            FlUrlMode::H2 => CompiledHttpRequest::new_hyper(
+                self.compile_hyper_request(method.clone(), body, debug)?,
+                method,
             ),
-            FlUrlMode::Http1Hyper => {
-                CompiledHttpRequest::Hyper(self.compile_hyper_request(method, body, debug)?)
-            }
+            FlUrlMode::Http1NoHyper => CompiledHttpRequest::new_my_http_client(
+                self.compile_non_hyper_request(method.clone(), body, debug)?,
+                method,
+            ),
+            FlUrlMode::Http1Hyper => CompiledHttpRequest::new_hyper(
+                self.compile_hyper_request(method.clone(), body, debug)?,
+                method,
+            ),
         };
 
         Ok(result)
@@ -495,7 +565,9 @@ impl FlUrl {
         debug: Option<&mut String>,
     ) -> Result<my_http_client::http::request::Request<Full<Bytes>>, FlUrlError> {
         if let Some(content_type) = body.get_content_type() {
-            self.headers.add("Content-Type", content_type.as_str());
+            if !self.headers.has_header("Content-Type") {
+                self.headers.add("Content-Type", content_type.as_str());
+            }
         }
 
         let mut body = body.into_vec();
@@ -508,7 +580,7 @@ impl FlUrl {
             body = self.compress_body(body);
         }
 
-        let path_and_query = self.url_builder.get_path_and_query();
+        let path_and_query = self.get_path_and_query_with_leading_slash();
 
         let mut result = match self.mode {
             FlUrlMode::H2 => {
@@ -522,8 +594,7 @@ impl FlUrl {
                     .authority(self.url_builder.get_host_port())
                     .path_and_query(path_and_query)
                     .scheme(scheme)
-                    .build()
-                    .unwrap();
+                    .build()?;
                 my_http_client::http::request::Builder::new()
                     .version(Version::HTTP_2)
                     .method(method.clone())
@@ -540,7 +611,10 @@ impl FlUrl {
 
         if !self.headers.has_host_header() {
             if !self.mode.is_h2() {
-                result = result.header(hyper::header::HOST.as_str(), self.url_builder.get_host());
+                result = result.header(
+                    hyper::header::HOST.as_str(),
+                    self.url_builder.get_host_port(),
+                );
             }
         }
 
@@ -577,7 +651,9 @@ impl FlUrl {
         debug: Option<&mut String>,
     ) -> Result<my_http_client::http1::MyHttpRequest, FlUrlError> {
         if let Some(content_type) = body.get_content_type() {
-            self.headers.add("Content-Type", content_type.as_str());
+            if !self.headers.has_header("Content-Type") {
+                self.headers.add("Content-Type", content_type.as_str());
+            }
         }
 
         let mut body = body.into_vec();
@@ -590,12 +666,12 @@ impl FlUrl {
             body = self.compress_body(body);
         }
 
-        let path_and_query = self.url_builder.get_path_and_query();
+        let path_and_query = self.get_path_and_query_with_leading_slash();
 
         let mut builder = MyHttpRequestBuilder::new(method, &path_and_query);
 
         if !self.headers.has_host_header() {
-            builder.append_header("Host", self.url_builder.get_host());
+            builder.append_header("Host", self.url_builder.get_host_port());
         }
 
         if self.url_builder.is_unix_socket() {
@@ -655,7 +731,7 @@ impl FlUrl {
         mut self,
         json: &impl serde::Serialize,
     ) -> Result<FlUrlResponse, FlUrlError> {
-        let body = FlUrlBody::as_json(json);
+        let body = FlUrlBody::try_as_json(json)?;
         let request = self.compile_request(Method::POST, body, None)?;
 
         self.execute(request).await
@@ -671,7 +747,7 @@ impl FlUrl {
         mut self,
         json: &impl serde::Serialize,
     ) -> Result<FlUrlResponse, FlUrlError> {
-        let body = FlUrlBody::as_json(json);
+        let body = FlUrlBody::try_as_json(json)?;
         let request = self.compile_request(Method::PATCH, body, None)?;
 
         self.execute(request).await
@@ -687,7 +763,7 @@ impl FlUrl {
         mut self,
         json: &impl serde::Serialize,
     ) -> Result<FlUrlResponse, FlUrlError> {
-        let body = FlUrlBody::as_json(json);
+        let body = FlUrlBody::try_as_json(json)?;
         let request = self.compile_request(Method::PUT, body, None)?;
         self.execute(request).await
     }
@@ -771,6 +847,7 @@ impl FlUrl {
             remote_endpoint,
             host_header: self.headers.get_host_header_value(),
             client_certificate: self.client_cert.as_ref(),
+            accept_invalid_certificate: self.accept_invalid_certificate,
             #[cfg(all(unix, feature = "with-ssh"))]
             ssh_session,
             reuse_connection_timeout_seconds: self.reuse_connection_timeout_sec,
@@ -783,7 +860,7 @@ impl FlUrl {
     >(
         self,
         request: &CompiledHttpRequest,
-        http_connection_resolver: &impl HttpConnectionResolver<TStream, TConnector>,
+        http_connection_resolver: Arc<dyn HttpConnectionResolver<TStream, TConnector>>,
         default_port: Option<u16>,
         #[cfg(all(unix, feature = "with-ssh"))] ssh_credentials: Option<Arc<my_ssh::SshCredentials>>,
     ) -> Result<FlUrlResponse, FlUrlError> {
@@ -808,21 +885,66 @@ impl FlUrl {
 
             match response {
                 Ok(response) => {
-                    http_connection_resolver
-                        .put_connection_back(connection)
-                        .await;
-                    let response = FlUrlResponse::from_http1_response(self.url_builder, response);
+                    let mut response =
+                        FlUrlResponse::from_http1_response(self.url_builder, response);
+                    response.set_body_read_timeout(self.response_body_timeout);
+                    response.set_decompress_gzip(self.decompress_gzip_response);
+                    // The connection stays checked out until the response body
+                    // is fully consumed; the returner puts it back (or disposes
+                    // it) at that point.
+                    response.set_connection_returner(Box::new(
+                        crate::http_clients_cache::PooledConnectionReturner {
+                            resolver: http_connection_resolver.clone(),
+                            connection,
+                        },
+                    ));
                     return Ok(response);
                 }
                 Err(err) => {
-                    if attempt_no >= max_retries {
-                        return Err(FlUrlError::MyHttpClientError(err));
+                    // A single timeout means a slow response, not a dead
+                    // connection — the shared H2 client must survive it (its
+                    // own consecutive-timeouts policy handles dead peers). Any
+                    // other error evicts the connection from the pool; dropping
+                    // the Arc disposes it.
+                    if matches!(&err, my_http_client::MyHttpClientError::RequestTimeout(_)) {
+                        drop(connection);
+                    } else {
+                        http_connection_resolver.drop_connection(connection).await;
+                    }
+
+                    if !error_is_safe_to_retry(&err, request) || attempt_no >= max_retries {
+                        return Err(map_my_http_client_error(err));
                     }
 
                     attempt_no += 1;
                 }
             }
         }
+    }
+}
+
+/// Replay safety: fl-url's outer retry loop replays only idempotent requests.
+/// Error kinds are NOT a reliable pre-wire signal across the three client
+/// modes (e.g. in Http1NoHyper a `CanNotConnectToRemoteHost` can surface after
+/// a POST already hit the wire, when the internal reconnect after a mid-flight
+/// disconnect fails), so a non-idempotent request is never replayed here —
+/// my-http-client's own retry loops already cover the genuinely-safe cases.
+fn error_is_safe_to_retry(
+    err: &my_http_client::MyHttpClientError,
+    request: &CompiledHttpRequest,
+) -> bool {
+    match err {
+        // The connection is consumed by the upgrade; a retry would just
+        // re-trigger it.
+        my_http_client::MyHttpClientError::UpgradedToWebSocket => false,
+        _ => request.method_is_idempotent(),
+    }
+}
+
+fn map_my_http_client_error(err: my_http_client::MyHttpClientError) -> FlUrlError {
+    match err {
+        my_http_client::MyHttpClientError::RequestTimeout(_) => FlUrlError::Timeout,
+        other => FlUrlError::MyHttpClientError(other),
     }
 }
 

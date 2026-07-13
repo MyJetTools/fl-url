@@ -36,9 +36,9 @@ impl MyHttpClientConnector<TcpStream> for HttpConnector {
     }
 
     fn reunite(
-        _read: tokio::io::ReadHalf<TcpStream>,
-        _write: tokio::io::WriteHalf<TcpStream>,
+        read: tokio::io::ReadHalf<TcpStream>,
+        write: tokio::io::WriteHalf<TcpStream>,
     ) -> TcpStream {
-        panic!("Would implement this if upgrade fl-url to support WebSockets")
+        read.unsplit(write)
     }
 }

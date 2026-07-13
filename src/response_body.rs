@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::time::Duration;
 
 use http_body_util::BodyExt;
 use hyper::HeaderMap;
@@ -39,46 +40,39 @@ impl ResponseBody {
     }
 
     pub fn get_header(&self, header: &str) -> Result<Option<&str>, FlUrlReadingHeaderError> {
-        match self {
-            Self::Hyper(response) => {
-                let result = response.as_ref().unwrap().headers().get(header);
+        let headers = match self {
+            Self::Hyper(response) => response.as_ref().unwrap().headers(),
+            Self::Body { headers, .. } => headers,
+        };
 
-                if result.is_none() {
-                    return Ok(None);
-                }
+        let result = headers.get(header);
 
-                let value = result.unwrap().to_str()?;
-
-                return Ok(Some(value));
-            }
-            Self::Body { .. } => {
-                panic!("Body is already disposed");
-            }
+        if result.is_none() {
+            return Ok(None);
         }
+
+        let value = result.unwrap().to_str()?;
+
+        Ok(Some(value))
     }
 
     pub fn get_header_case_insensitive(
         &self,
         header: &str,
     ) -> Result<Option<&str>, FlUrlReadingHeaderError> {
-        match self {
-            Self::Hyper(response) => {
-                for (name, value) in response.as_ref().unwrap().headers().iter() {
-                    if rust_extensions::str_utils::compare_strings_case_insensitive(
-                        name.as_str(),
-                        header,
-                    ) {
-                        let value = value.to_str()?;
-                        return Ok(Some(value));
-                    }
-                }
+        let headers = match self {
+            Self::Hyper(response) => response.as_ref().unwrap().headers(),
+            Self::Body { headers, .. } => headers,
+        };
 
-                return Ok(None);
-            }
-            Self::Body { .. } => {
-                panic!("Body is already disposed");
+        for (name, value) in headers.iter() {
+            if rust_extensions::str_utils::compare_strings_case_insensitive(name.as_str(), header) {
+                let value = value.to_str()?;
+                return Ok(Some(value));
             }
         }
+
+        Ok(None)
     }
 
     pub fn copy_headers_to_hash_map<'s>(
@@ -139,7 +133,10 @@ impl ResponseBody {
         }
     }
 
-    async fn convert_to_slice_if_needed(&mut self) -> Result<(), FlUrlError> {
+    pub(crate) async fn convert_to_slice_if_needed(
+        &mut self,
+        body_read_timeout: Option<Duration>,
+    ) -> Result<(), FlUrlError> {
         match self {
             Self::Hyper(response) => {
                 let response = response.take().unwrap();
@@ -149,49 +146,134 @@ impl ResponseBody {
 
                 let (parts, incoming) = response.into_parts();
 
-                let body = my_hyper_utils::box_body_to_vec(incoming, |err| {
-                    FlUrlError::ReadingHyperBodyError(err)
-                })
-                .await?;
+                // Written BEFORE the await: if the read future is dropped mid-way
+                // (cancellation) or fails, the enum stays in a valid state —
+                // headers remain reachable and body reads return an error
+                // instead of panicking on a taken-out `Hyper(None)`.
                 *self = Self::Body {
                     status_code,
                     version,
                     headers: parts.headers,
-                    body: Some(body),
+                    body: None,
+                };
+
+                let read_future = my_hyper_utils::box_body_to_vec(incoming, |err| {
+                    FlUrlError::ReadingHyperBodyError(err)
+                });
+
+                let body_result = match body_read_timeout {
+                    Some(timeout) => match tokio::time::timeout(timeout, read_future).await {
+                        Ok(result) => result,
+                        Err(_elapsed) => Err(FlUrlError::Timeout),
+                    },
+                    None => read_future.await,
+                };
+
+                // A read error/timeout leaves body: None -> the caller disposes
+                // the connection. A successful read stores the raw body; gzip
+                // decoding is a SEPARATE, body-level step (decode_gzip_if_needed)
+                // so a decode failure never disposes an already-drained socket.
+                let body = body_result?;
+
+                if let Self::Body { body: dest, .. } = self {
+                    *dest = Some(body);
                 }
+
+                Ok(())
             }
-            Self::Body { .. } => {}
+            Self::Body { .. } => Ok(()),
         }
+    }
+
+    /// Decodes a gzip-encoded loaded body in place and updates the
+    /// `Content-Encoding` / `Content-Length` headers to match. A pure data-level
+    /// transform: it runs only after the body has been fully read off the wire
+    /// and the connection settled, so a decode error does not affect connection
+    /// reuse.
+    pub(crate) fn decode_gzip_if_needed(&mut self) -> Result<(), FlUrlError> {
+        let Self::Body { headers, body, .. } = self else {
+            return Ok(());
+        };
+
+        let is_gzip = headers
+            .get(hyper::header::CONTENT_ENCODING)
+            .and_then(|value| value.to_str().ok())
+            .map(|value| value.eq_ignore_ascii_case("gzip"))
+            .unwrap_or(false);
+
+        if !is_gzip {
+            return Ok(());
+        }
+
+        let Some(compressed) = body.as_ref() else {
+            return Ok(());
+        };
+
+        if compressed.is_empty() {
+            return Ok(());
+        }
+
+        let decoded = decompress_gzip_body(compressed.as_slice())?;
+
+        // The stored headers must describe the body we actually hold, not the
+        // compressed wire form.
+        headers.remove(hyper::header::CONTENT_ENCODING);
+        if headers.contains_key(hyper::header::CONTENT_LENGTH) {
+            headers.insert(
+                hyper::header::CONTENT_LENGTH,
+                hyper::header::HeaderValue::from(decoded.len()),
+            );
+        }
+        *body = Some(decoded);
 
         Ok(())
     }
 
-    pub async fn convert_body_and_get_as_slice(&mut self) -> Result<&[u8], FlUrlError> {
-        self.convert_to_slice_if_needed().await?;
+    /// `true` only when the body has actually been read into memory. The
+    /// materialized variant with `body: None` (left behind by a cancelled or
+    /// failed read) does NOT count — the socket still carries unread bytes.
+    pub(crate) fn has_loaded_body(&self) -> bool {
+        matches!(self, ResponseBody::Body { body: Some(_), .. })
+    }
 
+    pub(crate) fn get_loaded_body_as_slice(&self) -> Result<&[u8], FlUrlError> {
         match self {
-            ResponseBody::Hyper(_) => {
-                panic!("Should not be here")
-            }
+            ResponseBody::Hyper(_) => Err(FlUrlError::ReadingHyperBodyError(
+                "Response body is not loaded yet".to_string(),
+            )),
             ResponseBody::Body { body, .. } => match body {
                 Some(body) => Ok(body.as_slice()),
-                None => panic!("Body is already disposed"),
+                None => Err(FlUrlError::ReadingHyperBodyError(
+                    "Response body is not available (already consumed or failed to read)"
+                        .to_string(),
+                )),
             },
         }
     }
 
-    pub async fn convert_body_and_receive_it(&mut self) -> Result<Vec<u8>, FlUrlError> {
-        self.convert_to_slice_if_needed().await?;
-
+    pub(crate) fn take_loaded_body(&mut self) -> Result<Vec<u8>, FlUrlError> {
         match self {
-            ResponseBody::Hyper(_) => {
-                panic!("Should not be here")
-            }
+            ResponseBody::Hyper(_) => Err(FlUrlError::ReadingHyperBodyError(
+                "Response body is not loaded yet".to_string(),
+            )),
             ResponseBody::Body { body, .. } => match body.take() {
                 Some(body) => Ok(body),
-                None => panic!("Body is already disposed"),
+                None => Err(FlUrlError::ReadingHyperBodyError(
+                    "Response body is not available (already consumed or failed to read)"
+                        .to_string(),
+                )),
             },
         }
+    }
+
+    pub async fn convert_body_and_get_as_slice(&mut self) -> Result<&[u8], FlUrlError> {
+        self.convert_to_slice_if_needed(None).await?;
+        self.get_loaded_body_as_slice()
+    }
+
+    pub async fn convert_body_and_receive_it(&mut self) -> Result<Vec<u8>, FlUrlError> {
+        self.convert_to_slice_if_needed(None).await?;
+        self.take_loaded_body()
     }
     pub fn into_http_body(self) -> Result<HyperResponse, FlUrlError> {
         match self {
@@ -265,6 +347,20 @@ impl ResponseBody {
             }
         }
     }
+}
+
+fn decompress_gzip_body(data: &[u8]) -> Result<Vec<u8>, FlUrlError> {
+    use std::io::Read;
+
+    // MultiGzDecoder (not GzDecoder) so concatenated gzip members — a valid,
+    // spec-allowed encoding some servers emit — are all decoded, not just the
+    // first.
+    let mut decoder = flate2::read::MultiGzDecoder::new(data);
+    let mut result = Vec::new();
+    decoder.read_to_end(&mut result).map_err(|err| {
+        FlUrlError::ReadingHyperBodyError(format!("Failed to decompress gzip body: {}", err))
+    })?;
+    Ok(result)
 }
 
 /*

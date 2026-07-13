@@ -18,6 +18,10 @@ impl<
         TConnector: MyHttpClientConnector<TStream> + Send + Sync + 'static,
     > MyHttpClientWrapperInner<TStream, TConnector>
 {
+    pub fn is_h2(&self) -> bool {
+        matches!(self, Self::H2(_))
+    }
+
     pub async fn do_request(
         &self,
         request: &CompiledHttpRequest,
@@ -25,8 +29,21 @@ impl<
     ) -> Result<MyHttpResponse<TStream>, MyHttpClientError> {
         match self {
             Self::MyHttpClient(my_http_client) => {
-                let request = request.unwrap_as_my_http_client_request();
-                my_http_client.do_request(&request, request_timeout).await
+                let result = my_http_client
+                    .do_request(request.as_my_http_client_request(), request_timeout)
+                    .await?;
+
+                match result {
+                    MyHttpResponse::Response(response) => Ok(MyHttpResponse::Response(response)),
+                    // fl-url does not support WebSockets: report the upgrade as an
+                    // error instead of returning a fake-success response with the
+                    // socket silently dropped. The upgraded connection is consumed
+                    // and must not be reused.
+                    MyHttpResponse::WebSocketUpgrade { disconnection, .. } => {
+                        disconnection.disconnect();
+                        Err(MyHttpClientError::UpgradedToWebSocket)
+                    }
+                }
             }
             Self::Hyper(my_http_client) => {
                 let request = request.unwrap_as_hyper();
@@ -37,17 +54,15 @@ impl<
                         Ok(MyHttpResponse::Response(response))
                     }
                     my_http_client::http1_hyper::HyperHttpResponse::WebSocketUpgrade {
-                        response,
-                        web_socket: _,
-                    } => Ok(MyHttpResponse::Response(response)),
+                        ..
+                    } => Err(MyHttpClientError::UpgradedToWebSocket),
                 }
             }
 
             Self::H2(my_http_client) => {
-                //let req = req.to_hyper_h2_request(is_https);
-
-                let request = request.unwrap_as_hyper();
-                let result = my_http_client.do_request(&request, request_timeout).await?;
+                let result = my_http_client
+                    .do_request(request.as_hyper(), request_timeout)
+                    .await?;
                 Ok(MyHttpResponse::Response(result))
             }
         }
@@ -57,32 +72,32 @@ impl<
 impl<
         TStream: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + Sync + 'static,
         TConnector: MyHttpClientConnector<TStream> + Send + Sync + 'static,
-    > Into<MyHttpClientWrapperInner<TStream, TConnector>>
-    for my_http_client::http1::MyHttpClient<TStream, TConnector>
+    > From<my_http_client::http1::MyHttpClient<TStream, TConnector>>
+    for MyHttpClientWrapperInner<TStream, TConnector>
 {
-    fn into(self) -> MyHttpClientWrapperInner<TStream, TConnector> {
-        MyHttpClientWrapperInner::MyHttpClient(self)
+    fn from(client: my_http_client::http1::MyHttpClient<TStream, TConnector>) -> Self {
+        MyHttpClientWrapperInner::MyHttpClient(client)
     }
 }
 
 impl<
         TStream: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + Sync + 'static,
         TConnector: MyHttpClientConnector<TStream> + Send + Sync + 'static,
-    > Into<MyHttpClientWrapperInner<TStream, TConnector>>
-    for my_http_client::http1_hyper::MyHttpHyperClient<TStream, TConnector>
+    > From<my_http_client::http1_hyper::MyHttpHyperClient<TStream, TConnector>>
+    for MyHttpClientWrapperInner<TStream, TConnector>
 {
-    fn into(self) -> MyHttpClientWrapperInner<TStream, TConnector> {
-        MyHttpClientWrapperInner::Hyper(self)
+    fn from(client: my_http_client::http1_hyper::MyHttpHyperClient<TStream, TConnector>) -> Self {
+        MyHttpClientWrapperInner::Hyper(client)
     }
 }
 
 impl<
         TStream: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + Sync + 'static,
         TConnector: MyHttpClientConnector<TStream> + Send + Sync + 'static,
-    > Into<MyHttpClientWrapperInner<TStream, TConnector>>
-    for my_http_client::http2::MyHttp2Client<TStream, TConnector>
+    > From<my_http_client::http2::MyHttp2Client<TStream, TConnector>>
+    for MyHttpClientWrapperInner<TStream, TConnector>
 {
-    fn into(self) -> MyHttpClientWrapperInner<TStream, TConnector> {
-        MyHttpClientWrapperInner::H2(self)
+    fn from(client: my_http_client::http2::MyHttp2Client<TStream, TConnector>) -> Self {
+        MyHttpClientWrapperInner::H2(client)
     }
 }

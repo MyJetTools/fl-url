@@ -1,6 +1,7 @@
 use my_http_client::MyHttpClientError;
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum FlUrlError {
     HyperError(hyper::Error),
     Timeout,
@@ -17,6 +18,7 @@ pub enum FlUrlError {
     SshSessionError(my_ssh::SshSessionError),
     ReadingHyperBodyError(String),
     InvalidUrl(String),
+    UnsupportedScheme(String),
 }
 
 impl FlUrlError {
@@ -27,10 +29,24 @@ impl FlUrlError {
         }
     }
 
-    pub fn to_string(&self) -> String {
-        format!("{:?}", self)
+    pub fn is_timeout(&self) -> bool {
+        matches!(
+            self,
+            FlUrlError::Timeout
+                | FlUrlError::MyHttpClientError(
+                    my_http_client::MyHttpClientError::RequestTimeout(_)
+                )
+        )
     }
 }
+
+impl std::fmt::Display for FlUrlError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl std::error::Error for FlUrlError {}
 
 impl From<my_tls::tokio_rustls::rustls::Error> for FlUrlError {
     fn from(value: my_tls::tokio_rustls::rustls::Error) -> Self {

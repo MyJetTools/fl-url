@@ -42,7 +42,15 @@ pub mod ssh;
 pub extern crate my_ssh;
 
 mod compiled_http_request;
+mod escaped_body_guard;
 
 lazy_static::lazy_static! {
     static ref CLIENTS_CACHED: Arc<FlUrlHttpConnectionsCache> =  Arc::new(FlUrlHttpConnectionsCache::new());
+}
+
+/// The process-global connection cache used by every `FlUrl` that has no
+/// explicit `set_connections_cache`. Exposed so long-running services can
+/// schedule `gc(ttl_seconds)` sweeps or `clear()` it on shutdown.
+pub fn shared_connections_cache() -> Arc<FlUrlHttpConnectionsCache> {
+    CLIENTS_CACHED.clone()
 }

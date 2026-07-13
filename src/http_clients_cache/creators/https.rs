@@ -24,6 +24,7 @@ impl HttpsConnectionCreator {
             params.remote_endpoint.to_owned(),
             server_name,
             params.client_certificate.map(|x| x.clone()),
+            params.accept_invalid_certificate,
             params.mode.is_h2(),
         );
 
@@ -50,8 +51,8 @@ impl HttpConnectionResolver<TlsStream<TcpStream>, HttpsConnector> for HttpsConne
         &self,
         params: &ConnectionParams<'_>,
     ) -> Arc<MyHttpClientWrapper<TlsStream<TcpStream>, HttpsConnector>> {
-        let key = super::super::utils::get_http_connection_key(params.remote_endpoint);
-        Self::create_connection(params, key.to_string())
+        let key = super::super::utils::get_https_connection_key(params);
+        Self::create_connection(params, key)
     }
 
     async fn put_connection_back(
@@ -74,6 +75,13 @@ impl HttpConnectionResolver<TlsStream<TcpStream>, HttpsConnector> for FlUrlHttpC
         &self,
         connection: Arc<MyHttpClientWrapper<TlsStream<TcpStream>, HttpsConnector>>,
     ) {
-        self.put_https_connection_back(connection).await;
+        self.put_https_connection_back_sync(connection);
+    }
+
+    async fn drop_connection(
+        &self,
+        connection: Arc<MyHttpClientWrapper<TlsStream<TcpStream>, HttpsConnector>>,
+    ) {
+        self.drop_https_connection_sync(&connection);
     }
 }

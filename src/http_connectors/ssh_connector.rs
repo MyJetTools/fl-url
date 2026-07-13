@@ -12,21 +12,16 @@ pub struct SshHttpConnector {
 #[async_trait::async_trait]
 impl MyHttpClientConnector<SshAsyncChannel> for SshHttpConnector {
     async fn connect(&self) -> Result<SshAsyncChannel, MyHttpClientError> {
-        let port = self.remote_host.get_port();
-        if port.is_none() {
-            panic!(
-                "Port is not defined in the remote endpoint {}",
-                self.remote_host.get_host_port()
-            );
-        }
+        // The endpoint behind the ssh tunnel is assumed to be HTTP, so we fall
+        // back to the default HTTP port when none is specified in the URL.
+        let port = self
+            .remote_host
+            .get_port()
+            .unwrap_or(crate::consts::HTTP_DEFAULT_PORT);
 
         let ssh_channel = self
             .ssh_session
-            .connect_to_remote_host(
-                self.remote_host.get_host(),
-                port.unwrap(),
-                Duration::from_secs(30),
-            )
+            .connect_to_remote_host(self.remote_host.get_host(), port, Duration::from_secs(30))
             .await;
 
         match ssh_channel {
@@ -56,9 +51,9 @@ impl MyHttpClientConnector<SshAsyncChannel> for SshHttpConnector {
     }
 
     fn reunite(
-        _read: tokio::io::ReadHalf<SshAsyncChannel>,
-        _write: tokio::io::WriteHalf<SshAsyncChannel>,
+        read: tokio::io::ReadHalf<SshAsyncChannel>,
+        write: tokio::io::WriteHalf<SshAsyncChannel>,
     ) -> SshAsyncChannel {
-        panic!("Would implement this if upgrade fl-url to support WebSockets")
+        read.unsplit(write)
     }
 }

@@ -43,8 +43,8 @@ impl HttpConnectionResolver<TcpStream, HttpConnector> for HttpConnectionCreator 
         &self,
         params: &ConnectionParams<'_>,
     ) -> Arc<MyHttpClientWrapper<TcpStream, HttpConnector>> {
-        let key = super::super::utils::get_http_connection_key(params.remote_endpoint);
-        Self::create_connection(params, key.to_string())
+        let key = super::super::utils::get_http_connection_key(params);
+        Self::create_connection(params, key)
     }
 
     async fn put_connection_back(
@@ -67,6 +67,13 @@ impl HttpConnectionResolver<TcpStream, HttpConnector> for FlUrlHttpConnectionsCa
         &self,
         connection: Arc<MyHttpClientWrapper<TcpStream, HttpConnector>>,
     ) {
-        self.put_http_connection_back(connection).await;
+        self.put_http_connection_back_sync(connection);
+    }
+
+    async fn drop_connection(
+        &self,
+        connection: Arc<MyHttpClientWrapper<TcpStream, HttpConnector>>,
+    ) {
+        self.drop_http_connection_sync(&connection);
     }
 }

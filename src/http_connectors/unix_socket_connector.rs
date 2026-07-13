@@ -50,9 +50,9 @@ impl MyHttpClientConnector<UnixStream> for UnixSocketConnector {
     }
 
     fn reunite(
-        _read: tokio::io::ReadHalf<UnixStream>,
-        _write: tokio::io::WriteHalf<UnixStream>,
+        read: tokio::io::ReadHalf<UnixStream>,
+        write: tokio::io::WriteHalf<UnixStream>,
     ) -> UnixStream {
-        panic!("Would implement this if upgrade fl-url to support WebSockets")
+        read.unsplit(write)
     }
 }

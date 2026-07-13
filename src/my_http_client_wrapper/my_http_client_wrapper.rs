@@ -23,6 +23,10 @@ impl<
         Self { key, inner }
     }
 
+    pub fn is_h2(&self) -> bool {
+        self.inner.is_h2()
+    }
+
     pub async fn do_request(
         &self,
         request: &CompiledHttpRequest,

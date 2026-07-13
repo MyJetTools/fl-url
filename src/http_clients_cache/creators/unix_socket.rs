@@ -41,7 +41,7 @@ impl HttpConnectionResolver<UnixSocketStream, UnixSocketConnector> for UnixSocke
         &self,
         params: &ConnectionParams<'_>,
     ) -> Arc<MyHttpClientWrapper<UnixSocketStream, UnixSocketConnector>> {
-        let key = super::super::utils::get_unix_socket_connection_key(params.remote_endpoint);
+        let key = super::super::utils::get_unix_socket_connection_key(params);
         Self::create_connection(params, key)
     }
 
@@ -65,6 +65,13 @@ impl HttpConnectionResolver<UnixSocketStream, UnixSocketConnector> for FlUrlHttp
         &self,
         connection: Arc<MyHttpClientWrapper<UnixSocketStream, UnixSocketConnector>>,
     ) {
-        self.put_unix_socket_connection_back(connection).await;
+        self.put_unix_socket_connection_back_sync(connection);
+    }
+
+    async fn drop_connection(
+        &self,
+        connection: Arc<MyHttpClientWrapper<UnixSocketStream, UnixSocketConnector>>,
+    ) {
+        self.drop_unix_socket_connection_sync(&connection);
     }
 }

@@ -41,6 +41,12 @@ impl FlUrlHeaders {
         self.host_header_value.is_some()
     }
 
+    pub fn has_header(&self, name: &str) -> bool {
+        self.headers
+            .iter()
+            .any(|(header_name, _)| header_name.eq_ignore_ascii_case(name))
+    }
+
     pub fn get_host_header_value(&self) -> Option<&str> {
         let host_value_pos = self.host_header_value.as_ref()?;
         let result = self.headers.get_value(host_value_pos);

@@ -53,8 +53,9 @@ impl HttpConnectionResolver<my_ssh::SshAsyncChannel, SshHttpConnector> for SshCo
         let key = super::super::utils::get_ssh_connection_key(
             ssh_session.get_ssh_credentials(),
             params.remote_endpoint,
+            params.mode,
         );
-        Self::create_connection(params, key.to_string())
+        Self::create_connection(params, key)
     }
 
     async fn put_connection_back(
@@ -79,6 +80,13 @@ impl HttpConnectionResolver<my_ssh::SshAsyncChannel, SshHttpConnector>
         &self,
         connection: Arc<MyHttpClientWrapper<my_ssh::SshAsyncChannel, SshHttpConnector>>,
     ) {
-        self.put_ssh_connection_back(connection).await;
+        self.put_ssh_connection_back_sync(connection);
+    }
+
+    async fn drop_connection(
+        &self,
+        connection: Arc<MyHttpClientWrapper<my_ssh::SshAsyncChannel, SshHttpConnector>>,
+    ) {
+        self.drop_ssh_connection_sync(&connection);
     }
 }

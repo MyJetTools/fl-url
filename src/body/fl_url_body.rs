@@ -22,9 +22,15 @@ impl FlUrlBody {
         FlUrlBody::Raw { data, content_type }
     }
 
+    /// Panics if the value fails to serialize; use [`Self::try_as_json`] to
+    /// handle the error instead.
     pub fn as_json(value: &impl serde::Serialize) -> Self {
-        let payload = serde_json::to_vec(value).expect("Failed to serialize to JSON");
-        FlUrlBody::Json(payload)
+        Self::try_as_json(value).expect("Failed to serialize to JSON")
+    }
+
+    pub fn try_as_json(value: &impl serde::Serialize) -> Result<Self, serde_json::Error> {
+        let payload = serde_json::to_vec(value)?;
+        Ok(FlUrlBody::Json(payload))
     }
 
     pub fn get_content_type(&self) -> Option<StrOrString<'static>> {
@@ -63,14 +69,14 @@ impl FlUrlBody {
      */
 }
 
-impl Into<FlUrlBody> for UrlEncodedBody {
-    fn into(self) -> FlUrlBody {
-        FlUrlBody::UrlEncoded(self)
+impl From<UrlEncodedBody> for FlUrlBody {
+    fn from(body: UrlEncodedBody) -> Self {
+        FlUrlBody::UrlEncoded(body)
     }
 }
 
-impl Into<FlUrlBody> for FormDataBody {
-    fn into(self) -> FlUrlBody {
-        FlUrlBody::FormData(self)
+impl From<FormDataBody> for FlUrlBody {
+    fn from(body: FormDataBody) -> Self {
+        FlUrlBody::FormData(body)
     }
 }

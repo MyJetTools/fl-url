@@ -9,3 +9,11 @@ impl From<hyper::header::ToStrError> for FlUrlReadingHeaderError {
         Self::CanNotConvertToUtf8(src)
     }
 }
+
+impl std::fmt::Display for FlUrlReadingHeaderError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl std::error::Error for FlUrlReadingHeaderError {}

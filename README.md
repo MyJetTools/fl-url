@@ -598,7 +598,7 @@ let response = FlUrl::new("ssh://user@ssh.example.com:22->http://localhost:8080/
 ## Unix Socket Support (Unix systems only)
 
 ```rust
-let response = FlUrl::new("unix:///var/run/docker.sock")
+let response = FlUrl::new("http+unix:///var/run/docker.sock")
     .append_path_segment("containers")
     .append_path_segment("json")
     .get()

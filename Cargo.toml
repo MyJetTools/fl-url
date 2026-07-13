@@ -7,6 +7,10 @@ edition = "2021"
 [features]
 default = ["with-ssh"]
 with-ssh = ["dep:my-ssh"]
+# Enables accept_invalid_certificate(). Dangerous: disables TLS server-cert
+# verification. Off by default; without it accept_invalid_certificate() errors at
+# connect time instead of silently downgrading security.
+dangerous-tls = ["my-tls/dangerous-tls"]
 
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html

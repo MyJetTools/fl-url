@@ -12,6 +12,7 @@ pub struct HttpsConnector {
     pub remote_host: RemoteEndpointOwned,
     pub server_name: String,
     pub client_certificate: Option<ClientCertificate>,
+    pub accept_invalid_certificate: bool,
     h2: bool,
 }
 
@@ -20,12 +21,14 @@ impl HttpsConnector {
         remote_host: RemoteEndpointOwned,
         server_name: String,
         client_certificate: Option<ClientCertificate>,
+        accept_invalid_certificate: bool,
         h2: bool,
     ) -> Self {
         Self {
             remote_host,
             server_name,
             client_certificate,
+            accept_invalid_certificate,
             h2,
         }
     }
@@ -48,7 +51,10 @@ impl MyHttpClientConnector<TlsStream<TcpStream>> for HttpsConnector {
 
         let tcp_stream = connect_result.unwrap();
 
-        let client_config = my_tls::create_tls_client_config(&self.client_certificate);
+        let client_config = my_tls::create_tls_client_config_ex(
+            &self.client_certificate,
+            self.accept_invalid_certificate,
+        );
 
         if let Err(err) = client_config {
             return Err(
@@ -67,10 +73,19 @@ impl MyHttpClientConnector<TlsStream<TcpStream>> for HttpsConnector {
 
         let connector = TlsConnector::from(Arc::new(client_config));
 
-        let server_name = my_tls::tokio_rustls::rustls::pki_types::ServerName::try_from(
+        let server_name = match my_tls::tokio_rustls::rustls::pki_types::ServerName::try_from(
             self.server_name.to_string(),
-        )
-        .unwrap();
+        ) {
+            Ok(server_name) => server_name,
+            Err(err) => {
+                return Err(
+                    my_http_client::MyHttpClientError::CanNotConnectToRemoteHost(format!(
+                        "Invalid TLS server name '{}'. Err:{}",
+                        self.server_name, err
+                    )),
+                );
+            }
+        };
 
         match connector.connect(server_name, tcp_stream).await {
             Ok(tls_stream) => Ok(tls_stream),
@@ -92,9 +107,9 @@ impl MyHttpClientConnector<TlsStream<TcpStream>> for HttpsConnector {
     }
 
     fn reunite(
-        _read: tokio::io::ReadHalf<TlsStream<TcpStream>>,
-        _write: tokio::io::WriteHalf<TlsStream<TcpStream>>,
+        read: tokio::io::ReadHalf<TlsStream<TcpStream>>,
+        write: tokio::io::WriteHalf<TlsStream<TcpStream>>,
     ) -> TlsStream<TcpStream> {
-        panic!("Would implement this if upgrade fl-url to support WebSockets")
+        read.unsplit(write)
     }
 }
