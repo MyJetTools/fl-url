@@ -19,6 +19,9 @@ pub enum FlUrlError {
     ReadingHyperBodyError(String),
     InvalidUrl(String),
     UnsupportedScheme(String),
+    /// A `url_utils` request model failed to build (e.g. a field validator
+    /// rejected its value) inside `FlUrl::execute_request`.
+    RequestBuild(String),
 }
 
 impl FlUrlError {
@@ -104,5 +107,11 @@ impl From<std::io::Error> for FlUrlError {
 impl From<hyper::http::Error> for FlUrlError {
     fn from(src: hyper::http::Error) -> Self {
         Self::HttpError(src)
+    }
+}
+
+impl From<url_utils::schema::client::HttpRequestBuildError> for FlUrlError {
+    fn from(src: url_utils::schema::client::HttpRequestBuildError) -> Self {
+        Self::RequestBuild(format!("{}: {}", src.field, src.reason))
     }
 }

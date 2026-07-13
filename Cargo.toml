@@ -1,6 +1,6 @@
 [package]
 name = "flurl"
-version = "0.6.1"
+version = "0.7.0"
 authors = ["Andrey <amigin@gmail.com>"]
 edition = "2021"
 
@@ -30,7 +30,7 @@ lazy_static = "*"
 async-trait = "*"
 bytes = "*"
 
-url-utils = { tag = "0.1.4", git = "https://github.com/MyJetTools/url-utils.git" }
+url-utils = { tag = "0.2.0", git = "https://github.com/MyJetTools/url-utils.git" }
 
 serde = { version = "*", features = ["derive"] }
 serde_json = { version = "*" }

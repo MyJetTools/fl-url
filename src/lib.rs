@@ -14,7 +14,7 @@ mod into_fl_url;
 mod my_http_client_wrapper;
 
 pub use fl_response::*;
-pub use fl_url::{FlUrl, FlUrlMode};
+pub use fl_url::{FlUrl, FlUrlMode, HttpVerb};
 pub use http_clients_cache::*;
 pub use into_fl_url::*;
 //mod url_builder_owned;

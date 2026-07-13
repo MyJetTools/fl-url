@@ -65,3 +65,11 @@ impl FlUrlHeaders {
         &self.headers
     }
 }
+
+/// Lets a `url_utils` request model (`#[derive(MyHttpInput)]`) push its header
+/// fields straight into our header collection during `execute_request`.
+impl url_utils::schema::client::HeaderBuilder for FlUrlHeaders {
+    fn add_header(&mut self, name: &str, value: &str) {
+        self.add(name, value);
+    }
+}

@@ -17,7 +17,7 @@ use std::time::Duration;
 use tokio::net::TcpStream;
 
 use super::FlUrlResponse;
-use crate::body::FlUrlBody;
+use crate::body::HttpRequestBody;
 use crate::compiled_http_request::CompiledHttpRequest;
 use crate::http_connectors::*;
 
@@ -51,6 +51,17 @@ impl Default for FlUrlMode {
     fn default() -> Self {
         Self::Http1Hyper
     }
+}
+
+/// HTTP verb selector for [`FlUrl::execute_request`].
+#[derive(Clone, Copy, Debug)]
+pub enum HttpVerb {
+    Get,
+    Post,
+    Put,
+    Patch,
+    Delete,
+    Head,
 }
 
 pub struct FlUrl {
@@ -367,6 +378,50 @@ impl FlUrl {
         self
     }
 
+    /// Pours a `url_utils` request model into this `FlUrl`: the model appends its
+    /// path segments + query params to our `url_builder`, pushes its header fields
+    /// into our `headers`, and hands over its body (which it consumes). The base
+    /// host and any static route prefix must already be configured on `self`.
+    fn fill_from_model(
+        &mut self,
+        model: impl url_utils::schema::client::THttpRequestBuilder,
+    ) -> Result<HttpRequestBody, FlUrlError> {
+        model.fill_url(&mut self.url_builder)?;
+        model.fill_headers(&mut self.headers)?;
+        // `get_body` consumes the model, so it must be the last thing we read.
+        // The body is our own `HttpRequestBody` already — no conversion needed;
+        // `compile_*_request` reads its (possibly dynamic, e.g. FormData boundary)
+        // content type via `get_content_type()`. `FlUrlRnd` supplies the random
+        // multipart boundary suffix (url-utils carries no RNG of its own).
+        let body = model.get_body::<crate::body::FlUrlRnd>()?;
+        Ok(body)
+    }
+
+    /// Executes an HTTP request described by a `url_utils` request model (any type
+    /// deriving `url_utils::macros::MyHttpInput`). The model fills the URL
+    /// path/query, headers, and body; `verb` selects the method. The base host and
+    /// any static route prefix are configured on `self` beforehand via the usual
+    /// builder methods (`append_path_segment`, `with_header`, …).
+    ///
+    /// `Get`/`Delete`/`Head` do not carry a body, so a body produced by the model
+    /// is ignored for those verbs.
+    pub async fn execute_request(
+        mut self,
+        verb: HttpVerb,
+        model: impl url_utils::schema::client::THttpRequestBuilder,
+    ) -> Result<FlUrlResponse, FlUrlError> {
+        let body = self.fill_from_model(model)?;
+
+        match verb {
+            HttpVerb::Get => self.get().await,
+            HttpVerb::Delete => self.delete().await,
+            HttpVerb::Head => self.head().await,
+            HttpVerb::Post => self.post(body).await,
+            HttpVerb::Put => self.put(body).await,
+            HttpVerb::Patch => self.patch(body).await,
+        }
+    }
+
     async fn execute(self, request: CompiledHttpRequest) -> Result<FlUrlResponse, FlUrlError> {
         #[cfg(all(unix, feature = "with-ssh"))]
         if self.ssh_credentials.is_some() {
@@ -537,7 +592,7 @@ impl FlUrl {
     fn compile_request(
         &mut self,
         method: Method,
-        body: FlUrlBody,
+        body: HttpRequestBody,
         debug: Option<&mut String>,
     ) -> Result<CompiledHttpRequest, FlUrlError> {
         let result = match self.mode {
@@ -561,7 +616,7 @@ impl FlUrl {
     fn compile_hyper_request(
         &mut self,
         method: Method,
-        body: FlUrlBody,
+        body: HttpRequestBody,
         debug: Option<&mut String>,
     ) -> Result<my_http_client::http::request::Request<Full<Bytes>>, FlUrlError> {
         if let Some(content_type) = body.get_content_type() {
@@ -647,7 +702,7 @@ impl FlUrl {
     fn compile_non_hyper_request(
         &mut self,
         method: Method,
-        body: FlUrlBody,
+        body: HttpRequestBody,
         debug: Option<&mut String>,
     ) -> Result<my_http_client::http1::MyHttpRequest, FlUrlError> {
         if let Some(content_type) = body.get_content_type() {
@@ -692,7 +747,7 @@ impl FlUrl {
     }
 
     pub async fn get(mut self) -> Result<FlUrlResponse, FlUrlError> {
-        let request = self.compile_request(Method::GET, FlUrlBody::Empty, None)?;
+        let request = self.compile_request(Method::GET, HttpRequestBody::Empty, None)?;
         self.execute(request).await
     }
 
@@ -701,23 +756,23 @@ impl FlUrl {
         request_debug_string: &mut String,
     ) -> Result<FlUrlResponse, FlUrlError> {
         let request =
-            self.compile_request(Method::GET, FlUrlBody::Empty, Some(request_debug_string))?;
+            self.compile_request(Method::GET, HttpRequestBody::Empty, Some(request_debug_string))?;
         self.execute(request).await
     }
 
     pub async fn head(mut self) -> Result<FlUrlResponse, FlUrlError> {
-        let request = self.compile_request(Method::HEAD, FlUrlBody::Empty, None)?;
+        let request = self.compile_request(Method::HEAD, HttpRequestBody::Empty, None)?;
         self.execute(request).await
     }
 
-    pub async fn post(mut self, body: impl Into<FlUrlBody>) -> Result<FlUrlResponse, FlUrlError> {
+    pub async fn post(mut self, body: impl Into<HttpRequestBody>) -> Result<FlUrlResponse, FlUrlError> {
         let request = self.compile_request(Method::POST, body.into(), None)?;
         self.execute(request).await
     }
 
     pub async fn post_with_debug(
         mut self,
-        body: impl Into<FlUrlBody>,
+        body: impl Into<HttpRequestBody>,
         request_debug_string: &mut String,
     ) -> Result<FlUrlResponse, FlUrlError> {
         let body = body.into();
@@ -731,13 +786,13 @@ impl FlUrl {
         mut self,
         json: &impl serde::Serialize,
     ) -> Result<FlUrlResponse, FlUrlError> {
-        let body = FlUrlBody::try_as_json(json)?;
+        let body = HttpRequestBody::try_as_json(json)?;
         let request = self.compile_request(Method::POST, body, None)?;
 
         self.execute(request).await
     }
 
-    pub async fn patch(mut self, body: impl Into<FlUrlBody>) -> Result<FlUrlResponse, FlUrlError> {
+    pub async fn patch(mut self, body: impl Into<HttpRequestBody>) -> Result<FlUrlResponse, FlUrlError> {
         let request = self.compile_request(Method::PATCH, body.into(), None)?;
         self.execute(request).await
     }
@@ -747,13 +802,13 @@ impl FlUrl {
         mut self,
         json: &impl serde::Serialize,
     ) -> Result<FlUrlResponse, FlUrlError> {
-        let body = FlUrlBody::try_as_json(json)?;
+        let body = HttpRequestBody::try_as_json(json)?;
         let request = self.compile_request(Method::PATCH, body, None)?;
 
         self.execute(request).await
     }
 
-    pub async fn put(mut self, body: impl Into<FlUrlBody>) -> Result<FlUrlResponse, FlUrlError> {
+    pub async fn put(mut self, body: impl Into<HttpRequestBody>) -> Result<FlUrlResponse, FlUrlError> {
         let request = self.compile_request(Method::PUT, body.into(), None)?;
         self.execute(request).await
     }
@@ -763,13 +818,13 @@ impl FlUrl {
         mut self,
         json: &impl serde::Serialize,
     ) -> Result<FlUrlResponse, FlUrlError> {
-        let body = FlUrlBody::try_as_json(json)?;
+        let body = HttpRequestBody::try_as_json(json)?;
         let request = self.compile_request(Method::PUT, body, None)?;
         self.execute(request).await
     }
 
     pub async fn delete(mut self) -> Result<FlUrlResponse, FlUrlError> {
-        let request = self.compile_request(Method::DELETE, FlUrlBody::Empty, None)?;
+        let request = self.compile_request(Method::DELETE, HttpRequestBody::Empty, None)?;
         self.execute(request).await
     }
 
@@ -778,7 +833,7 @@ impl FlUrl {
         request_debug_string: &mut String,
     ) -> Result<FlUrlResponse, FlUrlError> {
         let request =
-            self.compile_request(Method::DELETE, FlUrlBody::Empty, Some(request_debug_string))?;
+            self.compile_request(Method::DELETE, HttpRequestBody::Empty, Some(request_debug_string))?;
         self.execute(request).await
     }
     fn compile_debug_info(&self, out: &mut String) {
@@ -990,5 +1045,102 @@ mod test {
         let resp = fl_url_resp.get_body_as_slice().await.unwrap();
 
         println!("{}", resp.len());
+    }
+
+    #[test]
+    fn execute_request_fills_url_headers_and_body_from_model() {
+        use url_utils::macros::MyHttpInput;
+
+        #[derive(MyHttpInput)]
+        struct CreateUser {
+            #[http_path(name = "orgId", description = "")]
+            org_id: String,
+            #[http_query(name = "notify", description = "")]
+            notify: bool,
+            #[http_header(name = "X-Api-Key", description = "")]
+            api_key: String,
+            #[http_body(name = "name", description = "")]
+            name: String,
+        }
+
+        let model = CreateUser {
+            org_id: "org-42".to_string(),
+            notify: true,
+            api_key: "secret".to_string(),
+            name: "John".to_string(),
+        };
+
+        // Base host + static route prefix set by the caller, model fills the rest.
+        let mut fl_url = FlUrl::new("https://api.example.com")
+            .append_path_segment("api")
+            .append_path_segment("users");
+
+        let body = fl_url.fill_from_model(model).unwrap();
+
+        // Static prefix + model path segment + model query param.
+        assert_eq!(
+            fl_url.url_builder.get_path_and_query(),
+            "/api/users/org-42?notify=true"
+        );
+
+        // Model header field landed in FlUrlHeaders.
+        assert!(fl_url
+            .headers
+            .iter()
+            .any(|(name, value)| name == "X-Api-Key" && value == "secret"));
+
+        // Body field serialized to JSON.
+        match body {
+            crate::body::HttpRequestBody::Json(bytes) => {
+                let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+                assert_eq!(json["name"], "John");
+            }
+            _ => panic!("expected a JSON body"),
+        }
+    }
+
+    #[test]
+    fn execute_request_builds_multipart_body_with_random_boundary() {
+        use url_utils::macros::MyHttpInput;
+
+        // A form-data model is the only path where `FlUrlRnd` is actually used:
+        // it supplies the random `multipart/form-data` boundary suffix.
+        #[derive(MyHttpInput)]
+        struct UploadForm {
+            #[http_form_data(name = "title", description = "")]
+            title: String,
+            #[http_form_data(name = "count", description = "")]
+            count: i32,
+        }
+
+        let model = UploadForm {
+            title: "MyTitle".to_string(),
+            count: 5,
+        };
+
+        let mut fl_url = FlUrl::new("https://api.example.com").append_path_segment("upload");
+
+        let body = fl_url.fill_from_model(model).unwrap();
+
+        // The model yields a FormData body, and its content type carries the
+        // random boundary generated via `FlUrlRnd`.
+        let content_type = body.get_content_type().unwrap().as_str().to_string();
+        assert!(content_type.starts_with("multipart/form-data; boundary="));
+
+        let boundary = content_type
+            .split("boundary=")
+            .nth(1)
+            .expect("content type must carry a boundary");
+        // A non-empty random suffix was appended to the fixed boundary prefix.
+        assert!(boundary.len() > "------DataFormBoundary".len());
+
+        // The very boundary advertised in the content type delimits the body
+        // bytes — i.e. the random string flowed all the way through.
+        let text = String::from_utf8(body.into_vec()).unwrap();
+        assert!(text.contains(boundary));
+        assert!(text.contains("name=\"title\""));
+        assert!(text.contains("MyTitle"));
+        assert!(text.contains("name=\"count\""));
+        assert!(text.contains('5'));
     }
 }

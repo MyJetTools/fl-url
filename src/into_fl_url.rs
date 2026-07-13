@@ -1,6 +1,6 @@
 use rust_extensions::StrOrString;
 
-use crate::{body::FlUrlBody, FlUrl, FlUrlError, FlUrlResponse};
+use crate::{body::HttpRequestBody, FlUrl, FlUrlError, FlUrlResponse};
 
 #[async_trait::async_trait]
 pub trait IntoFlUrl {
@@ -20,8 +20,8 @@ pub trait IntoFlUrl {
     fn append_raw_ending_to_url<'s>(self, raw: impl Into<StrOrString<'s>>) -> FlUrl;
 
     async fn get(self) -> Result<FlUrlResponse, FlUrlError>;
-    async fn post(self, body: FlUrlBody) -> Result<FlUrlResponse, FlUrlError>;
-    async fn put(self, body: FlUrlBody) -> Result<FlUrlResponse, FlUrlError>;
+    async fn post(self, body: HttpRequestBody) -> Result<FlUrlResponse, FlUrlError>;
+    async fn put(self, body: HttpRequestBody) -> Result<FlUrlResponse, FlUrlError>;
 
     async fn delete(self) -> Result<FlUrlResponse, FlUrlError>;
     async fn head(self) -> Result<FlUrlResponse, FlUrlError>;
@@ -61,11 +61,11 @@ impl<'g> IntoFlUrl for &'g str {
         FlUrl::new(self).head().await
     }
 
-    async fn post(self, body: FlUrlBody) -> Result<FlUrlResponse, FlUrlError> {
+    async fn post(self, body: HttpRequestBody) -> Result<FlUrlResponse, FlUrlError> {
         FlUrl::new(self).post(body).await
     }
 
-    async fn put(self, body: FlUrlBody) -> Result<FlUrlResponse, FlUrlError> {
+    async fn put(self, body: HttpRequestBody) -> Result<FlUrlResponse, FlUrlError> {
         FlUrl::new(self).put(body).await
     }
 
@@ -108,11 +108,11 @@ impl<'g> IntoFlUrl for &'g String {
         FlUrl::new(self).head().await
     }
 
-    async fn post(self, body: FlUrlBody) -> Result<FlUrlResponse, FlUrlError> {
+    async fn post(self, body: HttpRequestBody) -> Result<FlUrlResponse, FlUrlError> {
         FlUrl::new(self).post(body).await
     }
 
-    async fn put(self, body: FlUrlBody) -> Result<FlUrlResponse, FlUrlError> {
+    async fn put(self, body: HttpRequestBody) -> Result<FlUrlResponse, FlUrlError> {
         FlUrl::new(self).put(body).await
     }
 
@@ -155,11 +155,11 @@ impl IntoFlUrl for String {
         FlUrl::new(self).head().await
     }
 
-    async fn post(self, body: FlUrlBody) -> Result<FlUrlResponse, FlUrlError> {
+    async fn post(self, body: HttpRequestBody) -> Result<FlUrlResponse, FlUrlError> {
         FlUrl::new(self).post(body).await
     }
 
-    async fn put(self, body: FlUrlBody) -> Result<FlUrlResponse, FlUrlError> {
+    async fn put(self, body: HttpRequestBody) -> Result<FlUrlResponse, FlUrlError> {
         FlUrl::new(self).put(body).await
     }
 

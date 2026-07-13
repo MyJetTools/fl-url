@@ -108,9 +108,9 @@ println!("Request: {}", debug_string);
 ### POST
 
 ```rust
-use flurl::body::FlUrlBody;
+use flurl::body::HttpRequestBody;
 
-let body = FlUrlBody::as_json(&my_data);
+let body = HttpRequestBody::as_json(&my_data);
 let response = FlUrl::new("https://api.example.com/users")
     .post(body)
     .await?;
@@ -120,7 +120,7 @@ let response = FlUrl::new("https://api.example.com/users")
 
 ```rust
 let mut debug_string = String::new();
-let body = FlUrlBody::as_json(&my_data);
+let body = HttpRequestBody::as_json(&my_data);
 let response = FlUrl::new("https://api.example.com/users")
     .post_with_debug(body, &mut debug_string)
     .await?;
@@ -129,7 +129,7 @@ let response = FlUrl::new("https://api.example.com/users")
 ### PUT
 
 ```rust
-let body = FlUrlBody::as_json(&update_data);
+let body = HttpRequestBody::as_json(&update_data);
 let response = FlUrl::new("https://api.example.com/users/123")
     .put(body)
     .await?;
@@ -138,7 +138,7 @@ let response = FlUrl::new("https://api.example.com/users/123")
 ### PATCH
 
 ```rust
-let body = FlUrlBody::as_json(&patch_data);
+let body = HttpRequestBody::as_json(&patch_data);
 let response = FlUrl::new("https://api.example.com/users/123")
     .patch(body)
     .await?;
@@ -221,7 +221,7 @@ let response = FlUrl::new("https://api.example.com/data")
 ### JSON Body
 
 ```rust
-use flurl::body::FlUrlBody;
+use flurl::body::HttpRequestBody;
 use serde::Serialize;
 
 #[derive(Serialize)]
@@ -236,7 +236,7 @@ let user = User {
 };
 
 let response = FlUrl::new("https://api.example.com/users")
-    .post(FlUrlBody::as_json(&user))
+    .post(HttpRequestBody::as_json(&user))
     .await?;
 ```
 
@@ -258,10 +258,10 @@ let response = FlUrl::new("https://api.example.com/login")
 ### Multipart Form Data
 
 ```rust
-use flurl::body::FormDataBody;
+use flurl::body::new_form_data;
 
-// Form fields
-let form_data = FormDataBody::new()
+// Form fields (`new_form_data()` generates a random multipart boundary)
+let form_data = new_form_data()
     .append_form_data_field("username", "john")
     .append_form_data_field("email", "john@example.com");
 
@@ -270,7 +270,7 @@ let response = FlUrl::new("https://api.example.com/profile")
     .await?;
 
 // Form with file upload
-let form_data = FormDataBody::new()
+let form_data = new_form_data()
     .append_form_data_field("title", "My Document")
     .append_form_data_file("file", "document.pdf", "application/pdf", file_bytes);
 
@@ -282,10 +282,10 @@ let response = FlUrl::new("https://api.example.com/upload")
 ### Raw Body
 
 ```rust
-use flurl::body::FlUrlBody;
+use flurl::body::HttpRequestBody;
 
 let raw_data = b"custom binary data";
-let body = FlUrlBody::from_raw_data(raw_data.to_vec(), Some("application/octet-stream"));
+let body = HttpRequestBody::from_raw_data(raw_data.to_vec(), Some("application/octet-stream"));
 
 let response = FlUrl::new("https://api.example.com/upload")
     .post(body)
@@ -641,7 +641,7 @@ let response = FlUrl::new("https://api.example.com/data")
 ### Request Compression
 
 ```rust
-let body = FlUrlBody::as_json(&large_data);
+let body = HttpRequestBody::as_json(&large_data);
 let response = FlUrl::new("https://api.example.com/data")
     .compress() // Automatically gzip compress body if > 64 bytes
     .post(body)
@@ -661,7 +661,7 @@ let response = FlUrl::new("https://api.example.com/data")
 
 ```rust
 let mut debug_string = String::new();
-let body = FlUrlBody::as_json(&my_data);
+let body = HttpRequestBody::as_json(&my_data);
 let response = FlUrl::new("https://api.example.com/data")
     .post_with_debug(body, &mut debug_string)
     .await?;
@@ -701,7 +701,7 @@ match FlUrl::new("https://api.example.com/data").get().await {
 ### Complete Example: API Client
 
 ```rust
-use flurl::{FlUrl, body::FlUrlBody};
+use flurl::{FlUrl, body::HttpRequestBody};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize)]
@@ -726,7 +726,7 @@ async fn create_user(name: &str, email: &str) -> Result<User, Box<dyn std::error
     let mut response = FlUrl::new("https://api.example.com")
         .append_path_segment("users")
         .with_header("Authorization", "Bearer token123")
-        .post(FlUrlBody::as_json(&user_data))
+        .post(HttpRequestBody::as_json(&user_data))
         .await?;
     
     let user: User = response.get_json().await?;
