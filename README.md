@@ -96,6 +96,29 @@ Futures returned under wasm are `!Send` (the browser is single-threaded), so dri
 them with `wasm_bindgen_futures::spawn_local` / your framework's async context
 rather than `tokio::spawn`. The `.await` call sites are unchanged.
 
+### Relative URLs (origin resolution, wasm-only)
+
+Under wasm you can pass a **root-relative** URL — anything that does not start with
+`http://` or `https://`, e.g. `/api/users` — and FlUrl resolves it against the
+current page (or web-worker) origin before the request, exactly the way the browser
+resolves a relative `fetch`:
+
+```rust
+// In a page served from https://my-app.com:
+let response = FlUrl::new("/api/dashboards/v1/ab-books-compare")
+    .get()
+    .await?;
+// → GET https://my-app.com/api/dashboards/v1/ab-books-compare
+```
+
+The origin is read via `web-sys` from `Window.location` (or, in a worker,
+`WorkerGlobalScope.location`), so no base URL has to be threaded through your code.
+Absolute `http(s)://…` URLs are used as-is. The prefix is applied **before** the URL
+is parsed, so the parser always sees a well-formed absolute URL.
+
+This resolution is wasm-only: on native there is no ambient origin, so pass an
+absolute URL there.
+
 ## Basic Usage
 
 ### Simple GET Request
@@ -353,6 +376,72 @@ let response = FlUrl::new("https://api.example.com/upload")
     .post(body)
     .await?;
 ```
+
+## Model-Driven Requests
+
+Instead of wiring up the path, query, headers, and body by hand, you can describe a
+request with a `my_http_utils` model (any type deriving
+`my_http_utils::macros::MyHttpInput`) and hand it to `execute_request`. The model
+fills the URL path/query, headers, and body; the `HttpVerb` selects the method. The
+base host and any static route prefix are still configured on the builder beforehand.
+
+```rust
+use flurl::{FlUrl, HttpVerb};
+use my_http_utils::macros::MyHttpInput;
+
+#[derive(MyHttpInput)]
+struct CreateUser {
+    #[http_path(name = "orgId", description = "")]
+    org_id: String,
+    #[http_query(name = "notify", description = "")]
+    notify: bool,
+    #[http_header(name = "X-Api-Key", description = "")]
+    api_key: String,
+    #[http_body(name = "name", description = "")]
+    name: String,
+}
+
+let model = CreateUser {
+    org_id: "org-42".to_string(),
+    notify: true,
+    api_key: "secret".to_string(),
+    name: "John".to_string(),
+};
+
+// Base host + static route prefix set by the caller, the model fills the rest.
+let response = FlUrl::new("https://api.example.com")
+    .append_path_segment("api")
+    .append_path_segment("users")
+    .execute_request(HttpVerb::Post, model)
+    .await?;
+// POST https://api.example.com/api/users/org-42?notify=true
+//   X-Api-Key: secret
+//   { "name": "John" }
+```
+
+`Get`/`Delete`/`Head` do not carry a body, so a body produced by the model is
+ignored for those verbs.
+
+### Requests Without an Input Model
+
+When a request carries no input model, pass `EmptyRequestModel` instead of deriving
+a dedicated one. The URL and headers already set on the builder are used as-is, and
+body-carrying verbs (`Post`/`Put`/`Patch`) send an empty body:
+
+```rust
+use flurl::{FlUrl, EmptyRequestModel, HttpVerb};
+
+let response = FlUrl::new("https://api.example.com")
+    .append_path_segment("health")
+    .execute_request(HttpVerb::Get, EmptyRequestModel)
+    .await?;
+```
+
+`EmptyRequestModel` is a shared, transport-agnostic stub that implements
+`THttpRequestBuilder` as a no-op — it appends nothing to the URL, adds no headers,
+and produces an empty body. It is the parameter-less stand-in for `execute_request`
+on both the native and wasm backends, so you don't have to spell out a model type
+(the way a bare `None` would have forced you to) just to satisfy the signature.
 
 ## Response Handling
 

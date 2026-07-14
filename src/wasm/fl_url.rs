@@ -237,8 +237,13 @@ impl FlUrl {
         Ok(body)
     }
 
-    /// Executes an HTTP request described by a `my_http_utils` request model (any type
-    /// deriving `my_http_utils::macros::MyHttpInput`). Mirrors the native backend.
+    /// Executes an HTTP request described by a `my_http_utils` request model (any
+    /// type deriving `my_http_utils::macros::MyHttpInput`). Mirrors the native
+    /// backend.
+    ///
+    /// For a parameter-less request, pass [`crate::EmptyRequestModel`] instead of
+    /// deriving a dedicated model — the URL/headers already set on `self` are used
+    /// as-is and body-carrying verbs send an empty body.
     ///
     /// `Get`/`Delete`/`Head` do not carry a body, so a body produced by the model
     /// is ignored for those verbs.
