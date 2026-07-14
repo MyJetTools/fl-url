@@ -6,7 +6,7 @@ use rust_extensions::StrOrString;
 use my_http_utils::UrlBuilder;
 
 use crate::body::HttpRequestBody;
-use crate::wasm::fetch::execute_fetch;
+use crate::wasm::fetch::{execute_fetch, get_origin};
 use crate::wasm::{FlUrlHttpConnectionsCache, FlUrlResponse};
 use crate::{FlUrlError, FlUrlHeaders};
 
@@ -71,13 +71,24 @@ impl FlUrl {
     pub fn try_new<'s>(url: impl Into<StrOrString<'s>>) -> Result<Self, FlUrlError> {
         let url: StrOrString<'s> = url.into();
 
+        // A URL that is not an absolute `http(s)` URL (e.g. `/api/xxx`) carries no
+        // scheme/host of its own. Under wasm we resolve it against the current page
+        // (or worker) origin, the same way the browser resolves a relative `fetch`:
+        // `/api/xxx` -> `https://my-host/api/xxx`.
+        let resolved_url = if needs_origin_prefix(url.as_str()) {
+            Some(format!("{}{}", get_origin()?, url.as_str()))
+        } else {
+            None
+        };
+        let url_str = resolved_url.as_deref().unwrap_or_else(|| url.as_str());
+
         let endpoint =
-            rust_extensions::remote_endpoint::RemoteEndpointHostString::try_parse(url.as_str())
+            rust_extensions::remote_endpoint::RemoteEndpointHostString::try_parse(url_str)
                 .map_err(FlUrlError::InvalidUrl)?;
 
         let url_builder = match endpoint {
             rust_extensions::remote_endpoint::RemoteEndpointHostString::Direct(_) => {
-                UrlBuilder::new(url.as_str())
+                UrlBuilder::new(url_str)
             }
             rust_extensions::remote_endpoint::RemoteEndpointHostString::ViaSsh { .. } => {
                 return Err(FlUrlError::UnsupportedScheme(
@@ -501,6 +512,12 @@ impl FlUrl {
         }
         result
     }
+}
+
+/// True when `url` is not an absolute `http(s)` URL and therefore has to be
+/// resolved against the current origin (e.g. `/api/xxx`).
+fn needs_origin_prefix(url: &str) -> bool {
+    !(url.starts_with("http://") || url.starts_with("https://"))
 }
 
 /// Only idempotent methods are replayed by the outer retry loop, and only for

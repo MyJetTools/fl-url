@@ -1143,4 +1143,42 @@ mod test {
         assert!(text.contains("name=\"count\""));
         assert!(text.contains('5'));
     }
+
+    #[test]
+    fn execute_request_keeps_headers_added_before_it() {
+        use my_http_utils::macros::MyHttpInput;
+
+        #[derive(MyHttpInput)]
+        struct Model {
+            #[http_header(name = "X-Api-Key", description = "")]
+            api_key: String,
+            #[http_body(name = "name", description = "")]
+            name: String,
+        }
+
+        let model = Model {
+            api_key: "secret".to_string(),
+            name: "John".to_string(),
+        };
+
+        // Two headers set on the builder BEFORE the model is poured in.
+        let mut fl_url = FlUrl::new("https://api.example.com")
+            .with_header("Authorization", "Bearer token")
+            .with_header("X-Trace", "abc");
+
+        fl_url.fill_from_model(model).unwrap();
+
+        let has = |n: &str, v: &str| {
+            fl_url
+                .headers
+                .iter()
+                .any(|(name, value)| name == n && value == v)
+        };
+
+        // The headers added before execute_request/fill_from_model survive...
+        assert!(has("Authorization", "Bearer token"));
+        assert!(has("X-Trace", "abc"));
+        // ...right alongside the header field the model pushes in.
+        assert!(has("X-Api-Key", "secret"));
+    }
 }

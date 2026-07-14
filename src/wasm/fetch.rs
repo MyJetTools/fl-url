@@ -165,6 +165,27 @@ pub(crate) fn collect_headers(headers: &Headers) -> Vec<(String, String)> {
     result
 }
 
+/// Returns the current origin (e.g. `https://example.com`) of the page or worker,
+/// with any trailing slash stripped. Used to resolve a request URL that is not an
+/// absolute `http(s)` URL (e.g. `/api/xxx`) against the current origin, the same
+/// way the browser resolves a relative `fetch`.
+pub(crate) fn get_origin() -> Result<String, FlUrlError> {
+    let global = js_sys::global();
+
+    let origin = if let Some(window) = global.dyn_ref::<web_sys::Window>() {
+        window.location().origin().map_err(js_to_err)?
+    } else if let Some(scope) = global.dyn_ref::<web_sys::WorkerGlobalScope>() {
+        scope.location().origin()
+    } else {
+        return Err(FlUrlError::FetchError(
+            "global scope is neither Window nor WorkerGlobalScope; cannot resolve origin for a relative URL"
+                .to_string(),
+        ));
+    };
+
+    Ok(origin.strip_suffix('/').unwrap_or(&origin).to_string())
+}
+
 /// `fetch` lives on the global scope, which is a `Window` in a page and a
 /// `WorkerGlobalScope` in a worker — support both.
 fn fetch_promise(request: &Request) -> Result<js_sys::Promise, FlUrlError> {
