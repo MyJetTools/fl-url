@@ -15,8 +15,9 @@ FLUrl is a Hyper-based HTTP client that provides a fluent API for building and e
 - **Unix Socket Support**: Native Unix socket support (Unix systems only)
 - **Retry Logic**: Configurable retry mechanism
 - **Request Compression**: Automatic gzip compression for request bodies
-- **Streaming Responses**: Support for streaming response bodies
+- **Streaming Responses**: Support for streaming response bodies (native only)
 - **Debug Support**: Built-in request debugging capabilities
+- **WASM Support**: The same API compiles to `wasm32-unknown-unknown` (browser / web-worker) on top of the `fetch` API — see [WebAssembly (WASM) Support](#webassembly-wasm-support)
 
 ## Installation
 
@@ -33,6 +34,67 @@ For SSH tunneling support:
 [dependencies]
 flurl = { version = "0.6.1", features = ["with-ssh"] }
 ```
+
+## WebAssembly (WASM) Support
+
+`flurl` is a **single crate that compiles for both native and `wasm32`**, and the
+backend is chosen automatically by target — the public API (`FlUrl`,
+`FlUrlResponse`, `FlUrlError`, `FlUrlHeaders`, `IntoFlUrl`, `body::*`, …) is the
+same on both, so the same call sites compile everywhere:
+
+```rust
+use flurl::FlUrl;
+
+// Identical code on native and in the browser:
+let mut response = FlUrl::new("https://api.example.com")
+    .append_path_segment("users")
+    .with_header("Authorization", "Bearer token")
+    .get()
+    .await?;
+
+let users: Vec<User> = response.get_json().await?;
+```
+
+### How it is wired
+
+| Target | Backend (`cfg`) | Transport |
+| --- | --- | --- |
+| non-wasm | [`flurl::non_wasm`] — full hyper/tokio impl | HTTP/1.1 & HTTP/2, TLS, client certs, connection pooling, unix sockets, SSH |
+| `wasm32-unknown-unknown` | [`flurl::wasm`] | the browser `fetch` API via `web-sys` |
+
+Both backends alias their types to the crate root, and the shared pieces
+(`FlUrlError`, the request `body` types, the drop-connection scenario) live at the
+root and are used by both. Native-only dependencies (hyper, tokio, my-tls, …) are
+excluded from the wasm build; the wasm build pulls only `web-sys` / `wasm-bindgen`.
+
+Add it to a wasm project exactly like a normal dependency (no extra feature
+needed — the target is detected automatically):
+
+```toml
+[dependencies]
+flurl = "0.7"
+```
+
+### What differs under wasm
+
+Because the browser owns the connection pool, TLS and redirects, the following
+native knobs are kept for signature parity but are **no-ops** under wasm:
+`set_connections_cache`, `accept_invalid_certificate`, `do_not_reuse_connection`,
+`update_mode`, `accept_gzip` (the browser decompresses transparently),
+`set_not_used_connection_timeout`.
+
+These **do** work under wasm: `set_timeout` bounds the request→headers round-trip
+via `AbortController` + `setTimeout`; `set_response_body_timeout` bounds the body
+read on the same signal (unbounded by default, as on native); `with_retries`
+replays idempotent methods only; `compress` gzips the request body.
+
+Native-only surface that is **not available** under wasm (browsers can't express
+it): `with_client_certificate`, all `*_ssh_*` methods, unix-socket URLs,
+`get_body_as_stream` / `FlResponseAsStream`, and `into_hyper_response`.
+
+Futures returned under wasm are `!Send` (the browser is single-threaded), so drive
+them with `wasm_bindgen_futures::spawn_local` / your framework's async context
+rather than `tokio::spawn`. The `.await` call sites are unchanged.
 
 ## Basic Usage
 

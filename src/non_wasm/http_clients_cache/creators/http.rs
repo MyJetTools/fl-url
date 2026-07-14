@@ -4,7 +4,7 @@ use my_http_client::{http1::MyHttpClient, http1_hyper::MyHttpHyperClient, http2:
 use tokio::net::TcpStream;
 
 use crate::{
-    fl_url::FlUrlMode, http_connectors::HttpConnector, my_http_client_wrapper::MyHttpClientWrapper,
+    non_wasm::fl_url::FlUrlMode, non_wasm::http_connectors::HttpConnector, non_wasm::my_http_client_wrapper::MyHttpClientWrapper,
     ConnectionParams, FlUrlHttpConnectionsCache,
 };
 
@@ -18,7 +18,7 @@ impl HttpConnectionCreator {
         key: String,
     ) -> Arc<MyHttpClientWrapper<TcpStream, HttpConnector>> {
         let http_connector =
-            crate::http_connectors::HttpConnector::new(params.remote_endpoint.to_owned());
+            crate::non_wasm::http_connectors::HttpConnector::new(params.remote_endpoint.to_owned());
 
         match params.mode {
             FlUrlMode::H2 => Arc::new(MyHttpClientWrapper::new(

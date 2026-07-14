@@ -6,7 +6,7 @@ use my_tls::tokio_rustls::client::TlsStream;
 use tokio::net::TcpStream;
 
 use crate::{
-    fl_url::FlUrlMode, http_connectors::HttpsConnector, my_http_client_wrapper::MyHttpClientWrapper,
+    non_wasm::fl_url::FlUrlMode, non_wasm::http_connectors::HttpsConnector, non_wasm::my_http_client_wrapper::MyHttpClientWrapper,
 };
 
 use super::super::*;

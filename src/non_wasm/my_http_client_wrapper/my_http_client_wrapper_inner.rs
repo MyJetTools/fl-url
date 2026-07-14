@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use my_http_client::{http1::MyHttpResponse, MyHttpClientConnector, MyHttpClientError};
 
-use crate::compiled_http_request::CompiledHttpRequest;
+use crate::non_wasm::compiled_http_request::CompiledHttpRequest;
 
 pub enum MyHttpClientWrapperInner<
     TStream: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + Sync + 'static,

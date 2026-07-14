@@ -1,9 +1,11 @@
 #[derive(Debug)]
 pub enum FlUrlReadingHeaderError {
+    #[cfg(not(target_arch = "wasm32"))]
     CanNotConvertToUtf8(hyper::header::ToStrError),
     CanNotConvertUnixSocketHeaderToUtf8(String),
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl From<hyper::header::ToStrError> for FlUrlReadingHeaderError {
     fn from(src: hyper::header::ToStrError) -> Self {
         Self::CanNotConvertToUtf8(src)

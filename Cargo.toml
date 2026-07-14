@@ -14,34 +14,55 @@ dangerous-tls = ["my-tls/dangerous-tls"]
 
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+# Target-agnostic dependencies, shared by both the native (`non_wasm`) and the
+# `wasm` backends. Everything here must compile on wasm32-unknown-unknown.
 [dependencies]
-hyper = { version = "*", features = ["full"] }
-tokio = { version = "*", features = ["rt", "rt-multi-thread", "macros"] }
-
 rust-extensions = { tag = "0.1.5", git = "https://github.com/MyJetTools/rust-extensions.git" }
-
-hyper-util = { version = "*", features = ["tokio"] }
-
-http-body-util = { version = "*" }
-
-my-http-client = { tag = "0.1.2", git = "https://github.com/MyJetTools/my-http-client.git" }
-
-lazy_static = "*"
-async-trait = "*"
-bytes = "*"
-
-url-utils = { tag = "0.2.0", git = "https://github.com/MyJetTools/url-utils.git" }
-
+my-http-utils = { tag = "0.1.0", git = "https://github.com/MyJetTools/my-http-utils.git" }
 serde = { version = "*", features = ["derive"] }
 serde_json = { version = "*" }
+async-trait = "*"
+# Pure-Rust backend so it compiles under wasm too (used by `.compress()`).
+flate2 = { version = "*", default-features = false, features = [
+    "rust_backend",
+] }
 
-flate2 = "*"
-http = "*"
+# Native backend (`non_wasm`): hyper / tokio / TLS / connection pooling / ssh.
+# None of these compile to wasm, so they are excluded from the wasm build.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+hyper = { version = "*", features = ["full"] }
+tokio = { version = "*", features = ["rt", "rt-multi-thread", "macros"] }
+hyper-util = { version = "*", features = ["tokio"] }
+http-body-util = { version = "*" }
+my-http-client = { tag = "0.1.2", git = "https://github.com/MyJetTools/my-http-client.git" }
 my-hyper-utils = { tag = "0.1.0", git = "https://github.com/MyJetTools/my-hyper-utils.git" }
+my-tls = { tag = "0.1.5", git = "https://github.com/MyJetTools/my-tls.git" }
+http = "*"
+bytes = "*"
 rand = "*"
 parking_lot = "*"
 ahash = "*"
-my-tls = { tag = "0.1.5", git = "https://github.com/MyJetTools/my-tls.git" }
+lazy_static = "*"
 
+# wasm backend (`wasm`): the browser fetch API via web-sys.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = [
+    "Window",
+    "WorkerGlobalScope",
+    "Request",
+    "RequestInit",
+    "Response",
+    "Headers",
+    "AbortController",
+    "AbortSignal",
+    "DomException",
+    "console",
+] }
+
+# SSH is unix-only and therefore never part of the wasm build.
 [target.'cfg(unix)'.dependencies]
 my-ssh = { tag = "0.1.2", git = "https://github.com/MyJetTools/my-ssh.git", optional = true }

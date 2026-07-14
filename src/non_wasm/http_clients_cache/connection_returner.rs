@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use my_http_client::MyHttpClientConnector;
 
-use crate::my_http_client_wrapper::MyHttpClientWrapper;
+use crate::non_wasm::my_http_client_wrapper::MyHttpClientWrapper;
 
 use super::HttpConnectionResolver;
 

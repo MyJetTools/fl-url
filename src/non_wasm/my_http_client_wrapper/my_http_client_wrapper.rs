@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use my_http_client::{http1::MyHttpResponse, MyHttpClientConnector, MyHttpClientError};
 
-use crate::compiled_http_request::CompiledHttpRequest;
+use crate::non_wasm::compiled_http_request::CompiledHttpRequest;
 
 use super::*;
 

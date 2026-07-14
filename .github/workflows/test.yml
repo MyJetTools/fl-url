@@ -37,3 +37,19 @@ jobs:
 
       - name: Build on Windows (without unix-only with-ssh feature)
         run: cargo build --no-default-features
+
+  build-wasm:
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - uses: actions-rust-lang/setup-rust-toolchain@v1.15.2
+        with:
+          toolchain: stable
+          target: wasm32-unknown-unknown
+
+      # The wasm (browser fetch) backend. `--no-default-features` drops the
+      # unix-only `with-ssh` feature, which is never part of a wasm build.
+      - name: Build for wasm32 (browser fetch backend)
+        run: cargo build --target wasm32-unknown-unknown --no-default-features

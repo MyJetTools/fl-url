@@ -3,8 +3,8 @@ use std::sync::Arc;
 use my_http_client::{http1::MyHttpClient, http1_hyper::MyHttpHyperClient, http2::MyHttp2Client};
 
 use crate::{
-    fl_url::FlUrlMode, http_connectors::SshHttpConnector,
-    my_http_client_wrapper::MyHttpClientWrapper, ConnectionParams, FlUrlHttpConnectionsCache,
+    non_wasm::fl_url::FlUrlMode, non_wasm::http_connectors::SshHttpConnector,
+    non_wasm::my_http_client_wrapper::MyHttpClientWrapper, ConnectionParams, FlUrlHttpConnectionsCache,
     HttpConnectionResolver,
 };
 

@@ -1,44 +1,39 @@
-use my_http_client::{HeaderValuePosition, MyHttpClientHeadersBuilder};
-
+/// wasm counterpart of the native `FlUrlHeaders`.
+///
+/// The native version is backed by `my-http-client`'s header builder; under wasm
+/// we keep a plain `Vec` since headers are handed to the browser `Headers` object
+/// at request time. The public methods match the native ones so request-building
+/// code is portable.
 pub struct FlUrlHeaders {
-    pub(crate) headers: MyHttpClientHeadersBuilder,
+    headers: Vec<(String, String)>,
     pub has_connection_header: bool,
     pub len: usize,
-    pub host_header_value: Option<HeaderValuePosition>,
+    host_header_present: bool,
 }
 
 impl FlUrlHeaders {
     pub fn new() -> Self {
         Self {
-            headers: MyHttpClientHeadersBuilder::new(),
-
+            headers: Vec::new(),
             has_connection_header: false,
-            host_header_value: None,
             len: 0,
+            host_header_present: false,
         }
     }
 
-    /*
-       pub fn add_json_content_type(&mut self) {
-           self.headers
-               .add_header(CONTENT_TYPE.as_str(), "application/json");
-       }
-    */
     pub fn add(&mut self, name: &str, value: &str) {
-        if rust_extensions::str_utils::compare_strings_case_insensitive(name, "connection") {
+        if name.eq_ignore_ascii_case("connection") {
             self.has_connection_header = true;
         }
-
-        let pos = self.headers.add_header(name, value);
-
         if name.eq_ignore_ascii_case("host") {
-            self.host_header_value = Some(pos);
+            self.host_header_present = true;
         }
+        self.headers.push((name.to_string(), value.to_string()));
         self.len += 1;
     }
 
     pub fn has_host_header(&self) -> bool {
-        self.host_header_value.is_some()
+        self.host_header_present
     }
 
     pub fn has_header(&self, name: &str) -> bool {
@@ -48,21 +43,30 @@ impl FlUrlHeaders {
     }
 
     pub fn get_host_header_value(&self) -> Option<&str> {
-        let host_value_pos = self.host_header_value.as_ref()?;
-        let result = self.headers.get_value(host_value_pos);
-        Some(result)
+        self.headers
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("host"))
+            .map(|(_, value)| value.as_str())
     }
 
     pub fn len(&self) -> usize {
         self.len
     }
 
-    pub fn iter<'s>(&'s self) -> impl Iterator<Item = (&'s str, &'s str)> {
-        self.headers.iter()
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
     }
 
-    pub fn get_builder(&self) -> &MyHttpClientHeadersBuilder {
-        &self.headers
+    pub fn iter<'s>(&'s self) -> impl Iterator<Item = (&'s str, &'s str)> {
+        self.headers
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_str()))
+    }
+}
+
+impl Default for FlUrlHeaders {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

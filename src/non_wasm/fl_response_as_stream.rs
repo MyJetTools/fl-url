@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use http::response::Parts;
 use http_body_util::BodyExt;
-use url_utils::UrlBuilder;
+use my_http_utils::UrlBuilder;
 
 use crate::{ConnectionReturner, FlUrlError};
 

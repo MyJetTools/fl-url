@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
 use crate::{
-    fl_url::FlUrlMode,
-    http_connectors::{UnixSocketConnector, UnixSocketStream},
-    my_http_client_wrapper::MyHttpClientWrapper,
+    non_wasm::fl_url::FlUrlMode,
+    non_wasm::http_connectors::{UnixSocketConnector, UnixSocketStream},
+    non_wasm::my_http_client_wrapper::MyHttpClientWrapper,
 };
 use my_http_client::{http1::MyHttpClient, http1_hyper::MyHttpHyperClient, http2::MyHttp2Client};
 

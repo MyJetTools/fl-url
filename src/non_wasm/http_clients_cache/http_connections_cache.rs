@@ -9,7 +9,7 @@ use tokio::net::TcpStream;
 
 use my_tls::tokio_rustls::client::TlsStream;
 
-use crate::{http_connectors::*, my_http_client_wrapper::MyHttpClientWrapper, ConnectionParams};
+use crate::{non_wasm::http_connectors::*, non_wasm::my_http_client_wrapper::MyHttpClientWrapper, ConnectionParams};
 
 pub struct ConnectionItem<
     TStream: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + Sync + 'static,

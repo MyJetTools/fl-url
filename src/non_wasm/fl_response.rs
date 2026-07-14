@@ -2,10 +2,10 @@ use std::{collections::HashMap, fmt::Debug, time::Duration};
 
 use hyper::{header::CONNECTION, StatusCode};
 use serde::de::DeserializeOwned;
-use url_utils::UrlBuilder;
+use my_http_utils::UrlBuilder;
 
 use crate::{
-    fl_response_as_stream::FlResponseAsStream, ConnectionReturner, FlUrlError,
+    non_wasm::fl_response_as_stream::FlResponseAsStream, ConnectionReturner, FlUrlError,
     FlUrlReadingHeaderError, ResponseBody,
 };
 
@@ -141,7 +141,7 @@ impl FlUrlResponse {
         match returner {
             None => response,
             Some(returner) => response.map(|body| {
-                crate::escaped_body_guard::EscapedBodyGuard::new(
+                crate::non_wasm::escaped_body_guard::EscapedBodyGuard::new(
                     body,
                     returner,
                     !close_requested && !drop_by_status,

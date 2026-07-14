@@ -18,10 +18,10 @@ use tokio::net::TcpStream;
 
 use super::FlUrlResponse;
 use crate::body::HttpRequestBody;
-use crate::compiled_http_request::CompiledHttpRequest;
-use crate::http_connectors::*;
+use crate::non_wasm::compiled_http_request::CompiledHttpRequest;
+use crate::non_wasm::http_connectors::*;
 
-use crate::http_clients_cache::*;
+use crate::non_wasm::http_clients_cache::*;
 
 use crate::HttpConnectionResolver;
 
@@ -29,7 +29,7 @@ use crate::FlUrlError;
 
 use crate::FlUrlHeaders;
 
-use url_utils::UrlBuilder;
+use my_http_utils::UrlBuilder;
 
 #[derive(Debug, Clone, Copy)]
 pub enum FlUrlMode {
@@ -114,7 +114,7 @@ impl FlUrl {
                     remote_host_behind_ssh,
                 } => (
                     UrlBuilder::new(remote_host_behind_ssh.as_str()),
-                    Some(crate::ssh::to_ssh_credentials(&ssh_remote_host)),
+                    Some(crate::non_wasm::ssh::to_ssh_credentials(&ssh_remote_host)),
                 ),
             }
         };
@@ -378,13 +378,13 @@ impl FlUrl {
         self
     }
 
-    /// Pours a `url_utils` request model into this `FlUrl`: the model appends its
+    /// Pours a `my_http_utils` request model into this `FlUrl`: the model appends its
     /// path segments + query params to our `url_builder`, pushes its header fields
     /// into our `headers`, and hands over its body (which it consumes). The base
     /// host and any static route prefix must already be configured on `self`.
     fn fill_from_model(
         &mut self,
-        model: impl url_utils::schema::client::THttpRequestBuilder,
+        model: impl my_http_utils::schema::client::THttpRequestBuilder,
     ) -> Result<HttpRequestBody, FlUrlError> {
         model.fill_url(&mut self.url_builder)?;
         model.fill_headers(&mut self.headers)?;
@@ -392,13 +392,13 @@ impl FlUrl {
         // The body is our own `HttpRequestBody` already — no conversion needed;
         // `compile_*_request` reads its (possibly dynamic, e.g. FormData boundary)
         // content type via `get_content_type()`. `FlUrlRnd` supplies the random
-        // multipart boundary suffix (url-utils carries no RNG of its own).
+        // multipart boundary suffix (my-http-utils carries no RNG of its own).
         let body = model.get_body::<crate::body::FlUrlRnd>()?;
         Ok(body)
     }
 
-    /// Executes an HTTP request described by a `url_utils` request model (any type
-    /// deriving `url_utils::macros::MyHttpInput`). The model fills the URL
+    /// Executes an HTTP request described by a `my_http_utils` request model (any type
+    /// deriving `my_http_utils::macros::MyHttpInput`). The model fills the URL
     /// path/query, headers, and body; `verb` selects the method. The base host and
     /// any static route prefix are configured on `self` beforehand via the usual
     /// builder methods (`append_path_segment`, `with_header`, …).
@@ -408,7 +408,7 @@ impl FlUrl {
     pub async fn execute_request(
         mut self,
         verb: HttpVerb,
-        model: impl url_utils::schema::client::THttpRequestBuilder,
+        model: impl my_http_utils::schema::client::THttpRequestBuilder,
     ) -> Result<FlUrlResponse, FlUrlError> {
         let body = self.fill_from_model(model)?;
 
@@ -446,7 +446,7 @@ impl FlUrl {
                 if self.do_not_reuse_connection {
                     self.execute_with_retry::<TcpStream, HttpConnector>(
                         &request,
-                        Arc::new(crate::http_clients_cache::creators::HttpConnectionCreator),
+                        Arc::new(crate::non_wasm::http_clients_cache::creators::HttpConnectionCreator),
                         crate::consts::HTTP_DEFAULT_PORT.into(),
                         #[cfg(all(unix, feature = "with-ssh"))]
                         None,
@@ -468,7 +468,7 @@ impl FlUrl {
                 if self.do_not_reuse_connection {
                     self.execute_with_retry::<TlsStream<TcpStream>, HttpsConnector>(
                         &request,
-                        Arc::new(crate::http_clients_cache::creators::HttpsConnectionCreator),
+                        Arc::new(crate::non_wasm::http_clients_cache::creators::HttpsConnectionCreator),
                         crate::consts::HTTPS_DEFAULT_PORT.into(),
                         #[cfg(all(unix, feature = "with-ssh"))]
                         None,
@@ -498,7 +498,7 @@ impl FlUrl {
                 if self.do_not_reuse_connection {
                     self.execute_with_retry::<UnixSocketStream, UnixSocketConnector>(
                         &request,
-                        Arc::new(crate::http_clients_cache::creators::UnixSocketHttpClientCreator),
+                        Arc::new(crate::non_wasm::http_clients_cache::creators::UnixSocketHttpClientCreator),
                         None,
                         #[cfg(all(unix, feature = "with-ssh"))]
                         None,
@@ -538,7 +538,7 @@ impl FlUrl {
             return self
                 .execute_with_retry::<my_ssh::SshAsyncChannel, SshHttpConnector>(
                     &request,
-                    Arc::new(crate::http_clients_cache::creators::SshConnectionCreator),
+                    Arc::new(crate::non_wasm::http_clients_cache::creators::SshConnectionCreator),
                     crate::consts::HTTP_DEFAULT_PORT.into(),
                     Some(Arc::new(ssh_credentials)),
                 )
@@ -557,7 +557,7 @@ impl FlUrl {
     pub(crate) fn get_connections_cache(&self) -> Arc<FlUrlHttpConnectionsCache> {
         match self.connections_cache.as_ref() {
             Some(cache) => cache.clone(),
-            None => crate::CLIENTS_CACHED.clone(),
+            None => crate::non_wasm::CLIENTS_CACHED.clone(),
         }
     }
 
@@ -948,7 +948,7 @@ impl FlUrl {
                     // is fully consumed; the returner puts it back (or disposes
                     // it) at that point.
                     response.set_connection_returner(Box::new(
-                        crate::http_clients_cache::PooledConnectionReturner {
+                        crate::non_wasm::http_clients_cache::PooledConnectionReturner {
                             resolver: http_connection_resolver.clone(),
                             connection,
                         },
@@ -1025,7 +1025,7 @@ mod test {
     #[tokio::test]
     async fn test_h2() {
         let mut fl_url_resp = FlUrl::new("https://jetdev.eu/img/logo.png")
-            .update_mode(crate::fl_url::FlUrlMode::H2)
+            .update_mode(crate::non_wasm::fl_url::FlUrlMode::H2)
             .get()
             .await
             .unwrap();
@@ -1049,7 +1049,7 @@ mod test {
 
     #[test]
     fn execute_request_fills_url_headers_and_body_from_model() {
-        use url_utils::macros::MyHttpInput;
+        use my_http_utils::macros::MyHttpInput;
 
         #[derive(MyHttpInput)]
         struct CreateUser {
@@ -1101,7 +1101,7 @@ mod test {
 
     #[test]
     fn execute_request_builds_multipart_body_with_random_boundary() {
-        use url_utils::macros::MyHttpInput;
+        use my_http_utils::macros::MyHttpInput;
 
         // A form-data model is the only path where `FlUrlRnd` is actually used:
         // it supplies the random `multipart/form-data` boundary suffix.
