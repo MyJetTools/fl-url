@@ -901,9 +901,11 @@ impl FlUrl {
     /// wire — so `n` and the producer must come from one source (a file's metadata and
     /// that same file), never be computed twice.
     ///
-    /// `content_length` wins over a `Content-Length` added with [`Self::with_header`];
-    /// the manual one is dropped rather than emitted twice, which would be a protocol
-    /// violation.
+    /// `content_length` is the single source of the framing, so it overrides a
+    /// `Content-Length` added with [`Self::with_header`] in both directions: `Some(n)`
+    /// replaces such a header (never emits a second one, which would be a protocol
+    /// violation), and `None` removes it, because a body of unknown size must not
+    /// claim a length it may not deliver.
     ///
     /// Three builder knobs do not apply, and none of them fails quietly:
     ///
@@ -931,9 +933,10 @@ impl FlUrl {
 
         self.mode = FlUrlMode::Http1Hyper;
 
-        let request = self.compile_streamed_request(method, body, content_length)?;
+        let request = self.compile_streamed_request(method, body)?;
 
-        self.execute(RequestToExecute::streamed(request)).await
+        self.execute(RequestToExecute::streamed(request, content_length))
+            .await
     }
 
     /// Builds the request head for [`Self::execute_streamed`] and erases the body to
@@ -945,7 +948,6 @@ impl FlUrl {
         &mut self,
         method: Method,
         body: TBody,
-        content_length: Option<usize>,
     ) -> Result<my_http_client::HyperRequest, FlUrlError>
     where
         TBody: hyper::body::Body<Data = Bytes> + Send + Sync + 'static,
@@ -960,22 +962,7 @@ impl FlUrl {
             .uri(path_and_query);
 
         for (key, value) in self.headers.iter() {
-            // The `content_length` argument is authoritative: a manually added
-            // Content-Length is dropped instead of ending up on the wire twice, which
-            // is a protocol violation rather than a merely confusing header list.
-            if content_length.is_some() && key.eq_ignore_ascii_case("content-length") {
-                continue;
-            }
             result = result.header(key, value);
-        }
-
-        // hyper frames the body from this header when it is present, and falls back to
-        // chunked (a streamed body reports no size hint) when it is not.
-        if let Some(content_length) = content_length {
-            result = result.header(
-                hyper::header::CONTENT_LENGTH.as_str(),
-                content_length.to_string(),
-            );
         }
 
         if !self.headers.has_host_header() {
@@ -1177,10 +1164,14 @@ impl FlUrl {
                 RequestToExecute::Compiled(request) => {
                     connection.do_request(request, request_timeout).await
                 }
-                RequestToExecute::Streamed { request, .. } => match request.take() {
+                RequestToExecute::Streamed {
+                    request,
+                    content_size,
+                    ..
+                } => match request.take() {
                     Some(request) => {
                         connection
-                            .do_streamed_request(request, request_timeout)
+                            .do_streamed_request(request, *content_size, request_timeout)
                             .await
                     }
                     // Unreachable while max_retries is pinned to 0 above; kept as an

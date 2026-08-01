@@ -451,8 +451,10 @@ ends early therefore fails the request with `"user body write aborted"` instead 
 leaving a truncated payload behind — so `n` and the producer have to come from one
 source (a file's metadata and that same file), never be computed twice.
 
-The argument wins over a `Content-Length` added with `with_header`; the manual one is
-dropped rather than emitted twice.
+The argument is the single source of the framing, so it overrides a `Content-Length`
+added with `with_header` in **both** directions: `Some(n)` replaces such a header
+(never emits a second one, which would be a protocol violation), and `None` removes
+it — a body of unknown size must not claim a length it may not deliver.
 
 #### What does not apply to a streamed body
 

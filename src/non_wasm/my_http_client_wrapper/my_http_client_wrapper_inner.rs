@@ -75,12 +75,13 @@ impl<
     pub async fn do_streamed_request(
         &self,
         request: my_http_client::HyperRequest,
+        content_size: Option<usize>,
         request_timeout: Duration,
     ) -> Result<MyHttpResponse<TStream>, MyHttpClientError> {
         match self {
             Self::Hyper(my_http_client) => {
                 let result = my_http_client
-                    .do_streamed_request(request, request_timeout)
+                    .do_streamed_request(request, content_size, request_timeout)
                     .await?;
 
                 match result {

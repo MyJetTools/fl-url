@@ -11,18 +11,24 @@ pub enum RequestToExecute {
     /// The body is produced as a stream and is consumed while it is being sent, so
     /// there is nothing left to replay — this one is a single shot. `request` is
     /// `None` once it has been handed to the client.
+    ///
+    /// `content_size` is the framing, and my-http-client is what applies it: `Some(n)`
+    /// puts `Content-Length: n` on the request, `None` strips any content-length and
+    /// lets it go out chunked. fl-url only carries the choice here.
     Streamed {
         request: Option<my_http_client::HyperRequest>,
         method: Method,
+        content_size: Option<usize>,
     },
 }
 
 impl RequestToExecute {
-    pub fn streamed(request: my_http_client::HyperRequest) -> Self {
+    pub fn streamed(request: my_http_client::HyperRequest, content_size: Option<usize>) -> Self {
         let method = request.method().clone();
         Self::Streamed {
             request: Some(request),
             method,
+            content_size,
         }
     }
 

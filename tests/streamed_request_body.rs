@@ -229,8 +229,11 @@ async fn streamed_post_puts_the_payload_on_the_wire_chunked() {
     assert!(received.body_is_all_x, "the payload was corrupted on the way");
 }
 
-#[tokio::test]
-async fn streamed_post_keeps_memory_flat_regardless_of_the_body_size() {
+/// Both framings read and write the payload in pieces — that is what keeps memory
+/// flat. Chunked wraps every piece in its own size prefix; `Content-Length` puts the
+/// bytes on the wire bare. The envelope is the only difference, so neither may grow
+/// with the size of the body.
+async fn stream_a_large_body_and_measure_rss(content_length: Option<usize>) -> u64 {
     // 256 MiB: enough that materializing it would be plainly visible in RSS, and far
     // past the assertion threshold below.
     const CHUNKS: usize = 4096;
@@ -250,7 +253,7 @@ async fn streamed_post_keeps_memory_flat_regardless_of_the_body_size() {
         .append_path_segment("upload")
         .do_not_reuse_connection()
         .set_timeout(Duration::from_secs(600))
-        .post_request_streamed(body, None)
+        .post_request_streamed(body, content_length)
         .await
         .unwrap();
 
@@ -262,6 +265,19 @@ async fn streamed_post_keeps_memory_flat_regardless_of_the_body_size() {
     let received = server.await.unwrap();
     assert_eq!(received.body_len, TOTAL);
 
+    // The framing each case was supposed to produce actually reached the wire, so a
+    // silent fallback can not make one of these two measurements meaningless.
+    match content_length {
+        Some(len) => {
+            assert_eq!(received.header("content-length"), Some(len.to_string().as_str()));
+            assert!(!received.has_header("transfer-encoding"));
+        }
+        None => {
+            assert_eq!(received.header("transfer-encoding"), Some("chunked"));
+            assert!(!received.has_header("content-length"));
+        }
+    }
+
     // The publisher is allowed 4 chunks of run-ahead, the socket holds one more, so
     // the whole transfer should cost a few hundred KiB of payload buffers. 64 MiB is
     // a quarter of the body — well clear of the noise of a test process, and nowhere
@@ -269,8 +285,9 @@ async fn streamed_post_keeps_memory_flat_regardless_of_the_body_size() {
     if let (Some(before), Some(after)) = (rss_before, rss_after) {
         let growth = after.saturating_sub(before);
         println!(
-            "streamed {} MiB, RSS grew by {} KiB",
+            "streamed {} MiB as {}, RSS grew by {} KiB",
             TOTAL / (1024 * 1024),
+            if content_length.is_some() { "content-length" } else { "chunked" },
             growth / 1024
         );
         assert!(
@@ -280,6 +297,19 @@ async fn streamed_post_keeps_memory_flat_regardless_of_the_body_size() {
             TOTAL
         );
     }
+
+    TOTAL as u64
+}
+
+#[tokio::test]
+async fn chunked_keeps_memory_flat_regardless_of_the_body_size() {
+    stream_a_large_body_and_measure_rss(None).await;
+}
+
+#[tokio::test]
+async fn content_length_keeps_memory_flat_regardless_of_the_body_size() {
+    let total = stream_a_large_body_and_measure_rss(Some(4096 * CHUNK_SIZE)).await;
+    assert_eq!(total, (4096 * CHUNK_SIZE) as u64);
 }
 
 #[tokio::test]
@@ -535,4 +565,44 @@ async fn the_content_length_argument_wins_over_a_manually_added_header() {
         Some(TOTAL.to_string().as_str())
     );
     assert_eq!(received.body_len, TOTAL);
+}
+
+#[tokio::test]
+async fn a_none_length_strips_a_manually_added_content_length() {
+    // The argument is the single source of the framing, so `None` does not merely
+    // "not add" a Content-Length — it removes one the caller left on the builder.
+    // Otherwise a stale header would claim a length the stream has no idea about.
+    const CHUNKS: usize = 4;
+    const TOTAL: usize = CHUNKS * CHUNK_SIZE;
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = tokio::spawn(serve_one_request(listener, true));
+
+    let (publisher, body) = RequestBodyStream::new(4);
+    publish_x_chunks(publisher, CHUNKS);
+
+    let mut response = FlUrl::new(format!("http://127.0.0.1:{}", port))
+        .append_path_segment("upload")
+        // left over on the builder, and nothing the stream promised to honour
+        .with_header("Content-Length", "999999")
+        .do_not_reuse_connection()
+        .set_timeout(Duration::from_secs(30))
+        .post_request_streamed(body, None)
+        .await
+        .unwrap();
+
+    assert_eq!(response.get_status_code(), 200);
+    let _ = response.get_body_as_slice().await.unwrap();
+
+    let received = server.await.unwrap();
+
+    assert!(
+        !received.has_header("content-length"),
+        "a None length must strip the manual header, head was:\n{}",
+        received.head
+    );
+    assert_eq!(received.header("transfer-encoding"), Some("chunked"));
+    assert_eq!(received.body_len, TOTAL);
+    assert!(received.body_is_all_x);
 }
