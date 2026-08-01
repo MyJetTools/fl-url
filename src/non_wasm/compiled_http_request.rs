@@ -3,6 +3,53 @@ use bytes::Bytes;
 use http_body_util::Full;
 use hyper::Method;
 
+/// What `execute_with_retry` is handed. Both shapes travel the same connection-pool
+/// path; they differ in whether the payload survives an attempt.
+pub enum RequestToExecute {
+    /// The body is in memory, so a failed attempt can be replayed.
+    Compiled(CompiledHttpRequest),
+    /// The body is produced as a stream and is consumed while it is being sent, so
+    /// there is nothing left to replay — this one is a single shot. `request` is
+    /// `None` once it has been handed to the client.
+    Streamed {
+        request: Option<my_http_client::HyperRequest>,
+        method: Method,
+    },
+}
+
+impl RequestToExecute {
+    pub fn streamed(request: my_http_client::HyperRequest) -> Self {
+        let method = request.method().clone();
+        Self::Streamed {
+            request: Some(request),
+            method,
+        }
+    }
+
+    /// `true` when the payload can not be replayed, whatever `with_retries` says.
+    pub fn is_streamed(&self) -> bool {
+        matches!(self, Self::Streamed { .. })
+    }
+
+    pub fn method_is_idempotent(&self) -> bool {
+        match self {
+            Self::Compiled(request) => request.method_is_idempotent(),
+            Self::Streamed { method, .. } => method.is_idempotent(),
+        }
+    }
+
+    pub fn print_http_headers(&self) {
+        match self {
+            Self::Compiled(request) => request.print_http_headers(),
+            Self::Streamed { request, .. } => {
+                if let Some(request) = request {
+                    println!("{:?}", request.headers());
+                }
+            }
+        }
+    }
+}
+
 pub enum CompiledHttpRequestInner {
     Hyper(my_http_client::http::request::Request<Full<Bytes>>),
     MyHttpClient(my_http_client::http1::MyHttpRequest),

@@ -67,6 +67,40 @@ impl<
             }
         }
     }
+
+    /// A streamed request body is a hyper HTTP/1.1 feature here: the own HTTP/1.1
+    /// implementation serializes the request into one buffer, and the h2 client has
+    /// no streaming entry point. `FlUrl` pins the mode to `Http1Hyper` before it gets
+    /// this far, so the other two arms are a guard rather than a reachable path.
+    pub async fn do_streamed_request(
+        &self,
+        request: my_http_client::HyperRequest,
+        request_timeout: Duration,
+    ) -> Result<MyHttpResponse<TStream>, MyHttpClientError> {
+        match self {
+            Self::Hyper(my_http_client) => {
+                let result = my_http_client
+                    .do_streamed_request(request, request_timeout)
+                    .await?;
+
+                match result {
+                    my_http_client::http1_hyper::HyperHttpResponse::Response(response) => {
+                        Ok(MyHttpResponse::Response(response))
+                    }
+                    // fl-url does not support WebSockets; the upgraded connection is
+                    // consumed and must not be reused.
+                    my_http_client::http1_hyper::HyperHttpResponse::WebSocketUpgrade {
+                        ..
+                    } => Err(MyHttpClientError::UpgradedToWebSocket),
+                }
+            }
+            Self::MyHttpClient(_) | Self::H2(_) => {
+                Err(MyHttpClientError::CanNotExecuteRequest(
+                    "A streamed request body requires FlUrlMode::Http1Hyper".to_string(),
+                ))
+            }
+        }
+    }
 }
 
 impl<

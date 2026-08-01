@@ -35,6 +35,18 @@ impl<
         self.inner.do_request(request, request_timeout).await
     }
 
+    /// Sends a request whose body is produced as a stream. Only the `Http1Hyper`
+    /// client can do this, so the caller has to have pinned the mode beforehand.
+    pub async fn do_streamed_request(
+        &self,
+        request: my_http_client::HyperRequest,
+        request_timeout: Duration,
+    ) -> Result<MyHttpResponse<TStream>, MyHttpClientError> {
+        self.inner
+            .do_streamed_request(request, request_timeout)
+            .await
+    }
+
     pub async fn connect(&self) -> Result<(), MyHttpClientError> {
         match &self.inner {
             MyHttpClientWrapperInner::MyHttpClient(my_http_client) => {

@@ -16,6 +16,7 @@ FLUrl is a Hyper-based HTTP client that provides a fluent API for building and e
 - **Retry Logic**: Configurable retry mechanism
 - **Request Compression**: Automatic gzip compression for request bodies
 - **Streaming Responses**: Support for streaming response bodies (native only)
+- **Streaming Request Bodies**: Send a body of any size at constant memory, framed with `Content-Length` or chunked (native only) — see [Streamed Body](#streamed-body-native-only)
 - **Debug Support**: Built-in request debugging capabilities
 - **WASM Support**: The same API compiles to `wasm32-unknown-unknown` (browser / web-worker) on top of the `fetch` API — see [WebAssembly (WASM) Support](#webassembly-wasm-support)
 
@@ -376,6 +377,94 @@ let response = FlUrl::new("https://api.example.com/upload")
     .post(body)
     .await?;
 ```
+
+### Streamed Body (native only)
+
+Every body above is a `Vec<u8>`: the payload exists in memory as a whole, and a large
+upload costs its own size in RSS — twice, if the caller also read a file to build it.
+For a body that must not be materialized, `post_request_streamed` /
+`put_request_streamed` / `patch_request_streamed` take anything implementing
+`hyper::body::Body<Data = Bytes>` and write it to the socket as it is produced. Peak
+memory is one chunk plus whatever the producer buffers, whatever the size of the body.
+
+`my_http_client::RequestBodyStream` is the usual producer — a body over an mpsc
+channel, where the channel is the backpressure: `publish` waits once `buffer` chunks
+are queued for the socket. **Dropping the publisher is what ends the body.**
+
+```rust
+use my_http_client::RequestBodyStream;
+
+let (publisher, body) = RequestBodyStream::new(4);
+
+tokio::spawn(async move {
+    while let Some(chunk) = source.next().await {
+        // Err means the request is over — nothing else can be published
+        if publisher.publish(chunk).await.is_err() {
+            break;
+        }
+    }
+    // dropping the publisher ends the body
+});
+
+let response = FlUrl::new("https://api.example.com")
+    .append_path_segment("upload")
+    .set_timeout(Duration::from_secs(600))
+    // None: the size is unknown, so the body goes out chunked
+    .post_request_streamed(body, None)
+    .await?;
+```
+
+A proxied `hyper::body::Incoming`, a `StreamBody` over a file reader, or any other
+`Body` implementation works just as well.
+
+#### Framing: the `content_length` argument
+
+HTTP/1.1 offers exactly two ways to delimit a request body, and the last argument
+picks between them:
+
+| argument | framing | when |
+| --- | --- | --- |
+| `None` | `Transfer-Encoding: chunked` | the size is genuinely unknown. Every HTTP/1.1 recipient is required to understand chunked, so this is the right default |
+| `Some(n)` | `Content-Length: n` | the size is known, or the endpoint refuses a chunked request body |
+
+```rust
+let response = FlUrl::new("https://api.example.com")
+    .append_path_segment("files")
+    .append_path_segment("archive.tar")
+    .set_timeout(Duration::from_secs(600))
+    .put_request_streamed(body, Some(len))
+    .await?;
+```
+
+What lands on the wire is then plain length framing:
+
+```
+PUT /files/archive.tar HTTP/1.1
+content-length: 524288
+host: api.example.com
+```
+
+With `Some(n)` the body must then deliver **exactly** `n` bytes. That is not an fl-url
+rule but the protocol's: a short body makes the message incomplete, and extra bytes
+would be read as the start of the next request on the same connection. A stream that
+ends early therefore fails the request with `"user body write aborted"` instead of
+leaving a truncated payload behind — so `n` and the producer have to come from one
+source (a file's metadata and that same file), never be computed twice.
+
+The argument wins over a `Content-Length` added with `with_header`; the manual one is
+dropped rather than emitted twice.
+
+#### What does not apply to a streamed body
+
+| knob | what happens |
+| --- | --- |
+| `compress()` | `FlUrlError::StreamedBodyCanNotBeCompressed` — gzip needs the whole body in one buffer, which is exactly what streaming avoids |
+| `with_retries(n)` | ignored: the payload is consumed as it is sent, so the request is attempted **exactly once**. Rebuilding the stream and calling again is the caller's decision — it owns the source data |
+| `set_timeout(d)` | now covers the **whole** call, upload included, not just the wait for the response head. The 10s default is far too short for a real upload |
+| `update_mode(..)` | ignored: the mode is pinned to `Http1Hyper`, since the own HTTP/1.1 implementation serializes a request into one buffer and the h2 client has no streaming entry point |
+
+These methods are native-only — the browser `fetch` API cannot stream a request body
+without HTTP/2 duplex, so there is no wasm counterpart.
 
 ## Model-Driven Requests
 

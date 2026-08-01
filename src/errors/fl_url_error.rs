@@ -20,6 +20,12 @@ pub enum FlUrlError {
     /// rejected its value) inside `FlUrl::execute_request`.
     RequestBuild(String),
 
+    /// `.compress()` was combined with a streamed request body. Gzipping needs the
+    /// whole body in one buffer, which is exactly what streaming exists to avoid, so
+    /// the request is refused instead of quietly materializing the payload.
+    #[cfg(not(target_arch = "wasm32"))]
+    StreamedBodyCanNotBeCompressed,
+
     #[cfg(not(target_arch = "wasm32"))]
     HyperError(hyper::Error),
     #[cfg(not(target_arch = "wasm32"))]

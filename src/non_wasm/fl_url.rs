@@ -18,7 +18,7 @@ use tokio::net::TcpStream;
 
 use super::FlUrlResponse;
 use crate::body::HttpRequestBody;
-use crate::non_wasm::compiled_http_request::CompiledHttpRequest;
+use crate::non_wasm::compiled_http_request::{CompiledHttpRequest, RequestToExecute};
 use crate::non_wasm::http_connectors::*;
 
 use crate::non_wasm::http_clients_cache::*;
@@ -426,7 +426,7 @@ impl FlUrl {
         }
     }
 
-    async fn execute(self, request: CompiledHttpRequest) -> Result<FlUrlResponse, FlUrlError> {
+    async fn execute(self, request: RequestToExecute) -> Result<FlUrlResponse, FlUrlError> {
         #[cfg(all(unix, feature = "with-ssh"))]
         if self.ssh_credentials.is_some() {
             let mut self_mut = self;
@@ -449,7 +449,7 @@ impl FlUrl {
             Scheme::Http => {
                 if self.do_not_reuse_connection {
                     self.execute_with_retry::<TcpStream, HttpConnector>(
-                        &request,
+                        request,
                         Arc::new(crate::non_wasm::http_clients_cache::creators::HttpConnectionCreator),
                         crate::consts::HTTP_DEFAULT_PORT.into(),
                         #[cfg(all(unix, feature = "with-ssh"))]
@@ -459,7 +459,7 @@ impl FlUrl {
                 } else {
                     let clients_cache = self.get_connections_cache();
                     self.execute_with_retry::<TcpStream, HttpConnector>(
-                        &request,
+                        request,
                         clients_cache,
                         crate::consts::HTTP_DEFAULT_PORT.into(),
                         #[cfg(all(unix, feature = "with-ssh"))]
@@ -471,7 +471,7 @@ impl FlUrl {
             Scheme::Https => {
                 if self.do_not_reuse_connection {
                     self.execute_with_retry::<TlsStream<TcpStream>, HttpsConnector>(
-                        &request,
+                        request,
                         Arc::new(crate::non_wasm::http_clients_cache::creators::HttpsConnectionCreator),
                         crate::consts::HTTPS_DEFAULT_PORT.into(),
                         #[cfg(all(unix, feature = "with-ssh"))]
@@ -482,7 +482,7 @@ impl FlUrl {
                     let clients_cache = self.get_connections_cache();
 
                     self.execute_with_retry::<TlsStream<TcpStream>, HttpsConnector>(
-                        &request,
+                        request,
                         clients_cache,
                         crate::consts::HTTPS_DEFAULT_PORT.into(),
                         #[cfg(all(unix, feature = "with-ssh"))]
@@ -501,7 +501,7 @@ impl FlUrl {
             Scheme::UnixSocket => {
                 if self.do_not_reuse_connection {
                     self.execute_with_retry::<UnixSocketStream, UnixSocketConnector>(
-                        &request,
+                        request,
                         Arc::new(crate::non_wasm::http_clients_cache::creators::UnixSocketHttpClientCreator),
                         None,
                         #[cfg(all(unix, feature = "with-ssh"))]
@@ -512,7 +512,7 @@ impl FlUrl {
                     let clients_cache = self.get_connections_cache();
 
                     self.execute_with_retry::<UnixSocketStream, UnixSocketConnector>(
-                        &request,
+                        request,
                         clients_cache,
                         None,
                         #[cfg(all(unix, feature = "with-ssh"))]
@@ -529,7 +529,7 @@ impl FlUrl {
     #[cfg(all(unix, feature = "with-ssh"))]
     async fn execute_ssh(
         mut self,
-        request: CompiledHttpRequest,
+        request: RequestToExecute,
         mut ssh_credentials: my_ssh::SshCredentials,
     ) -> Result<FlUrlResponse, FlUrlError> {
         if let Some(private_key_resolver) = self.ssh_security_credentials_resolver.take() {
@@ -541,7 +541,7 @@ impl FlUrl {
         if self.do_not_reuse_connection {
             return self
                 .execute_with_retry::<my_ssh::SshAsyncChannel, SshHttpConnector>(
-                    &request,
+                    request,
                     Arc::new(crate::non_wasm::http_clients_cache::creators::SshConnectionCreator),
                     crate::consts::HTTP_DEFAULT_PORT.into(),
                     Some(Arc::new(ssh_credentials)),
@@ -551,7 +551,7 @@ impl FlUrl {
 
         let clients_cache = self.get_connections_cache();
         self.execute_with_retry::<my_ssh::SshAsyncChannel, SshHttpConnector>(
-            &request,
+            request,
             clients_cache,
             crate::consts::HTTP_DEFAULT_PORT.into(),
             Some(Arc::new(ssh_credentials)),
@@ -752,7 +752,7 @@ impl FlUrl {
 
     pub async fn get(mut self) -> Result<FlUrlResponse, FlUrlError> {
         let request = self.compile_request(Method::GET, HttpRequestBody::Empty, None)?;
-        self.execute(request).await
+        self.execute(RequestToExecute::Compiled(request)).await
     }
 
     pub async fn get_with_debug(
@@ -761,17 +761,17 @@ impl FlUrl {
     ) -> Result<FlUrlResponse, FlUrlError> {
         let request =
             self.compile_request(Method::GET, HttpRequestBody::Empty, Some(request_debug_string))?;
-        self.execute(request).await
+        self.execute(RequestToExecute::Compiled(request)).await
     }
 
     pub async fn head(mut self) -> Result<FlUrlResponse, FlUrlError> {
         let request = self.compile_request(Method::HEAD, HttpRequestBody::Empty, None)?;
-        self.execute(request).await
+        self.execute(RequestToExecute::Compiled(request)).await
     }
 
     pub async fn post(mut self, body: impl Into<HttpRequestBody>) -> Result<FlUrlResponse, FlUrlError> {
         let request = self.compile_request(Method::POST, body.into(), None)?;
-        self.execute(request).await
+        self.execute(RequestToExecute::Compiled(request)).await
     }
 
     pub async fn post_with_debug(
@@ -782,7 +782,234 @@ impl FlUrl {
         let body = body.into();
 
         let request = self.compile_request(Method::POST, body, Some(request_debug_string))?;
-        self.execute(request).await
+        self.execute(RequestToExecute::Compiled(request)).await
+    }
+
+    /// POSTs a body that is produced as a stream instead of living in memory as a
+    /// whole. See [`Self::execute_streamed`] for what applies to every streamed
+    /// request — framing, retries, timeouts.
+    ///
+    /// ```no_run
+    /// # async fn doc() -> Result<(), flurl::FlUrlError> {
+    /// use my_http_client::RequestBodyStream;
+    ///
+    /// let (publisher, body) = RequestBodyStream::new(4);
+    ///
+    /// tokio::spawn(async move {
+    ///     for chunk in 0..10u8 {
+    ///         // Err means the request is over — nothing else can be published
+    ///         if publisher.publish(vec![chunk; 64 * 1024]).await.is_err() {
+    ///             break;
+    ///         }
+    ///     }
+    ///     // dropping the publisher is what ends the body
+    /// });
+    ///
+    /// let response = flurl::FlUrl::new("https://api.example.com")
+    ///     .append_path_segment("upload")
+    ///     .set_timeout(std::time::Duration::from_secs(600))
+    ///     // None: the size is unknown, so the body goes out chunked
+    ///     .post_request_streamed(body, None)
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn post_request_streamed<TBody>(
+        self,
+        body: TBody,
+        content_length: Option<usize>,
+    ) -> Result<FlUrlResponse, FlUrlError>
+    where
+        TBody: hyper::body::Body<Data = Bytes> + Send + Sync + 'static,
+        TBody::Error: std::fmt::Display,
+    {
+        self.execute_streamed(Method::POST, body, content_length)
+            .await
+    }
+
+    /// PUTs a body that is produced as a stream. See [`Self::execute_streamed`].
+    ///
+    /// An upload whose size is known — a file being sent somewhere — is the case for
+    /// passing a length rather than letting it go out chunked:
+    ///
+    /// ```no_run
+    /// # async fn doc(len: usize, body: my_http_client::RequestBodyStream<Vec<u8>>)
+    /// # -> Result<(), flurl::FlUrlError> {
+    /// let response = flurl::FlUrl::new("https://api.example.com")
+    ///     .append_path_segment("files")
+    ///     .append_path_segment("archive.tar")
+    ///     .set_timeout(std::time::Duration::from_secs(600))
+    ///     // `len` and the producer of `body` must come from one source
+    ///     .put_request_streamed(body, Some(len))
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn put_request_streamed<TBody>(
+        self,
+        body: TBody,
+        content_length: Option<usize>,
+    ) -> Result<FlUrlResponse, FlUrlError>
+    where
+        TBody: hyper::body::Body<Data = Bytes> + Send + Sync + 'static,
+        TBody::Error: std::fmt::Display,
+    {
+        self.execute_streamed(Method::PUT, body, content_length)
+            .await
+    }
+
+    /// PATCHes a body that is produced as a stream. See [`Self::execute_streamed`].
+    pub async fn patch_request_streamed<TBody>(
+        self,
+        body: TBody,
+        content_length: Option<usize>,
+    ) -> Result<FlUrlResponse, FlUrlError>
+    where
+        TBody: hyper::body::Body<Data = Bytes> + Send + Sync + 'static,
+        TBody::Error: std::fmt::Display,
+    {
+        self.execute_streamed(Method::PATCH, body, content_length)
+            .await
+    }
+
+    /// Sends `body` as a stream under `method` — a [`my_http_client::RequestBodyStream`]
+    /// fed by a publisher, a proxied `hyper::body::Incoming`, a `StreamBody` over a
+    /// file reader, anything implementing `hyper::body::Body<Data = Bytes>`. Peak
+    /// memory is one chunk plus whatever the producer buffers, not the size of the
+    /// payload.
+    ///
+    /// This path is hyper HTTP/1.1 only: the mode is pinned to
+    /// [`FlUrlMode::Http1Hyper`] regardless of [`Self::update_mode`], because the own
+    /// HTTP/1.1 implementation serializes a request into one buffer and the h2 client
+    /// has no streaming entry point.
+    ///
+    /// **Framing** is what `content_length` picks. HTTP/1.1 delimits a request body
+    /// exactly two ways (RFC 9112 §6), and these are they:
+    ///
+    /// * `None` → `Transfer-Encoding: chunked`. The length never has to be known, and
+    ///   every HTTP/1.1 recipient is required to understand chunked, so this is the
+    ///   default a streamed body wants.
+    /// * `Some(n)` → `Content-Length: n`, no chunked. For endpoints that refuse a
+    ///   chunked request body, and for anything that has to know the size before it
+    ///   starts reading.
+    ///
+    /// With `Some(n)` the body must then deliver **exactly** `n` bytes. That is the
+    /// protocol's rule, not fl-url's: a short body makes the message incomplete, and
+    /// extra bytes would be read as the start of the next request on the same
+    /// connection. A stream that ends early therefore fails the request
+    /// (`"user body write aborted"`) instead of putting a truncated payload on the
+    /// wire — so `n` and the producer must come from one source (a file's metadata and
+    /// that same file), never be computed twice.
+    ///
+    /// `content_length` wins over a `Content-Length` added with [`Self::with_header`];
+    /// the manual one is dropped rather than emitted twice, which would be a protocol
+    /// violation.
+    ///
+    /// Three builder knobs do not apply, and none of them fails quietly:
+    ///
+    /// * [`Self::compress`] gzips the body as one buffer, which is exactly what
+    ///   streaming avoids → [`FlUrlError::StreamedBodyCanNotBeCompressed`].
+    /// * [`Self::with_retries`] is ignored: the payload is consumed as it is sent, so
+    ///   the request is attempted exactly once. Rebuilding the stream and calling
+    ///   again is the caller's decision — it owns the source data.
+    /// * [`Self::set_timeout`] covers the **whole** call, upload included, not just
+    ///   the wait for the response head. The 10s default is far too short for a real
+    ///   upload; set it to the size of the transfer you expect.
+    pub async fn execute_streamed<TBody>(
+        mut self,
+        method: Method,
+        body: TBody,
+        content_length: Option<usize>,
+    ) -> Result<FlUrlResponse, FlUrlError>
+    where
+        TBody: hyper::body::Body<Data = Bytes> + Send + Sync + 'static,
+        TBody::Error: std::fmt::Display,
+    {
+        if self.compress_body {
+            return Err(FlUrlError::StreamedBodyCanNotBeCompressed);
+        }
+
+        self.mode = FlUrlMode::Http1Hyper;
+
+        let request = self.compile_streamed_request(method, body, content_length)?;
+
+        self.execute(RequestToExecute::streamed(request)).await
+    }
+
+    /// Builds the request head for [`Self::execute_streamed`] and erases the body to
+    /// the trait object the connection carries. Mirrors the header work of
+    /// `compile_hyper_request`, minus everything that needs the body in hand:
+    /// no `Content-Type` derived from the payload (a stream carries none — set it with
+    /// [`Self::with_header`]), no debug dump of the body, no compression.
+    fn compile_streamed_request<TBody>(
+        &mut self,
+        method: Method,
+        body: TBody,
+        content_length: Option<usize>,
+    ) -> Result<my_http_client::HyperRequest, FlUrlError>
+    where
+        TBody: hyper::body::Body<Data = Bytes> + Send + Sync + 'static,
+        TBody::Error: std::fmt::Display,
+    {
+        let path_and_query = self.get_path_and_query_with_leading_slash();
+
+        // Http1Hyper only, so the origin-form target is the right one — no absolute
+        // URI + :authority the way the h2 branch builds it.
+        let mut result = my_http_client::http::request::Builder::new()
+            .method(method.clone())
+            .uri(path_and_query);
+
+        for (key, value) in self.headers.iter() {
+            // The `content_length` argument is authoritative: a manually added
+            // Content-Length is dropped instead of ending up on the wire twice, which
+            // is a protocol violation rather than a merely confusing header list.
+            if content_length.is_some() && key.eq_ignore_ascii_case("content-length") {
+                continue;
+            }
+            result = result.header(key, value);
+        }
+
+        // hyper frames the body from this header when it is present, and falls back to
+        // chunked (a streamed body reports no size hint) when it is not.
+        if let Some(content_length) = content_length {
+            result = result.header(
+                hyper::header::CONTENT_LENGTH.as_str(),
+                content_length.to_string(),
+            );
+        }
+
+        if !self.headers.has_host_header() {
+            result = result.header(
+                hyper::header::HOST.as_str(),
+                self.url_builder.get_host_port(),
+            );
+        }
+
+        if self.url_builder.is_unix_socket() {
+            result = result.header(hyper::header::ACCEPT, "*/*");
+        } else {
+            if !self.headers.has_connection_header {
+                if !self.do_not_reuse_connection {
+                    result = result.header(hyper::header::CONNECTION.as_str(), "keep-alive");
+                }
+            }
+        }
+
+        let body = http_body_util::BodyExt::boxed(http_body_util::BodyExt::map_err(
+            body,
+            |err| err.to_string(),
+        ));
+
+        match result.body(body) {
+            Ok(result) => Ok(result),
+            Err(err) => Err(FlUrlError::ReadingHyperBodyError(format!(
+                "[{}]. '{}' '{}' Invalid getting fl_url streamed body: {}",
+                method.as_str(),
+                self.url_builder.get_host_port(),
+                self.url_builder.get_path_and_query(),
+                err
+            ))),
+        }
     }
 
     #[deprecated(note = "Use `post` instead")]
@@ -793,12 +1020,12 @@ impl FlUrl {
         let body = HttpRequestBody::try_as_json(json)?;
         let request = self.compile_request(Method::POST, body, None)?;
 
-        self.execute(request).await
+        self.execute(RequestToExecute::Compiled(request)).await
     }
 
     pub async fn patch(mut self, body: impl Into<HttpRequestBody>) -> Result<FlUrlResponse, FlUrlError> {
         let request = self.compile_request(Method::PATCH, body.into(), None)?;
-        self.execute(request).await
+        self.execute(RequestToExecute::Compiled(request)).await
     }
 
     #[deprecated(note = "Use `patch` instead")]
@@ -809,12 +1036,12 @@ impl FlUrl {
         let body = HttpRequestBody::try_as_json(json)?;
         let request = self.compile_request(Method::PATCH, body, None)?;
 
-        self.execute(request).await
+        self.execute(RequestToExecute::Compiled(request)).await
     }
 
     pub async fn put(mut self, body: impl Into<HttpRequestBody>) -> Result<FlUrlResponse, FlUrlError> {
         let request = self.compile_request(Method::PUT, body.into(), None)?;
-        self.execute(request).await
+        self.execute(RequestToExecute::Compiled(request)).await
     }
 
     #[deprecated(note = "Use `put` instead")]
@@ -824,12 +1051,12 @@ impl FlUrl {
     ) -> Result<FlUrlResponse, FlUrlError> {
         let body = HttpRequestBody::try_as_json(json)?;
         let request = self.compile_request(Method::PUT, body, None)?;
-        self.execute(request).await
+        self.execute(RequestToExecute::Compiled(request)).await
     }
 
     pub async fn delete(mut self) -> Result<FlUrlResponse, FlUrlError> {
         let request = self.compile_request(Method::DELETE, HttpRequestBody::Empty, None)?;
-        self.execute(request).await
+        self.execute(RequestToExecute::Compiled(request)).await
     }
 
     pub async fn delete_with_debug(
@@ -838,7 +1065,7 @@ impl FlUrl {
     ) -> Result<FlUrlResponse, FlUrlError> {
         let request =
             self.compile_request(Method::DELETE, HttpRequestBody::Empty, Some(request_debug_string))?;
-        self.execute(request).await
+        self.execute(RequestToExecute::Compiled(request)).await
     }
     fn compile_debug_info(&self, out: &mut String) {
         out.push_str("PathAndQuery: '");
@@ -918,7 +1145,7 @@ impl FlUrl {
         TConnector: MyHttpClientConnector<TStream> + Send + Sync + 'static,
     >(
         self,
-        request: &CompiledHttpRequest,
+        mut request: RequestToExecute,
         http_connection_resolver: Arc<dyn HttpConnectionResolver<TStream, TConnector>>,
         default_port: Option<u16>,
         #[cfg(all(unix, feature = "with-ssh"))] ssh_credentials: Option<Arc<my_ssh::SshCredentials>>,
@@ -927,7 +1154,13 @@ impl FlUrl {
             request.print_http_headers();
         }
         let mut attempt_no = 0;
-        let max_retries = self.max_retries;
+        // A streamed body is consumed as it is sent, so there is nothing left to
+        // replay — `with_retries` does not apply to it, whatever it was set to.
+        let max_retries = if request.is_streamed() {
+            0
+        } else {
+            self.max_retries
+        };
         let request_timeout = self.request_timeout;
         let params: ConnectionParams<'_> = self
             .get_connection_params(
@@ -940,7 +1173,25 @@ impl FlUrl {
         loop {
             let connection = http_connection_resolver.get_http_connection(&params).await;
 
-            let response = connection.do_request(request, request_timeout).await;
+            let response = match &mut request {
+                RequestToExecute::Compiled(request) => {
+                    connection.do_request(request, request_timeout).await
+                }
+                RequestToExecute::Streamed { request, .. } => match request.take() {
+                    Some(request) => {
+                        connection
+                            .do_streamed_request(request, request_timeout)
+                            .await
+                    }
+                    // Unreachable while max_retries is pinned to 0 above; kept as an
+                    // error rather than an unwrap so a future change to the retry
+                    // policy can not silently resend a half-consumed body.
+                    None => Err(my_http_client::MyHttpClientError::CanNotExecuteRequest(
+                        "A streamed request body has already been consumed and can not be replayed"
+                            .to_string(),
+                    )),
+                },
+            };
 
             match response {
                 Ok(response) => {
@@ -971,7 +1222,7 @@ impl FlUrl {
                         http_connection_resolver.drop_connection(connection).await;
                     }
 
-                    if !error_is_safe_to_retry(&err, request) || attempt_no >= max_retries {
+                    if !error_is_safe_to_retry(&err, &request) || attempt_no >= max_retries {
                         return Err(map_my_http_client_error(err));
                     }
 
@@ -990,7 +1241,7 @@ impl FlUrl {
 /// my-http-client's own retry loops already cover the genuinely-safe cases.
 fn error_is_safe_to_retry(
     err: &my_http_client::MyHttpClientError,
-    request: &CompiledHttpRequest,
+    request: &RequestToExecute,
 ) -> bool {
     match err {
         // The connection is consumed by the upgrade; a retry would just
