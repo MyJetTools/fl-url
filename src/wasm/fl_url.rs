@@ -264,6 +264,27 @@ impl FlUrl {
         }
     }
 
+    /// Same as [`Self::execute_request`], but dumps the compiled request — verb,
+    /// path and query, headers and body — into `request_debug_string` before it goes
+    /// on the wire. The dump is written for every verb, body-carrying or not.
+    pub async fn execute_request_with_debug(
+        mut self,
+        verb: HttpVerb,
+        model: impl my_http_utils::schema::client::THttpRequestBuilder,
+        request_debug_string: &mut String,
+    ) -> Result<FlUrlResponse, FlUrlError> {
+        let body = self.fill_from_model(model)?;
+
+        match verb {
+            HttpVerb::Get => self.get_with_debug(request_debug_string).await,
+            HttpVerb::Delete => self.delete_with_debug(request_debug_string).await,
+            HttpVerb::Head => self.head_with_debug(request_debug_string).await,
+            HttpVerb::Post => self.post_with_debug(body, request_debug_string).await,
+            HttpVerb::Put => self.put_with_debug(body, request_debug_string).await,
+            HttpVerb::Patch => self.patch_with_debug(body, request_debug_string).await,
+        }
+    }
+
     pub async fn get(self) -> Result<FlUrlResponse, FlUrlError> {
         self.run("GET", true, HttpRequestBody::Empty, None).await
     }
@@ -278,6 +299,19 @@ impl FlUrl {
 
     pub async fn head(self) -> Result<FlUrlResponse, FlUrlError> {
         self.run("HEAD", true, HttpRequestBody::Empty, None).await
+    }
+
+    pub async fn head_with_debug(
+        self,
+        request_debug_string: &mut String,
+    ) -> Result<FlUrlResponse, FlUrlError> {
+        self.run(
+            "HEAD",
+            true,
+            HttpRequestBody::Empty,
+            Some(request_debug_string),
+        )
+        .await
     }
 
     pub async fn post(
@@ -312,6 +346,15 @@ impl FlUrl {
         self.run("PATCH", false, body.into(), None).await
     }
 
+    pub async fn patch_with_debug(
+        self,
+        body: impl Into<HttpRequestBody>,
+        request_debug_string: &mut String,
+    ) -> Result<FlUrlResponse, FlUrlError> {
+        self.run("PATCH", false, body.into(), Some(request_debug_string))
+            .await
+    }
+
     #[deprecated(note = "Use `patch` instead")]
     pub async fn patch_json(
         self,
@@ -326,6 +369,15 @@ impl FlUrl {
         body: impl Into<HttpRequestBody>,
     ) -> Result<FlUrlResponse, FlUrlError> {
         self.run("PUT", true, body.into(), None).await
+    }
+
+    pub async fn put_with_debug(
+        self,
+        body: impl Into<HttpRequestBody>,
+        request_debug_string: &mut String,
+    ) -> Result<FlUrlResponse, FlUrlError> {
+        self.run("PUT", true, body.into(), Some(request_debug_string))
+            .await
     }
 
     #[deprecated(note = "Use `put` instead")]

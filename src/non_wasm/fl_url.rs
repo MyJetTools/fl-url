@@ -426,6 +426,27 @@ impl FlUrl {
         }
     }
 
+    /// Same as [`Self::execute_request`], but dumps the compiled request — verb,
+    /// path and query, headers and body — into `request_debug_string` before it goes
+    /// on the wire. The dump is written for every verb, body-carrying or not.
+    pub async fn execute_request_with_debug(
+        mut self,
+        verb: HttpVerb,
+        model: impl my_http_utils::schema::client::THttpRequestBuilder,
+        request_debug_string: &mut String,
+    ) -> Result<FlUrlResponse, FlUrlError> {
+        let body = self.fill_from_model(model)?;
+
+        match verb {
+            HttpVerb::Get => self.get_with_debug(request_debug_string).await,
+            HttpVerb::Delete => self.delete_with_debug(request_debug_string).await,
+            HttpVerb::Head => self.head_with_debug(request_debug_string).await,
+            HttpVerb::Post => self.post_with_debug(body, request_debug_string).await,
+            HttpVerb::Put => self.put_with_debug(body, request_debug_string).await,
+            HttpVerb::Patch => self.patch_with_debug(body, request_debug_string).await,
+        }
+    }
+
     async fn execute(self, request: RequestToExecute) -> Result<FlUrlResponse, FlUrlError> {
         #[cfg(all(unix, feature = "with-ssh"))]
         if self.ssh_credentials.is_some() {
@@ -769,6 +790,18 @@ impl FlUrl {
         self.execute(RequestToExecute::Compiled(request)).await
     }
 
+    pub async fn head_with_debug(
+        mut self,
+        request_debug_string: &mut String,
+    ) -> Result<FlUrlResponse, FlUrlError> {
+        let request = self.compile_request(
+            Method::HEAD,
+            HttpRequestBody::Empty,
+            Some(request_debug_string),
+        )?;
+        self.execute(RequestToExecute::Compiled(request)).await
+    }
+
     pub async fn post(mut self, body: impl Into<HttpRequestBody>) -> Result<FlUrlResponse, FlUrlError> {
         let request = self.compile_request(Method::POST, body.into(), None)?;
         self.execute(RequestToExecute::Compiled(request)).await
@@ -827,6 +860,23 @@ impl FlUrl {
             .await
     }
 
+    /// Same as [`Self::post_request_streamed`], with the request head dumped into
+    /// `request_debug_string` — the streamed payload itself is not printed. See
+    /// [`Self::execute_streamed_with_debug`].
+    pub async fn post_request_streamed_with_debug<TBody>(
+        self,
+        body: TBody,
+        content_length: Option<usize>,
+        request_debug_string: &mut String,
+    ) -> Result<FlUrlResponse, FlUrlError>
+    where
+        TBody: hyper::body::Body<Data = Bytes> + Send + Sync + 'static,
+        TBody::Error: std::fmt::Display,
+    {
+        self.execute_streamed_with_debug(Method::POST, body, content_length, request_debug_string)
+            .await
+    }
+
     /// PUTs a body that is produced as a stream. See [`Self::execute_streamed`].
     ///
     /// An upload whose size is known — a file being sent somewhere — is the case for
@@ -858,6 +908,22 @@ impl FlUrl {
             .await
     }
 
+    /// Same as [`Self::put_request_streamed`], with the request head dumped into
+    /// `request_debug_string`. See [`Self::execute_streamed_with_debug`].
+    pub async fn put_request_streamed_with_debug<TBody>(
+        self,
+        body: TBody,
+        content_length: Option<usize>,
+        request_debug_string: &mut String,
+    ) -> Result<FlUrlResponse, FlUrlError>
+    where
+        TBody: hyper::body::Body<Data = Bytes> + Send + Sync + 'static,
+        TBody::Error: std::fmt::Display,
+    {
+        self.execute_streamed_with_debug(Method::PUT, body, content_length, request_debug_string)
+            .await
+    }
+
     /// PATCHes a body that is produced as a stream. See [`Self::execute_streamed`].
     pub async fn patch_request_streamed<TBody>(
         self,
@@ -869,6 +935,22 @@ impl FlUrl {
         TBody::Error: std::fmt::Display,
     {
         self.execute_streamed(Method::PATCH, body, content_length)
+            .await
+    }
+
+    /// Same as [`Self::patch_request_streamed`], with the request head dumped into
+    /// `request_debug_string`. See [`Self::execute_streamed_with_debug`].
+    pub async fn patch_request_streamed_with_debug<TBody>(
+        self,
+        body: TBody,
+        content_length: Option<usize>,
+        request_debug_string: &mut String,
+    ) -> Result<FlUrlResponse, FlUrlError>
+    where
+        TBody: hyper::body::Body<Data = Bytes> + Send + Sync + 'static,
+        TBody::Error: std::fmt::Display,
+    {
+        self.execute_streamed_with_debug(Method::PATCH, body, content_length, request_debug_string)
             .await
     }
 
@@ -918,10 +1000,46 @@ impl FlUrl {
     ///   the wait for the response head. The 10s default is far too short for a real
     ///   upload; set it to the size of the transfer you expect.
     pub async fn execute_streamed<TBody>(
+        self,
+        method: Method,
+        body: TBody,
+        content_length: Option<usize>,
+    ) -> Result<FlUrlResponse, FlUrlError>
+    where
+        TBody: hyper::body::Body<Data = Bytes> + Send + Sync + 'static,
+        TBody::Error: std::fmt::Display,
+    {
+        self.execute_streamed_impl(method, body, content_length, None)
+            .await
+    }
+
+    /// Same as [`Self::execute_streamed`], with the request head — verb, path and
+    /// query, headers — dumped into `request_debug_string` before it goes on the wire.
+    ///
+    /// The payload is **not** in the dump: a streamed body exists only as it is
+    /// written to the socket, so printing it would mean buffering the very thing
+    /// streaming avoids.
+    pub async fn execute_streamed_with_debug<TBody>(
+        self,
+        method: Method,
+        body: TBody,
+        content_length: Option<usize>,
+        request_debug_string: &mut String,
+    ) -> Result<FlUrlResponse, FlUrlError>
+    where
+        TBody: hyper::body::Body<Data = Bytes> + Send + Sync + 'static,
+        TBody::Error: std::fmt::Display,
+    {
+        self.execute_streamed_impl(method, body, content_length, Some(request_debug_string))
+            .await
+    }
+
+    async fn execute_streamed_impl<TBody>(
         mut self,
         method: Method,
         body: TBody,
         content_length: Option<usize>,
+        debug: Option<&mut String>,
     ) -> Result<FlUrlResponse, FlUrlError>
     where
         TBody: hyper::body::Body<Data = Bytes> + Send + Sync + 'static,
@@ -932,6 +1050,10 @@ impl FlUrl {
         }
 
         self.mode = FlUrlMode::Http1Hyper;
+
+        if let Some(debug) = debug {
+            self.compile_debug_info_streamed(debug, method.as_str());
+        }
 
         let request = self.compile_streamed_request(method, body)?;
 
@@ -1015,6 +1137,15 @@ impl FlUrl {
         self.execute(RequestToExecute::Compiled(request)).await
     }
 
+    pub async fn patch_with_debug(
+        mut self,
+        body: impl Into<HttpRequestBody>,
+        request_debug_string: &mut String,
+    ) -> Result<FlUrlResponse, FlUrlError> {
+        let request = self.compile_request(Method::PATCH, body.into(), Some(request_debug_string))?;
+        self.execute(RequestToExecute::Compiled(request)).await
+    }
+
     #[deprecated(note = "Use `patch` instead")]
     pub async fn patch_json(
         mut self,
@@ -1028,6 +1159,15 @@ impl FlUrl {
 
     pub async fn put(mut self, body: impl Into<HttpRequestBody>) -> Result<FlUrlResponse, FlUrlError> {
         let request = self.compile_request(Method::PUT, body.into(), None)?;
+        self.execute(RequestToExecute::Compiled(request)).await
+    }
+
+    pub async fn put_with_debug(
+        mut self,
+        body: impl Into<HttpRequestBody>,
+        request_debug_string: &mut String,
+    ) -> Result<FlUrlResponse, FlUrlError> {
+        let request = self.compile_request(Method::PUT, body.into(), Some(request_debug_string))?;
         self.execute(RequestToExecute::Compiled(request)).await
     }
 
@@ -1086,6 +1226,17 @@ impl FlUrl {
                 request_debug_string.push_str(" non string bytes");
             }
         }
+    }
+
+    /// Debug dump for a streamed request: the head only. There is no body line — a
+    /// streamed payload exists only as it is written to the socket, so printing it
+    /// would mean buffering the very thing streaming avoids.
+    fn compile_debug_info_streamed(&self, request_debug_string: &mut String, method: &str) {
+        request_debug_string.push_str("[");
+        request_debug_string.push_str(method);
+        request_debug_string.push_str("] ");
+
+        self.compile_debug_info(request_debug_string);
     }
 
     pub fn to_string(&self) -> String {
@@ -1440,5 +1591,95 @@ mod test {
         assert!(has("X-Trace", "abc"));
         // ...right alongside the header field the model pushes in.
         assert!(has("X-Api-Key", "secret"));
+    }
+
+    /// Every verb goes through `compile_request`, which is what the `*_with_debug`
+    /// methods hand the debug string to — so the dump carries the verb, the target
+    /// and, for a body-carrying verb, the payload.
+    #[test]
+    fn every_verb_dumps_the_request_into_the_debug_string() {
+        use crate::body::HttpRequestBody;
+        use hyper::Method;
+
+        let cases = [
+            (Method::GET, None),
+            (Method::HEAD, None),
+            (Method::DELETE, None),
+            (Method::POST, Some("{\"a\":1}")),
+            (Method::PUT, Some("{\"b\":2}")),
+            (Method::PATCH, Some("{\"c\":3}")),
+        ];
+
+        for (method, body) in cases {
+            let mut fl_url = FlUrl::new("https://api.example.com")
+                .append_path_segment("users")
+                .append_query_param("notify", Some("true"))
+                .with_header("X-Api-Key", "secret");
+
+            let request_body = match body {
+                Some(body) => HttpRequestBody::from_raw_data(
+                    body.as_bytes().to_vec(),
+                    Some("application/json".into()),
+                ),
+                None => HttpRequestBody::Empty,
+            };
+
+            let mut debug = String::new();
+            fl_url
+                .compile_request(method.clone(), request_body, Some(&mut debug))
+                .unwrap();
+
+            assert!(
+                debug.starts_with(&format!("[{}] ", method.as_str())),
+                "[{}] dump must open with the verb: {}",
+                method.as_str(),
+                debug
+            );
+            assert!(
+                debug.contains("/users?notify=true"),
+                "[{}] dump must carry the target: {}",
+                method.as_str(),
+                debug
+            );
+            assert!(
+                debug.contains("X-Api-Key"),
+                "[{}] dump must carry the headers: {}",
+                method.as_str(),
+                debug
+            );
+
+            match body {
+                Some(body) => assert!(
+                    debug.contains(&format!("Body: {}", body)),
+                    "[{}] dump must carry the body: {}",
+                    method.as_str(),
+                    debug
+                ),
+                // A bodyless verb has nothing to print — and prints nothing.
+                None => assert!(
+                    !debug.contains("Body: "),
+                    "[{}] must not invent a body: {}",
+                    method.as_str(),
+                    debug
+                ),
+            }
+        }
+    }
+
+    /// A streamed body cannot be dumped — it exists only as it is written to the
+    /// socket — so the dump is the head and nothing else.
+    #[test]
+    fn a_streamed_request_dumps_the_head_without_a_body() {
+        let fl_url = FlUrl::new("https://api.example.com")
+            .append_path_segment("upload")
+            .with_header("X-Api-Key", "secret");
+
+        let mut debug = String::new();
+        fl_url.compile_debug_info_streamed(&mut debug, "POST");
+
+        assert!(debug.starts_with("[POST] "), "{}", debug);
+        assert!(debug.contains("/upload"), "{}", debug);
+        assert!(debug.contains("X-Api-Key"), "{}", debug);
+        assert!(!debug.contains("Body"), "{}", debug);
     }
 }

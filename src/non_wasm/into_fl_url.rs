@@ -25,6 +25,32 @@ pub trait IntoFlUrl {
 
     async fn delete(self) -> Result<FlUrlResponse, FlUrlError>;
     async fn head(self) -> Result<FlUrlResponse, FlUrlError>;
+
+    // Each verb above, with the request dumped into `request_debug_string` —
+    // same twins `FlUrl` itself carries.
+    async fn get_with_debug(
+        self,
+        request_debug_string: &mut String,
+    ) -> Result<FlUrlResponse, FlUrlError>;
+    async fn post_with_debug(
+        self,
+        body: HttpRequestBody,
+        request_debug_string: &mut String,
+    ) -> Result<FlUrlResponse, FlUrlError>;
+    async fn put_with_debug(
+        self,
+        body: HttpRequestBody,
+        request_debug_string: &mut String,
+    ) -> Result<FlUrlResponse, FlUrlError>;
+
+    async fn delete_with_debug(
+        self,
+        request_debug_string: &mut String,
+    ) -> Result<FlUrlResponse, FlUrlError>;
+    async fn head_with_debug(
+        self,
+        request_debug_string: &mut String,
+    ) -> Result<FlUrlResponse, FlUrlError>;
 }
 
 #[async_trait::async_trait]
@@ -71,6 +97,49 @@ impl<'g> IntoFlUrl for &'g str {
 
     async fn delete(self) -> Result<FlUrlResponse, FlUrlError> {
         FlUrl::new(self).delete().await
+    }
+
+    async fn get_with_debug(
+        self,
+        request_debug_string: &mut String,
+    ) -> Result<FlUrlResponse, FlUrlError> {
+        FlUrl::new(self).get_with_debug(request_debug_string).await
+    }
+
+    async fn head_with_debug(
+        self,
+        request_debug_string: &mut String,
+    ) -> Result<FlUrlResponse, FlUrlError> {
+        FlUrl::new(self).head_with_debug(request_debug_string).await
+    }
+
+    async fn post_with_debug(
+        self,
+        body: HttpRequestBody,
+        request_debug_string: &mut String,
+    ) -> Result<FlUrlResponse, FlUrlError> {
+        FlUrl::new(self)
+            .post_with_debug(body, request_debug_string)
+            .await
+    }
+
+    async fn put_with_debug(
+        self,
+        body: HttpRequestBody,
+        request_debug_string: &mut String,
+    ) -> Result<FlUrlResponse, FlUrlError> {
+        FlUrl::new(self)
+            .put_with_debug(body, request_debug_string)
+            .await
+    }
+
+    async fn delete_with_debug(
+        self,
+        request_debug_string: &mut String,
+    ) -> Result<FlUrlResponse, FlUrlError> {
+        FlUrl::new(self)
+            .delete_with_debug(request_debug_string)
+            .await
     }
 }
 
@@ -119,6 +188,49 @@ impl<'g> IntoFlUrl for &'g String {
     async fn delete(self) -> Result<FlUrlResponse, FlUrlError> {
         FlUrl::new(self).delete().await
     }
+
+    async fn get_with_debug(
+        self,
+        request_debug_string: &mut String,
+    ) -> Result<FlUrlResponse, FlUrlError> {
+        FlUrl::new(self).get_with_debug(request_debug_string).await
+    }
+
+    async fn head_with_debug(
+        self,
+        request_debug_string: &mut String,
+    ) -> Result<FlUrlResponse, FlUrlError> {
+        FlUrl::new(self).head_with_debug(request_debug_string).await
+    }
+
+    async fn post_with_debug(
+        self,
+        body: HttpRequestBody,
+        request_debug_string: &mut String,
+    ) -> Result<FlUrlResponse, FlUrlError> {
+        FlUrl::new(self)
+            .post_with_debug(body, request_debug_string)
+            .await
+    }
+
+    async fn put_with_debug(
+        self,
+        body: HttpRequestBody,
+        request_debug_string: &mut String,
+    ) -> Result<FlUrlResponse, FlUrlError> {
+        FlUrl::new(self)
+            .put_with_debug(body, request_debug_string)
+            .await
+    }
+
+    async fn delete_with_debug(
+        self,
+        request_debug_string: &mut String,
+    ) -> Result<FlUrlResponse, FlUrlError> {
+        FlUrl::new(self)
+            .delete_with_debug(request_debug_string)
+            .await
+    }
 }
 
 #[async_trait::async_trait]
@@ -165,5 +277,48 @@ impl IntoFlUrl for String {
 
     async fn delete(self) -> Result<FlUrlResponse, FlUrlError> {
         FlUrl::new(self).delete().await
+    }
+
+    async fn get_with_debug(
+        self,
+        request_debug_string: &mut String,
+    ) -> Result<FlUrlResponse, FlUrlError> {
+        FlUrl::new(self).get_with_debug(request_debug_string).await
+    }
+
+    async fn head_with_debug(
+        self,
+        request_debug_string: &mut String,
+    ) -> Result<FlUrlResponse, FlUrlError> {
+        FlUrl::new(self).head_with_debug(request_debug_string).await
+    }
+
+    async fn post_with_debug(
+        self,
+        body: HttpRequestBody,
+        request_debug_string: &mut String,
+    ) -> Result<FlUrlResponse, FlUrlError> {
+        FlUrl::new(self)
+            .post_with_debug(body, request_debug_string)
+            .await
+    }
+
+    async fn put_with_debug(
+        self,
+        body: HttpRequestBody,
+        request_debug_string: &mut String,
+    ) -> Result<FlUrlResponse, FlUrlError> {
+        FlUrl::new(self)
+            .put_with_debug(body, request_debug_string)
+            .await
+    }
+
+    async fn delete_with_debug(
+        self,
+        request_debug_string: &mut String,
+    ) -> Result<FlUrlResponse, FlUrlError> {
+        FlUrl::new(self)
+            .delete_with_debug(request_debug_string)
+            .await
     }
 }
