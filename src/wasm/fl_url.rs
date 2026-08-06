@@ -234,6 +234,22 @@ impl FlUrl {
         model.fill_url(&mut self.url_builder)?;
         model.fill_headers(&mut self.headers)?;
         let body = model.get_body::<crate::body::FlUrlRnd>()?;
+
+        // `HttpRequestBody::into_vec()` gives an empty `Vec` for a streamed body, so
+        // without this check a `#[http_body_as_stream]` model would go out as a
+        // request with no body at all — a silent data loss. The browser cannot stream
+        // a request body the way the native backend does: `fetch` only accepts a
+        // `ReadableStream` on Chromium 105+ over HTTP/2+, and not at all on Firefox or
+        // Safari. Where the payload is a picked file there is no need for it either —
+        // handing the `File`/`Blob` to `fetch` makes the browser stream it from disk
+        // itself, at constant memory, everywhere.
+        if body.is_stream() {
+            return Err(FlUrlError::RequestBuild(
+                "#[http_body_as_stream] can not be sent from wasm: the browser fetch API has no portable streamed request body"
+                    .to_string(),
+            ));
+        }
+
         Ok(body)
     }
 

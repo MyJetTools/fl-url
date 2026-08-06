@@ -606,3 +606,221 @@ async fn a_none_length_strips_a_manually_added_content_length() {
     assert_eq!(received.body_len, TOTAL);
     assert!(received.body_is_all_x);
 }
+
+// ---- Model-driven streamed body ---------------------------------------------
+//
+// The same payload, described by a `#[http_body_as_stream]` model instead of being
+// handed to `post_request_streamed` directly: one model both parses the body on the
+// server and streams it out from the client.
+
+use flurl::HttpVerb;
+use my_http_utils::http_input::{HttpBodyAsStream, HttpBodyStreamSender};
+use my_http_utils::macros::MyHttpInput;
+
+#[derive(MyHttpInput)]
+struct UploadHttpInput {
+    #[http_path(name = "fileName", description = "File name")]
+    file_name: String,
+    #[http_header(name = "X-Api-Key", description = "Api key")]
+    api_key: String,
+    #[http_body_as_stream(description = "File content")]
+    body: HttpBodyAsStream,
+}
+
+fn upload_model(body: HttpBodyAsStream) -> UploadHttpInput {
+    UploadHttpInput {
+        file_name: "archive.tar".to_string(),
+        api_key: "secret".to_string(),
+        body,
+    }
+}
+
+/// Writes `chunks` chunks into the model's stream and marks the body complete.
+/// Without `finish()` the reader reports the end as a truncation rather than an EOF.
+fn write_x_chunks(sender: HttpBodyStreamSender, chunks: usize) {
+    tokio::spawn(async move {
+        for _ in 0..chunks {
+            // false means the transport is gone — nothing left to write into
+            if !sender.send_chunk(vec![b'x'; CHUNK_SIZE]).await {
+                return;
+            }
+        }
+        sender.finish();
+    });
+}
+
+#[tokio::test]
+async fn a_model_stream_body_goes_out_chunked_with_the_models_url_and_headers() {
+    const CHUNKS: usize = 16;
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = tokio::spawn(serve_one_request(listener, true));
+
+    let (sender, stream) = HttpBodyAsStream::create(4, None);
+    write_x_chunks(sender, CHUNKS);
+
+    let mut response = FlUrl::new(format!("http://127.0.0.1:{}", port))
+        .append_path_segment("upload")
+        .with_header("Content-Type", "application/octet-stream")
+        .do_not_reuse_connection()
+        .set_timeout(Duration::from_secs(30))
+        .execute_request(HttpVerb::Post, upload_model(stream))
+        .await
+        .unwrap();
+
+    assert_eq!(response.get_status_code(), 200);
+    assert_eq!(response.get_body_as_slice().await.unwrap(), b"ok");
+
+    let received = server.await.unwrap();
+
+    // The static prefix on the builder plus the model's own path segment.
+    assert!(
+        received.head.starts_with("POST /upload/archive.tar HTTP/1.1"),
+        "unexpected request line: {}",
+        received.head
+    );
+    // The model's header field survives the streamed path...
+    assert_eq!(received.header("x-api-key"), Some("secret"));
+    // ...and so does one added on the builder.
+    assert_eq!(
+        received.header("content-type"),
+        Some("application/octet-stream")
+    );
+
+    // `create(_, None)` means the size is unknown, so the body is framed chunked.
+    assert_eq!(received.header("transfer-encoding"), Some("chunked"));
+    assert!(!received.has_header("content-length"));
+
+    assert_eq!(received.body_len, CHUNKS * CHUNK_SIZE);
+    assert!(received.body_is_all_x, "the payload was corrupted on the way");
+}
+
+#[tokio::test]
+async fn the_streams_own_content_length_picks_the_framing() {
+    // The framing of a model-driven stream is not a separate argument the caller could
+    // get out of step with the payload: it comes from the stream itself.
+    const CHUNKS: usize = 8;
+    const TOTAL: usize = CHUNKS * CHUNK_SIZE;
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = tokio::spawn(serve_one_request(listener, true));
+
+    let (sender, stream) = HttpBodyAsStream::create(4, Some(TOTAL as u64));
+    write_x_chunks(sender, CHUNKS);
+
+    let mut response = FlUrl::new(format!("http://127.0.0.1:{}", port))
+        .append_path_segment("upload")
+        .do_not_reuse_connection()
+        .set_timeout(Duration::from_secs(30))
+        .execute_request(HttpVerb::Put, upload_model(stream))
+        .await
+        .unwrap();
+
+    assert_eq!(response.get_status_code(), 200);
+    let _ = response.get_body_as_slice().await.unwrap();
+
+    let received = server.await.unwrap();
+
+    assert!(
+        received.head.starts_with("PUT /upload/archive.tar HTTP/1.1"),
+        "unexpected request line: {}",
+        received.head
+    );
+    assert_eq!(
+        received.header("content-length"),
+        Some(TOTAL.to_string().as_str())
+    );
+    assert!(!received.has_header("transfer-encoding"));
+    assert_eq!(received.body_len, TOTAL);
+    assert!(received.body_is_all_x);
+}
+
+#[tokio::test]
+async fn a_stream_model_on_a_bodyless_verb_is_refused() {
+    // GET drops a materialized body silently, which is harmless. Dropping a stream
+    // would leave the application writing into something nothing will ever read, so
+    // this combination is refused instead.
+    let (sender, stream) = HttpBodyAsStream::create(4, None);
+
+    let result = FlUrl::new("http://127.0.0.1:1")
+        .execute_request(HttpVerb::Get, upload_model(stream))
+        .await;
+
+    match result {
+        Err(flurl::FlUrlError::RequestBuild(message)) => {
+            assert!(
+                message.contains("http_body_as_stream"),
+                "unexpected message: {}",
+                message
+            );
+        }
+        Err(err) => panic!("expected RequestBuild, got {:?}", err),
+        Ok(_) => panic!("a streamed body on GET must not be silently dropped"),
+    }
+
+    drop(sender);
+}
+
+#[tokio::test]
+async fn a_model_carrying_an_empty_stream_is_refused() {
+    // `empty()` is what a model meant only to be parsed by a server carries. Sending
+    // it would produce a request with no body at all, so it fails loudly instead.
+    let result = FlUrl::new("http://127.0.0.1:1")
+        .execute_request(HttpVerb::Post, upload_model(HttpBodyAsStream::empty()))
+        .await;
+
+    match result {
+        Err(flurl::FlUrlError::RequestBuild(message)) => {
+            assert!(
+                message.contains("no body to send"),
+                "unexpected message: {}",
+                message
+            );
+        }
+        Err(err) => panic!("expected RequestBuild, got {:?}", err),
+        Ok(_) => panic!("an empty stream must not go out as a body-less request"),
+    }
+}
+
+#[tokio::test]
+async fn a_stream_that_breaks_off_fails_the_request() {
+    // The sender is dropped without `finish()`, which is how a producer that died
+    // half-way looks. That must fail the request rather than end the body early and
+    // leave a truncated payload on the server.
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+
+    tokio::spawn(async move {
+        let (socket, _) = listener.accept().await.unwrap();
+        // Held open and silent: the failure has to come from the broken stream, not
+        // from the peer going away.
+        tokio::time::sleep(Duration::from_secs(30)).await;
+        drop(socket);
+    });
+
+    let (sender, stream) = HttpBodyAsStream::create(4, None);
+    tokio::spawn(async move {
+        sender.send_chunk(vec![b'x'; CHUNK_SIZE]).await;
+        // dropped WITHOUT finish()
+    });
+
+    let result = FlUrl::new(format!("http://127.0.0.1:{}", port))
+        .append_path_segment("upload")
+        .do_not_reuse_connection()
+        // Generous on purpose: a timeout would make this test pass for the wrong
+        // reason, so the assertion below rules it out.
+        .set_timeout(Duration::from_secs(30))
+        .execute_request(HttpVerb::Post, upload_model(stream))
+        .await;
+
+    match result {
+        Ok(_) => panic!("a truncated stream must not be sent as a complete body"),
+        Err(err) => assert!(
+            !err.is_timeout(),
+            "the request had to fail on the broken stream, not on the timeout: {:?}",
+            err
+        ),
+    }
+}

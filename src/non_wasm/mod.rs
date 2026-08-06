@@ -17,6 +17,7 @@ mod fl_url_headers;
 mod http_clients_cache;
 mod http_connectors;
 mod into_fl_url;
+mod model_body_stream;
 mod my_http_client_wrapper;
 mod response_body;
 

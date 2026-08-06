@@ -516,6 +516,78 @@ let response = FlUrl::new("https://api.example.com")
 `Get`/`Delete`/`Head` do not carry a body, so a body produced by the model is
 ignored for those verbs.
 
+### A Model That Streams Its Body (native only)
+
+A model whose body field is marked `#[http_body_as_stream]` is sent the streamed way
+by the very same `execute_request` — the chunks the application writes into the
+stream go to the socket as they arrive, and the payload is never materialized. It is
+the same model the server parses the incoming body with, used from the other end.
+
+```rust
+use flurl::{FlUrl, HttpVerb};
+use my_http_utils::http_input::HttpBodyAsStream;
+use my_http_utils::macros::MyHttpInput;
+
+#[derive(MyHttpInput)]
+struct UploadHttpInput {
+    #[http_path(name = "fileName", description = "File name")]
+    file_name: String,
+    #[http_header(name = "X-Api-Key", description = "Api key")]
+    api_key: String,
+    #[http_body_as_stream(description = "File content")]
+    body: HttpBodyAsStream,
+}
+
+// `4` is the channel capacity — the back-pressure knob; `None` = the size is not
+// known up front, so the body goes out chunked.
+let (sender, stream) = HttpBodyAsStream::create(4, None);
+
+tokio::spawn(async move {
+    while let Some(chunk) = source.next().await {
+        // false means the transport is gone — nothing left to write into
+        if !sender.send_chunk(chunk).await {
+            return;
+        }
+    }
+    // Marks the body complete. WITHOUT it a dropped sender reads as a producer that
+    // died half-way, and the request fails instead of sending a truncated payload.
+    sender.finish();
+});
+
+let response = FlUrl::new("https://api.example.com")
+    .append_path_segment("upload")
+    .with_header("Content-Type", "application/octet-stream")
+    .set_timeout(Duration::from_secs(600))
+    .execute_request(HttpVerb::Post, UploadHttpInput {
+        file_name: "archive.tar".to_string(),
+        api_key: "secret".to_string(),
+        body: stream,
+    })
+    .await?;
+```
+
+The framing is not a separate argument here — it comes from the stream, so it can
+not drift out of step with the payload: the `content_length` given to
+`HttpBodyAsStream::create` becomes `Content-Length: n`, and `None` goes out chunked.
+Everything else listed under [What does not apply to a streamed
+body](#what-does-not-apply-to-a-streamed-body) applies unchanged — no `compress()`,
+no retries, and `set_timeout` covers the whole upload.
+
+Two cases fail the request rather than quietly sending something else:
+
+| case | why |
+| --- | --- |
+| `Get` / `Delete` / `Head` | a materialized body is merely dropped for these verbs, but dropping a *stream* would leave the application writing into something nothing will ever read |
+| `HttpBodyAsStream::empty()` | what a model carries when it is only ever parsed by a server; sending it would produce a request with no body at all |
+
+**wasm**: the browser `fetch` API has no portable streamed request body — a
+`ReadableStream` body needs Chromium 105+ over HTTP/2+, and Firefox and Safari do not
+support it at all — so `execute_request` with such a model returns
+`FlUrlError::RequestBuild` there instead of sending an empty body. Where the payload
+is a file the user picked, streaming it by hand is not needed anyway: handing the
+`File`/`Blob` straight to `fetch` makes the browser stream it from disk itself, at
+constant memory, in every browser.
+
 ### Requests Without an Input Model
 
 When a request carries no input model, pass `EmptyRequestModel` instead of deriving

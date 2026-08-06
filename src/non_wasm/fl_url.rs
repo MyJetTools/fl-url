@@ -20,6 +20,7 @@ use super::FlUrlResponse;
 use crate::body::HttpRequestBody;
 use crate::non_wasm::compiled_http_request::{CompiledHttpRequest, RequestToExecute};
 use crate::non_wasm::http_connectors::*;
+use crate::non_wasm::model_body_stream::ModelBodyStream;
 
 use crate::non_wasm::http_clients_cache::*;
 
@@ -409,12 +410,19 @@ impl FlUrl {
     ///
     /// `Get`/`Delete`/`Head` do not carry a body, so a body produced by the model
     /// is ignored for those verbs.
+    ///
+    /// A model with a `#[http_body_as_stream]` field goes down the streamed path
+    /// instead — see [`Self::execute_model_stream`].
     pub async fn execute_request(
         mut self,
         verb: HttpVerb,
         model: impl my_http_utils::schema::client::THttpRequestBuilder,
     ) -> Result<FlUrlResponse, FlUrlError> {
         let body = self.fill_from_model(model)?;
+
+        if let HttpRequestBody::Stream(stream) = body {
+            return self.execute_model_stream(verb, stream, None).await;
+        }
 
         match verb {
             HttpVerb::Get => self.get().await,
@@ -437,6 +445,12 @@ impl FlUrl {
     ) -> Result<FlUrlResponse, FlUrlError> {
         let body = self.fill_from_model(model)?;
 
+        if let HttpRequestBody::Stream(stream) = body {
+            return self
+                .execute_model_stream(verb, stream, Some(request_debug_string))
+                .await;
+        }
+
         match verb {
             HttpVerb::Get => self.get_with_debug(request_debug_string).await,
             HttpVerb::Delete => self.delete_with_debug(request_debug_string).await,
@@ -445,6 +459,56 @@ impl FlUrl {
             HttpVerb::Put => self.put_with_debug(body, request_debug_string).await,
             HttpVerb::Patch => self.patch_with_debug(body, request_debug_string).await,
         }
+    }
+
+    /// Sends a model whose body is a `#[http_body_as_stream]` field: the chunks the
+    /// application writes into the stream are pulled out of it and written to the
+    /// socket as they arrive, so the payload is never materialized.
+    ///
+    /// The framing comes from the stream itself — the `content_length` given to
+    /// `HttpBodyAsStream::create` becomes `Content-Length`, and `None` goes out
+    /// chunked. Everything else that applies to a streamed body applies here too
+    /// (see [`Self::execute_streamed`]): no `compress()`, no retries, the timeout
+    /// covers the whole upload.
+    async fn execute_model_stream(
+        self,
+        verb: HttpVerb,
+        stream: my_http_utils::http_input::HttpBodyAsStream,
+        debug: Option<&mut String>,
+    ) -> Result<FlUrlResponse, FlUrlError> {
+        // A streamed payload on a body-less verb is a mistake in the call, not
+        // something to drop quietly the way a materialized body is: the application
+        // is already writing into the stream, and nothing would ever read it.
+        let method = match verb {
+            HttpVerb::Post => Method::POST,
+            HttpVerb::Put => Method::PUT,
+            HttpVerb::Patch => Method::PATCH,
+            HttpVerb::Get | HttpVerb::Delete | HttpVerb::Head => {
+                return Err(FlUrlError::RequestBuild(format!(
+                    "{:?} carries no body, but the model streams one (#[http_body_as_stream])",
+                    verb
+                )))
+            }
+        };
+
+        // `empty()` (a model built to be parsed by a server, never sent) and a stream
+        // whose reader was already taken both land here, and the message says which.
+        let reader = stream.get_body_reader().map_err(|err| {
+            FlUrlError::RequestBuild(format!(
+                "#[http_body_as_stream] model has no body to send: {}",
+                err
+            ))
+        })?;
+
+        let content_length = reader.get_content_length().map(|len| len as usize);
+
+        self.execute_streamed_impl(
+            method,
+            ModelBodyStream::new(reader),
+            content_length,
+            debug,
+        )
+        .await
     }
 
     async fn execute(self, request: RequestToExecute) -> Result<FlUrlResponse, FlUrlError> {
