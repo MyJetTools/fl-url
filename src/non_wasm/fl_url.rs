@@ -734,8 +734,25 @@ impl FlUrl {
                     "http"
                 };
 
+                // H1 puts the socket path into the Host header and gets away with it;
+                // h2 can not, because ':authority' is parsed as a real authority and a
+                // path ends one at its first '/'. The caller's own Host header wins,
+                // otherwise the placeholder — the socket to open is already known to
+                // the connector, so the authority is only what the server sees.
+                #[cfg(unix)]
+                let authority = if self.url_builder.is_unix_socket() {
+                    self.headers
+                        .get_host_header_value()
+                        .unwrap_or(crate::consts::UNIX_SOCKET_AUTHORITY)
+                } else {
+                    self.url_builder.get_host_port()
+                };
+
+                #[cfg(not(unix))]
+                let authority = self.url_builder.get_host_port();
+
                 let uri = Uri::builder()
-                    .authority(self.url_builder.get_host_port())
+                    .authority(authority)
                     .path_and_query(path_and_query)
                     .scheme(scheme)
                     .build()?;

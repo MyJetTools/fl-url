@@ -30,7 +30,13 @@ impl MyHttpClientConnector<UnixStream> for UnixSocketConnector {
 
         let host = self.remote_host.get_host();
 
-        let connect_result = unix_socket.connect(host).await;
+        // A path starting with '~' is accepted as a unix socket url, but '~' is a
+        // shell convention the OS knows nothing about - it has to be resolved against
+        // $HOME before it reaches connect(), otherwise it is looked up as a directory
+        // literally named "~".
+        let host = rust_extensions::file_utils::format_path(host);
+
+        let connect_result = unix_socket.connect(host.as_str()).await;
         match connect_result {
             Ok(stream) => Ok(stream),
             Err(err) => Err(
