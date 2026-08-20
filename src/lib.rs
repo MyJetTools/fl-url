@@ -6,8 +6,9 @@
 //! * **native** (`cfg(not(target_arch = "wasm32"))`) — the full hyper/tokio
 //!   backend in [`mod@non_wasm`]: HTTP/1.1 & HTTP/2, connection pooling, unix
 //!   sockets, and — behind feature gates — TLS + client certificates
-//!   (`with-ring-tls`) and (on unix) SSH tunneling (`with-ssh`). Without `with-ring-tls`
-//!   the crate links no TLS stack at all and an `https://` request panics.
+//!   (`with-ring-tls` for ring, or `with-rust-tls` for a pure-Rust provider) and
+//!   (on unix) SSH tunneling (`with-ssh`). With neither TLS feature the crate
+//!   links no TLS stack at all and an `https://` request panics.
 //! * **wasm32** (`cfg(target_arch = "wasm32")`) — the browser `fetch` backend in
 //!   [`mod@wasm`]. Connection pooling, TLS and redirects are handled by the
 //!   browser, so those knobs become no-ops; every request-building and

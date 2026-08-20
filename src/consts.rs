@@ -1,5 +1,5 @@
 pub const HTTP_DEFAULT_PORT: u16 = 80;
-#[cfg(feature = "with-ring-tls")]
+#[cfg(feature = "_tls")]
 pub const HTTPS_DEFAULT_PORT: u16 = 443;
 
 /// HTTP/2 has no request line — the target is carried by the `:authority` pseudo

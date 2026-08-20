@@ -7,25 +7,38 @@ edition = "2021"
 [features]
 default = []
 with-ssh = ["dep:my-ssh"]
-# Links the TLS stack: my-tls / rustls, with **ring** as the rustls
-# CryptoProvider — hence `ring` in the name. Without this feature the crate never
-# pulls rustls in, `with_client_certificate()` does not exist, and an `https://`
-# request panics at execute time — see `FlUrl::execute`.
+
+# Internal — do not enable directly, and do not rely on its name. It means "the
+# TLS code paths are compiled in"; WHICH provider backs them is the separate
+# choice below. Every `#[cfg]` guarding TLS code keys off this, so adding a third
+# provider later is one line here instead of ~50 edits across src/.
 #
-# `my-tls/with-ring-crypto-providers` is part of it on purpose: my-tls leaves the
-# provider choice to the consumer, and with none installed both
-# `create_tls_client_config_ex` and the client-certificate key parsing fail at
-# connect time. FlUrl is a client library — turning this on has to give a working
-# https, not a build that needs the caller to install a provider first.
+# On its own it compiles the TLS code with no provider installed: an `https://`
+# request then fails at connect time with my-tls' "No rustls CryptoProvider is
+# installed" error rather than panicking.
+_tls = ["dep:my-tls"]
+
+# Pick exactly one of the two provider features. Both enable `https://` and
+# `with_client_certificate()`; they differ only in the rustls CryptoProvider.
 #
-# ring, not aws-lc-rs: no aws-lc-sys C build is inflicted on consumers. A caller
-# who wants a different provider should depend on my-tls directly without this
-# feature and install their own.
-with-ring-tls = ["dep:my-tls", "my-tls/with-ring-crypto-providers"]
-# Enables accept_invalid_certificate(). Dangerous: disables TLS server-cert
-# verification. Off by default; without it accept_invalid_certificate() errors at
-# connect time instead of silently downgrading security. Implies `with-ring-tls`.
-dangerous-tls = ["with-ring-tls", "my-tls/dangerous-tls"]
+# ring — the default recommendation. Mature and very widely deployed; costs a
+# bundled C/assembly build (no aws-lc-sys either way).
+with-ring-tls = ["_tls", "my-tls/with-ring-crypto-providers"]
+
+# Pure Rust — no C toolchain anywhere, via rustls-graviola. Trade-offs: it builds
+# ONLY on x86_64 and aarch64 (a hard `compile_error!` elsewhere) and the crypto
+# implementation is far younger and less deployed than ring. Prefer
+# `with-ring-tls` unless getting rid of the C toolchain is the point.
+#
+# Enabling both — which `--all-features` does — is not an error: my-tls resolves
+# the conflict in favour of ring.
+with-rust-tls = ["_tls", "my-tls/with-rust-crypto-providers"]
+
+# A modifier, not a TLS switch: it only unlocks accept_invalid_certificate().
+# Combine it with a provider feature — on its own the TLS code compiles but no
+# provider is installed. Dangerous: disables TLS server-cert verification, and
+# even then only for callers that opt in per request.
+dangerous-tls = ["_tls", "my-tls/dangerous-tls"]
 
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
