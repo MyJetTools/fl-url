@@ -49,13 +49,15 @@ impl<
                 let request = request.unwrap_as_hyper();
                 let result = my_http_client.do_request(request, request_timeout).await?;
 
+                // `HyperHttpResponse` has a single variant here: my-http-client is
+                // built without `with-websocket`, so a `101 Switching Protocols`
+                // arrives as an ordinary response rather than an upgrade. FlUrl
+                // never asks for an upgrade, and that is what keeps the whole
+                // tungstenite stack out of the dependency tree.
                 match result {
                     my_http_client::http1_hyper::HyperHttpResponse::Response(response) => {
                         Ok(MyHttpResponse::Response(response))
                     }
-                    my_http_client::http1_hyper::HyperHttpResponse::WebSocketUpgrade {
-                        ..
-                    } => Err(MyHttpClientError::UpgradedToWebSocket),
                 }
             }
 
@@ -84,15 +86,11 @@ impl<
                     .do_streamed_request(request, content_size, request_timeout)
                     .await?;
 
+                // Single variant - see the note in `do_request`.
                 match result {
                     my_http_client::http1_hyper::HyperHttpResponse::Response(response) => {
                         Ok(MyHttpResponse::Response(response))
                     }
-                    // fl-url does not support WebSockets; the upgraded connection is
-                    // consumed and must not be reused.
-                    my_http_client::http1_hyper::HyperHttpResponse::WebSocketUpgrade {
-                        ..
-                    } => Err(MyHttpClientError::UpgradedToWebSocket),
                 }
             }
             Self::MyHttpClient(_) | Self::H2(_) => {

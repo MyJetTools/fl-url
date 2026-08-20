@@ -24,23 +24,25 @@ pub fn new_form_data() -> FormDataBody {
     FormDataBody::new(&rand_string(16))
 }
 
-/// Native RNG: `rand`.
-#[cfg(not(target_arch = "wasm32"))]
+/// One implementation for both targets, on top of uuid-v4: `rust_extensions::uuid`
+/// resolves to the `uuid` crate natively and to `crypto.randomUUID()` in the
+/// browser, so FlUrl carries no RNG dependency of its own.
+///
+/// Hyphens are dropped — callers want a plain alphanumeric token — leaving 32 hex
+/// chars per uuid, then the result is cut to `len`. A multipart boundary only has
+/// to be absent from the body of that one request, so this is ample.
 fn rand_string(len: usize) -> String {
-    use rand::distr::Alphanumeric;
-    rand::distr::SampleString::sample_string(&Alphanumeric, &mut rand::rng(), len)
-}
-
-/// wasm RNG: `Math.random()`. A multipart boundary only has to be absent from the
-/// body of that one request, so a per-request random string is more than enough
-/// (no `getrandom`/CSPRNG dependency needed).
-#[cfg(target_arch = "wasm32")]
-fn rand_string(len: usize) -> String {
-    const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
     let mut result = String::with_capacity(len);
-    for _ in 0..len {
-        let idx = ((js_sys::Math::random() * CHARS.len() as f64) as usize).min(CHARS.len() - 1);
-        result.push(CHARS[idx] as char);
+
+    // One uuid covers len <= 32; the loop only matters if a caller wants more.
+    while result.len() < len {
+        result.extend(
+            rust_extensions::uuid::generate_v4()
+                .chars()
+                .filter(|c| *c != '-'),
+        );
     }
+
+    result.truncate(len); // hex only, so byte length == char count
     result
 }
