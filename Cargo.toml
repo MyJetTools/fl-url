@@ -7,10 +7,14 @@ edition = "2021"
 [features]
 default = []
 with-ssh = ["dep:my-ssh"]
+# Links the TLS stack (my-tls / rustls). Without it the crate never pulls rustls
+# in, `with_client_certificate()` does not exist, and an `https://` request
+# panics at execute time — see `FlUrl::execute`.
+with-tls = ["dep:my-tls"]
 # Enables accept_invalid_certificate(). Dangerous: disables TLS server-cert
 # verification. Off by default; without it accept_invalid_certificate() errors at
-# connect time instead of silently downgrading security.
-dangerous-tls = ["my-tls/dangerous-tls"]
+# connect time instead of silently downgrading security. Implies `with-tls`.
+dangerous-tls = ["with-tls", "my-tls/dangerous-tls"]
 
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -37,7 +41,7 @@ hyper-util = { version = "*", features = ["tokio"] }
 http-body-util = { version = "*" }
 my-http-client = { tag = "0.1.2", git = "https://github.com/MyJetTools/my-http-client.git" }
 my-hyper-utils = { tag = "0.1.0", git = "https://github.com/MyJetTools/my-hyper-utils.git" }
-my-tls = { tag = "0.1.5", git = "https://github.com/MyJetTools/my-tls.git" }
+my-tls = { tag = "0.1.5", git = "https://github.com/MyJetTools/my-tls.git", optional = true }
 http = "*"
 bytes = "*"
 rand = "*"

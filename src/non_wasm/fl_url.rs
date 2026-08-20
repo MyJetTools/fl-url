@@ -6,6 +6,7 @@ use hyper::Uri;
 use hyper::Version;
 use my_http_client::http1::MyHttpRequestBuilder;
 use my_http_client::MyHttpClientConnector;
+#[cfg(feature = "with-tls")]
 use my_tls::tokio_rustls::client::TlsStream;
 
 use rust_extensions::remote_endpoint::Scheme;
@@ -68,6 +69,7 @@ pub enum HttpVerb {
 pub struct FlUrl {
     pub url_builder: UrlBuilder,
     pub headers: FlUrlHeaders,
+    #[cfg(feature = "with-tls")]
     pub client_cert: Option<my_tls::ClientCertificate>,
     pub accept_invalid_certificate: bool,
     // If we are trying to reuse connection, but it was not used for this time, we will drop it
@@ -143,6 +145,7 @@ impl FlUrl {
 
         let result = Self {
             headers: FlUrlHeaders::new(),
+            #[cfg(feature = "with-tls")]
             client_cert: Default::default(),
             url_builder: url,
             accept_invalid_certificate: false,
@@ -319,6 +322,9 @@ impl FlUrl {
         self
     }
 
+    /// Only available with the `with-tls` feature — without it the crate does not
+    /// link a TLS stack at all, so there is no certificate type to pass in.
+    #[cfg(feature = "with-tls")]
     pub fn with_client_certificate(mut self, certificate: my_tls::ClientCertificate) -> Self {
         if self.client_cert.is_some() {
             panic!("Client certificate is already set");
@@ -331,6 +337,8 @@ impl FlUrl {
         self
     }
 
+    /// Without the `with-tls` feature this is inert: the request never reaches a
+    /// TLS handshake because `https://` panics at execute time.
     pub fn accept_invalid_certificate(mut self) -> Self {
         self.accept_invalid_certificate = true;
         self
@@ -553,6 +561,14 @@ impl FlUrl {
                     .await?
                 }
             }
+            #[cfg(not(feature = "with-tls"))]
+            Scheme::Https => {
+                panic!(
+                    "FlUrl does not support https: it is compiled without the 'with-tls' feature. Url: {}",
+                    self.url_builder
+                )
+            }
+            #[cfg(feature = "with-tls")]
             Scheme::Https => {
                 if self.do_not_reuse_connection {
                     self.execute_with_retry::<TlsStream<TcpStream>, HttpsConnector>(
@@ -1351,6 +1367,7 @@ impl FlUrl {
             mode: self.mode,
             remote_endpoint,
             host_header: self.headers.get_host_header_value(),
+            #[cfg(feature = "with-tls")]
             client_certificate: self.client_cert.as_ref(),
             accept_invalid_certificate: self.accept_invalid_certificate,
             #[cfg(all(unix, feature = "with-ssh"))]
@@ -1486,6 +1503,7 @@ mod test {
 
     use crate::FlUrl;
 
+    #[cfg(feature = "with-tls")]
     #[tokio::test]
     async fn test_h1() {
         let mut fl_url_resp = FlUrl::new("https://jetdev.eu/img/logo.png")
@@ -1500,6 +1518,7 @@ mod test {
         println!("{}", resp.len());
     }
 
+    #[cfg(feature = "with-tls")]
     #[tokio::test]
     async fn test_h2() {
         let mut fl_url_resp = FlUrl::new("https://jetdev.eu/img/logo.png")
@@ -1513,6 +1532,7 @@ mod test {
         println!("{}", resp.len());
     }
 
+    #[cfg(feature = "with-tls")]
     #[tokio::test]
     async fn test_head() {
         let mut fl_url_resp = FlUrl::new("https://jetdev.eu/img/logo.png")

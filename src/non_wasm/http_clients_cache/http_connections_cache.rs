@@ -7,6 +7,7 @@ use parking_lot::Mutex;
 use rust_extensions::date_time::DateTimeAsMicroseconds;
 use tokio::net::TcpStream;
 
+#[cfg(feature = "with-tls")]
 use my_tls::tokio_rustls::client::TlsStream;
 
 use crate::{non_wasm::http_connectors::*, non_wasm::my_http_client_wrapper::MyHttpClientWrapper, ConnectionParams};
@@ -22,6 +23,7 @@ pub struct ConnectionItem<
 pub struct FlUrlHttpConnectionsCacheInner {
     max_connections: usize,
     http: AHashMap<String, Vec<ConnectionItem<TcpStream, HttpConnector>>>,
+    #[cfg(feature = "with-tls")]
     https: AHashMap<String, Vec<ConnectionItem<TlsStream<TcpStream>, HttpsConnector>>>,
     #[cfg(unix)]
     unix_socket: AHashMap<String, Vec<ConnectionItem<UnixSocketStream, UnixSocketConnector>>>,
@@ -34,6 +36,7 @@ impl Default for FlUrlHttpConnectionsCacheInner {
         Self {
             max_connections: 5,
             http: Default::default(),
+            #[cfg(feature = "with-tls")]
             https: Default::default(),
             #[cfg(unix)]
             unix_socket: Default::default(),
@@ -69,6 +72,7 @@ impl FlUrlHttpConnectionsCache {
     pub fn clear(&self) {
         let mut write_access = self.inner.lock();
         write_access.http.clear();
+        #[cfg(feature = "with-tls")]
         write_access.https.clear();
         #[cfg(unix)]
         write_access.unix_socket.clear();
@@ -83,6 +87,7 @@ impl FlUrlHttpConnectionsCache {
         let now = DateTimeAsMicroseconds::now();
         let mut write_access = self.inner.lock();
         gc_map(&mut write_access.http, now, reuse_connection_timeout_seconds);
+        #[cfg(feature = "with-tls")]
         gc_map(
             &mut write_access.https,
             now,
@@ -144,6 +149,7 @@ impl FlUrlHttpConnectionsCache {
         remove_connection(&mut write_access.http, connection);
     }
 
+    #[cfg(feature = "with-tls")]
     pub async fn get_https_connection(
         &self,
         params: &ConnectionParams<'_>,
@@ -166,6 +172,7 @@ impl FlUrlHttpConnectionsCache {
         )
     }
 
+    #[cfg(feature = "with-tls")]
     pub fn put_https_connection_back_sync(
         &self,
         connection: Arc<MyHttpClientWrapper<TlsStream<TcpStream>, HttpsConnector>>,
@@ -175,6 +182,7 @@ impl FlUrlHttpConnectionsCache {
         put_connection_back(&mut write_access.https, max_connections, connection);
     }
 
+    #[cfg(feature = "with-tls")]
     pub async fn put_https_connection_back(
         &self,
         connection: Arc<MyHttpClientWrapper<TlsStream<TcpStream>, HttpsConnector>>,
@@ -182,6 +190,7 @@ impl FlUrlHttpConnectionsCache {
         self.put_https_connection_back_sync(connection);
     }
 
+    #[cfg(feature = "with-tls")]
     pub fn drop_https_connection_sync(
         &self,
         connection: &Arc<MyHttpClientWrapper<TlsStream<TcpStream>, HttpsConnector>>,
@@ -434,6 +443,7 @@ mod tests {
             mode,
             remote_endpoint: endpoint.to_ref(),
             host_header: None,
+            #[cfg(feature = "with-tls")]
             client_certificate: None,
             accept_invalid_certificate: false,
             reuse_connection_timeout_seconds: 120,

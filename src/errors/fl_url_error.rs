@@ -1,6 +1,7 @@
 /// The single, shared FlUrl error type. Variants that carry native-only payloads
 /// (hyper / rustls / my-http-client / ssh) are compiled only for non-wasm
-/// targets; the wasm backend adds [`FlUrlError::FetchError`]. It is
+/// targets — and the rustls one only with the `with-tls` feature; the wasm
+/// backend adds [`FlUrlError::FetchError`]. It is
 /// `#[non_exhaustive]`, so consumers must already carry a catch-all arm — which
 /// makes the per-target variant set a non-breaking implementation detail.
 #[derive(Debug)]
@@ -30,7 +31,7 @@ pub enum FlUrlError {
     HyperError(hyper::Error),
     #[cfg(not(target_arch = "wasm32"))]
     HttpError(hyper::http::Error),
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(all(not(target_arch = "wasm32"), feature = "with-tls"))]
     RustTlsError(my_tls::tokio_rustls::rustls::Error),
     #[cfg(not(target_arch = "wasm32"))]
     MyHttpClientError(my_http_client::MyHttpClientError),
@@ -103,7 +104,7 @@ impl From<my_http_utils::schema::client::HttpRequestBuildError> for FlUrlError {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "with-tls"))]
 impl From<my_tls::tokio_rustls::rustls::Error> for FlUrlError {
     fn from(value: my_tls::tokio_rustls::rustls::Error) -> Self {
         Self::RustTlsError(value)
