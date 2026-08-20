@@ -1,8 +1,8 @@
 mod http;
 pub use http::*;
-#[cfg(feature = "with-tls")]
+#[cfg(feature = "with-ring-tls")]
 mod https;
-#[cfg(feature = "with-tls")]
+#[cfg(feature = "with-ring-tls")]
 pub use https::*;
 
 #[cfg(all(unix, feature = "with-ssh"))]

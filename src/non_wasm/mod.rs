@@ -1,8 +1,8 @@
 //! The native (non-wasm) backend of FlUrl.
 //!
 //! This is the full hyper/tokio implementation — HTTP/1.1 & HTTP/2, connection
-//! pooling, unix sockets, plus TLS + client certificates behind the `with-tls`
-//! feature and (on unix) SSH tunneling behind `with-ssh`. Without `with-tls`
+//! pooling, unix sockets, plus TLS + client certificates behind the `with-ring-tls`
+//! feature and (on unix) SSH tunneling behind `with-ssh`. Without `with-ring-tls`
 //! there is no `HttpsConnector` and `FlUrl::execute` panics on an `https://` url.
 //! It is compiled only for non-wasm targets; `crate::lib` aliases the types
 //! defined here to the crate root so `flurl::FlUrl`, `flurl::FlUrlResponse`, …
@@ -33,7 +33,7 @@ pub use response_body::*;
 
 pub extern crate hyper;
 
-#[cfg(feature = "with-tls")]
+#[cfg(feature = "with-ring-tls")]
 pub extern crate my_tls;
 
 #[cfg(all(unix, feature = "with-ssh"))]

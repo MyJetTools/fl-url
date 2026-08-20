@@ -7,21 +7,25 @@ edition = "2021"
 [features]
 default = []
 with-ssh = ["dep:my-ssh"]
-# Links the TLS stack (my-tls / rustls). Without it the crate never pulls rustls
-# in, `with_client_certificate()` does not exist, and an `https://` request
-# panics at execute time — see `FlUrl::execute`.
+# Links the TLS stack: my-tls / rustls, with **ring** as the rustls
+# CryptoProvider — hence `ring` in the name. Without this feature the crate never
+# pulls rustls in, `with_client_certificate()` does not exist, and an `https://`
+# request panics at execute time — see `FlUrl::execute`.
 #
-# `my-tls/with-crypto-providers` is part of it on purpose: my-tls leaves the
-# rustls CryptoProvider to the consumer, and without one installed
-# `create_tls_client_config_ex` errors out at connect time. FlUrl is a client
-# library — turning on `with-tls` has to give a working https, not a build that
-# needs the caller to install a provider first. The feature pulls ring (not
-# aws-lc-rs), so no C toolchain is dragged in.
-with-tls = ["dep:my-tls", "my-tls/with-ring-crypto-providers"]
+# `my-tls/with-ring-crypto-providers` is part of it on purpose: my-tls leaves the
+# provider choice to the consumer, and with none installed both
+# `create_tls_client_config_ex` and the client-certificate key parsing fail at
+# connect time. FlUrl is a client library — turning this on has to give a working
+# https, not a build that needs the caller to install a provider first.
+#
+# ring, not aws-lc-rs: no aws-lc-sys C build is inflicted on consumers. A caller
+# who wants a different provider should depend on my-tls directly without this
+# feature and install their own.
+with-ring-tls = ["dep:my-tls", "my-tls/with-ring-crypto-providers"]
 # Enables accept_invalid_certificate(). Dangerous: disables TLS server-cert
 # verification. Off by default; without it accept_invalid_certificate() errors at
-# connect time instead of silently downgrading security. Implies `with-tls`.
-dangerous-tls = ["with-tls", "my-tls/dangerous-tls"]
+# connect time instead of silently downgrading security. Implies `with-ring-tls`.
+dangerous-tls = ["with-ring-tls", "my-tls/dangerous-tls"]
 
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html

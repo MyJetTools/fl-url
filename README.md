@@ -10,7 +10,7 @@ FLUrl is a Hyper-based HTTP client that provides a fluent API for building and e
 - **Connection Reuse**: Automatic connection pooling and reuse for HTTP/1.1 and HTTP/2
 - **Multiple HTTP Modes**: Support for HTTP/2, HTTP/1.1 with Hyper, and HTTP/1.1 without Hyper
 - **Body Types**: JSON, URL-encoded, multipart/form-data, and raw data
-- **SSL/TLS**: Opt-in via the `with-tls` feature — client certificate support and invalid certificate acceptance. Without it the crate never links rustls and `https://` panics
+- **SSL/TLS**: Opt-in via the `with-ring-tls` feature — rustls on the ring provider, client certificate support and invalid certificate acceptance. Without it the crate never links rustls and `https://` panics
 - **SSH Tunneling**: Optional SSH tunnel support via `with-ssh` feature
 - **Unix Socket Support**: Native Unix socket support (Unix systems only)
 - **Retry Logic**: Configurable retry mechanism
@@ -29,16 +29,16 @@ Add to your `Cargo.toml`:
 flurl = "0.6.1"
 ```
 
-**`https://` needs the `with-tls` feature.** It is off by default so that a
+**`https://` needs the `with-ring-tls` feature.** It is off by default so that a
 project doing plain HTTP (or unix sockets, or SSH tunnels) does not pay for the
-rustls stack — `my-tls`, `rustls`, `tokio-rustls`, `ring` and the C build of
-`aws-lc-sys` all leave the dependency tree. A build without it that requests an
+rustls stack — `my-tls`, `rustls`, `tokio-rustls` and `ring` all leave the
+dependency tree. A build without it that requests an
 `https://` url **panics** at execute time with
-`FlUrl does not support https: it is compiled without the 'with-tls' feature`.
+`FlUrl does not support https: it is compiled without the 'with-ring-tls' feature`.
 
 ```toml
 [dependencies]
-flurl = { version = "0.6.1", features = ["with-tls"] }
+flurl = { version = "0.6.1", features = ["with-ring-tls"] }
 ```
 
 For SSH tunneling support:
@@ -52,11 +52,11 @@ flurl = { version = "0.6.1", features = ["with-ssh"] }
 
 | Feature | Default | What it does |
 | --- | --- | --- |
-| `with-tls` | off | Links the TLS stack and enables `https://` plus [`with_client_certificate`](#client-certificate). Without it `https://` panics. |
-| `dangerous-tls` | off | Makes [`accept_invalid_certificate()`](#accept-invalid-certificates) actually skip server-cert verification. Implies `with-tls`. Without it that call errors at connect time rather than silently downgrading security. |
+| `with-ring-tls` | off | Links the TLS stack and enables `https://` plus [`with_client_certificate`](#client-certificate). Installs **ring** as the rustls `CryptoProvider` — that is the `ring` in the name; no `aws-lc-sys` C build is pulled in. Without the feature `https://` panics. |
+| `dangerous-tls` | off | Makes [`accept_invalid_certificate()`](#accept-invalid-certificates) actually skip server-cert verification. Implies `with-ring-tls`. Without it that call errors at connect time rather than silently downgrading security. |
 | `with-ssh` | off | [SSH tunneling](#ssh-tunneling-with-ssh-feature) (`ssh://…->http://…` urls). Unix only. |
 
-On `wasm32` TLS is the browser's job, so `with-tls` is irrelevant there — the
+On `wasm32` TLS is the browser's job, so `with-ring-tls` is irrelevant there — the
 `fetch` backend handles `https://` with or without it.
 
 ## WebAssembly (WASM) Support
@@ -113,7 +113,7 @@ read on the same signal (unbounded by default, as on native); `with_retries`
 replays idempotent methods only; `compress` gzips the request body.
 
 Native-only surface that is **not available** under wasm (browsers can't express
-it): `with_client_certificate` (native + `with-tls`), all `*_ssh_*` methods, unix-socket URLs,
+it): `with_client_certificate` (native + `with-ring-tls`), all `*_ssh_*` methods, unix-socket URLs,
 `get_body_as_stream` / `FlResponseAsStream`, and `into_hyper_response`.
 
 Futures returned under wasm are `!Send` (the browser is single-threaded), so drive
@@ -842,9 +842,9 @@ let response = FlUrl::new("https://api.example.com/data")
     .await?;
 ```
 
-## SSL/TLS Configuration (with-tls feature)
+## SSL/TLS Configuration (with-ring-tls feature)
 
-Everything in this section requires `features = ["with-tls"]`. Without it
+Everything in this section requires `features = ["with-ring-tls"]`. Without it
 `with_client_certificate` does not exist and an `https://` request panics.
 
 ### Accept Invalid Certificates
@@ -857,7 +857,7 @@ let response = FlUrl::new("https://self-signed.example.com")
 ```
 
 This one also needs `features = ["dangerous-tls"]` to take effect — with only
-`with-tls` the connection errors instead of silently dropping server-cert
+`with-ring-tls` the connection errors instead of silently dropping server-cert
 verification.
 
 ### Client Certificate

@@ -1,4 +1,4 @@
-#[cfg(feature = "with-tls")]
+#[cfg(feature = "with-ring-tls")]
 use std::hash::{Hash, Hasher};
 
 #[cfg(all(unix, feature = "with-ssh"))]
@@ -29,7 +29,7 @@ pub fn get_http_connection_key(params: &ConnectionParams<'_>) -> String {
 /// For HTTPS the TLS identity is baked into the connector at creation, so the
 /// key also includes the SNI server name and the client certificate — otherwise
 /// requests with different identities would silently share a handshake.
-#[cfg(feature = "with-tls")]
+#[cfg(feature = "with-ring-tls")]
 pub fn get_https_connection_key(params: &ConnectionParams<'_>) -> String {
     let cert_tag = match params.client_certificate {
         Some(cert) => {
