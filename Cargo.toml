@@ -10,7 +10,14 @@ with-ssh = ["dep:my-ssh"]
 # Links the TLS stack (my-tls / rustls). Without it the crate never pulls rustls
 # in, `with_client_certificate()` does not exist, and an `https://` request
 # panics at execute time — see `FlUrl::execute`.
-with-tls = ["dep:my-tls"]
+#
+# `my-tls/with-crypto-providers` is part of it on purpose: my-tls leaves the
+# rustls CryptoProvider to the consumer, and without one installed
+# `create_tls_client_config_ex` errors out at connect time. FlUrl is a client
+# library — turning on `with-tls` has to give a working https, not a build that
+# needs the caller to install a provider first. The feature pulls ring (not
+# aws-lc-rs), so no C toolchain is dragged in.
+with-tls = ["dep:my-tls", "my-tls/with-ring-crypto-providers"]
 # Enables accept_invalid_certificate(). Dangerous: disables TLS server-cert
 # verification. Off by default; without it accept_invalid_certificate() errors at
 # connect time instead of silently downgrading security. Implies `with-tls`.
