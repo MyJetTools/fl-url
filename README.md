@@ -10,7 +10,7 @@ FLUrl is a Hyper-based HTTP client that provides a fluent API for building and e
 - **Connection Reuse**: Automatic connection pooling and reuse for HTTP/1.1 and HTTP/2
 - **Multiple HTTP Modes**: Support for HTTP/2, HTTP/1.1 with Hyper, and HTTP/1.1 without Hyper
 - **Body Types**: JSON, URL-encoded, multipart/form-data, and raw data
-- **SSL/TLS**: Opt-in via the `with-ring-tls` feature — rustls on the ring provider, client certificate support and invalid certificate acceptance. Without it the crate never links rustls and `https://` panics
+- **SSL/TLS**: Opt-in via one of two provider features — `with-ring-tls` (ring) or `with-rust-tls` (pure Rust, no C toolchain). Client certificate support and invalid certificate acceptance. With neither, the crate never links rustls and `https://` panics
 - **SSH Tunneling**: Optional SSH tunnel support via `with-ssh` feature
 - **Unix Socket Support**: Native Unix socket support (Unix systems only)
 - **Retry Logic**: Configurable retry mechanism
@@ -29,17 +29,30 @@ Add to your `Cargo.toml`:
 flurl = "0.6.1"
 ```
 
-**`https://` needs the `with-ring-tls` feature.** It is off by default so that a
+**`https://` needs a TLS provider feature.** Both are off by default, so a
 project doing plain HTTP (or unix sockets, or SSH tunnels) does not pay for the
-rustls stack — `my-tls`, `rustls`, `tokio-rustls` and `ring` all leave the
-dependency tree. A build without it that requests an
-`https://` url **panics** at execute time with
-`FlUrl does not support https: it is compiled without the 'with-ring-tls' feature`.
+rustls stack — `my-tls`, `rustls`, `tokio-rustls` and the provider itself all
+leave the dependency tree. A build with neither, requesting an `https://` url,
+**panics** at execute time with `FlUrl does not support https: it is compiled
+without a TLS provider feature`.
+
+Pick one:
 
 ```toml
 [dependencies]
+# ring — the default recommendation: mature, very widely deployed.
 flurl = { version = "0.6.1", features = ["with-ring-tls"] }
 ```
+
+```toml
+[dependencies]
+# pure Rust — no C toolchain anywhere, via rustls-graviola.
+# x86_64 and aarch64 only; a younger, less deployed crypto implementation.
+flurl = { version = "0.6.1", features = ["with-rust-tls"] }
+```
+
+Enabling both is not an error (`--all-features` does it): my-tls resolves the
+conflict in favour of ring.
 
 For SSH tunneling support:
 
@@ -52,12 +65,13 @@ flurl = { version = "0.6.1", features = ["with-ssh"] }
 
 | Feature | Default | What it does |
 | --- | --- | --- |
-| `with-ring-tls` | off | Links the TLS stack and enables `https://` plus [`with_client_certificate`](#client-certificate). Installs **ring** as the rustls `CryptoProvider` — that is the `ring` in the name; no `aws-lc-sys` C build is pulled in. Without the feature `https://` panics. |
-| `dangerous-tls` | off | Makes [`accept_invalid_certificate()`](#accept-invalid-certificates) actually skip server-cert verification. Implies `with-ring-tls`. Without it that call errors at connect time rather than silently downgrading security. |
+| `with-ring-tls` | off | TLS on the **ring** provider. Enables `https://` plus [`with_client_certificate`](#client-certificate). Mature and widely deployed; costs a bundled C/assembly build. No `aws-lc-sys` either way. |
+| `with-rust-tls` | off | The same, on a **pure-Rust** provider (`rustls-graviola`) — no C toolchain at all. Builds only on x86_64 and aarch64, and the implementation is far younger than ring. Prefer `with-ring-tls` unless dropping the C toolchain is the point. |
+| `dangerous-tls` | off | A modifier, not a TLS switch: it makes [`accept_invalid_certificate()`](#accept-invalid-certificates) actually skip server-cert verification. Combine it with a provider feature — on its own the TLS code compiles but no provider is installed, so https fails at connect time. |
 | `with-ssh` | off | [SSH tunneling](#ssh-tunneling-with-ssh-feature) (`ssh://…->http://…` urls). Unix only. |
 
-On `wasm32` TLS is the browser's job, so `with-ring-tls` is irrelevant there — the
-`fetch` backend handles `https://` with or without it.
+On `wasm32` TLS is the browser's job, so neither provider feature matters there —
+the `fetch` backend handles `https://` with or without them.
 
 ## WebAssembly (WASM) Support
 
@@ -113,7 +127,7 @@ read on the same signal (unbounded by default, as on native); `with_retries`
 replays idempotent methods only; `compress` gzips the request body.
 
 Native-only surface that is **not available** under wasm (browsers can't express
-it): `with_client_certificate` (native + `with-ring-tls`), all `*_ssh_*` methods, unix-socket URLs,
+it): `with_client_certificate` (native + a TLS provider feature), all `*_ssh_*` methods, unix-socket URLs,
 `get_body_as_stream` / `FlResponseAsStream`, and `into_hyper_response`.
 
 Futures returned under wasm are `!Send` (the browser is single-threaded), so drive
@@ -842,9 +856,9 @@ let response = FlUrl::new("https://api.example.com/data")
     .await?;
 ```
 
-## SSL/TLS Configuration (with-ring-tls feature)
+## SSL/TLS Configuration (needs a TLS provider feature)
 
-Everything in this section requires `features = ["with-ring-tls"]`. Without it
+Everything in this section requires `with-ring-tls` or `with-rust-tls`. Without one
 `with_client_certificate` does not exist and an `https://` request panics.
 
 ### Accept Invalid Certificates
@@ -857,7 +871,7 @@ let response = FlUrl::new("https://self-signed.example.com")
 ```
 
 This one also needs `features = ["dangerous-tls"]` to take effect — with only
-`with-ring-tls` the connection errors instead of silently dropping server-cert
+a provider feature the connection errors instead of silently dropping server-cert
 verification.
 
 ### Client Certificate
