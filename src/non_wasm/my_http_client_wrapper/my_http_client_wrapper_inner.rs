@@ -49,15 +49,21 @@ impl<
                 let request = request.unwrap_as_hyper();
                 let result = my_http_client.do_request(request, request_timeout).await?;
 
-                // `HyperHttpResponse` has a single variant here: my-http-client is
-                // built without `with-websocket`, so a `101 Switching Protocols`
-                // arrives as an ordinary response rather than an upgrade. FlUrl
-                // never asks for an upgrade, and that is what keeps the whole
-                // tungstenite stack out of the dependency tree.
+                // `HyperHttpResponse` gains a `WebSocketUpgrade` variant when
+                // my-http-client is built with `with-websocket`. Cargo unifies
+                // features per package, so another crate in the graph (e.g.
+                // my-reverse-proxy, which needs the feature to recognize a 101 as
+                // an upgrade) turns it on for us too. We cannot gate the arm with
+                // `#[cfg(feature = "with-websocket")]` - that is a feature of a
+                // foreign crate and is always off here, so the arm would be cut out
+                // and the match stay non-exhaustive. A catch-all is valid in both
+                // states; FlUrl never requests an upgrade, so it is dead either way.
                 match result {
                     my_http_client::http1_hyper::HyperHttpResponse::Response(response) => {
                         Ok(MyHttpResponse::Response(response))
                     }
+                    #[allow(unreachable_patterns)]
+                    _ => unreachable!("FlUrl never requests a websocket upgrade"),
                 }
             }
 
@@ -86,11 +92,14 @@ impl<
                     .do_streamed_request(request, content_size, request_timeout)
                     .await?;
 
-                // Single variant - see the note in `do_request`.
+                // Catch-all for the feature-unified `WebSocketUpgrade` variant -
+                // see the note in `do_request`.
                 match result {
                     my_http_client::http1_hyper::HyperHttpResponse::Response(response) => {
                         Ok(MyHttpResponse::Response(response))
                     }
+                    #[allow(unreachable_patterns)]
+                    _ => unreachable!("FlUrl never requests a websocket upgrade"),
                 }
             }
             Self::MyHttpClient(_) | Self::H2(_) => {
