@@ -1,7 +1,7 @@
 #[cfg(feature = "_tls")]
 use std::hash::{Hash, Hasher};
+use std::net::IpAddr;
 
-#[cfg(all(unix, feature = "with-ssh"))]
 use rust_extensions::remote_endpoint::RemoteEndpoint;
 
 use crate::ConnectionParams;
@@ -14,6 +14,17 @@ fn mode_tag(mode: crate::FlUrlMode) -> &'static str {
     }
 }
 
+/// `host:port`, plus `@ip` when a `server-name@ip` url pinned the address — the
+/// same host reached at two different ips is two different upstreams, and their
+/// connections must not be handed out for each other.
+fn endpoint_tag(remote_endpoint: RemoteEndpoint<'_>, resolved_ip: Option<IpAddr>) -> String {
+    let host_port = remote_endpoint.get_host_port();
+    match resolved_ip {
+        Some(ip) => format!("{}@{}", host_port.as_str(), ip),
+        None => host_port.as_str().to_string(),
+    }
+}
+
 /// Connections are only interchangeable when both the endpoint and the way the
 /// client was built match, so the key includes the mode the wrapper was created
 /// with — a request compiled for one mode routed to a wrapper of another would
@@ -21,7 +32,7 @@ fn mode_tag(mode: crate::FlUrlMode) -> &'static str {
 pub fn get_http_connection_key(params: &ConnectionParams<'_>) -> String {
     format!(
         "{}|{}",
-        params.remote_endpoint.get_host_port().as_str(),
+        endpoint_tag(params.remote_endpoint, params.resolved_ip),
         mode_tag(params.mode)
     )
 }
@@ -44,7 +55,7 @@ pub fn get_https_connection_key(params: &ConnectionParams<'_>) -> String {
 
     format!(
         "{}|{}|{}|{}",
-        params.remote_endpoint.get_host_port().as_str(),
+        endpoint_tag(params.remote_endpoint, params.resolved_ip),
         mode_tag(params.mode),
         params.get_server_name(),
         cert_tag
@@ -64,6 +75,7 @@ pub fn get_unix_socket_connection_key(params: &ConnectionParams<'_>) -> String {
 pub fn get_ssh_connection_key(
     ssh_credentials: &my_ssh::SshCredentials,
     remote_endpoint: RemoteEndpoint,
+    resolved_ip: Option<IpAddr>,
     mode: crate::FlUrlMode,
 ) -> String {
     let (host, port) = ssh_credentials.get_host_port();
@@ -73,7 +85,7 @@ pub fn get_ssh_connection_key(
         ssh_credentials.get_user_name(),
         host,
         port,
-        remote_endpoint.get_host_port().as_str(),
+        endpoint_tag(remote_endpoint, resolved_ip),
         mode_tag(mode)
     )
 }

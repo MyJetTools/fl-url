@@ -13,6 +13,7 @@ use rust_extensions::remote_endpoint::Scheme;
 use rust_extensions::StrOrString;
 
 use std::io::Write;
+use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpStream;
@@ -22,6 +23,7 @@ use crate::body::HttpRequestBody;
 use crate::non_wasm::compiled_http_request::{CompiledHttpRequest, RequestToExecute};
 use crate::non_wasm::http_connectors::*;
 use crate::non_wasm::model_body_stream::ModelBodyStream;
+use crate::non_wasm::resolved_ip::extract_resolved_ip;
 
 use crate::non_wasm::http_clients_cache::*;
 
@@ -68,6 +70,9 @@ pub enum HttpVerb {
 
 pub struct FlUrl {
     pub url_builder: UrlBuilder,
+    // Set by a `scheme://server-name@ip/...` url: the socket is opened to this ip
+    // instead of resolving the url's host, which stays the Host header and TLS SNI.
+    resolved_ip: Option<IpAddr>,
     pub headers: FlUrlHeaders,
     #[cfg(feature = "_tls")]
     pub client_cert: Option<my_tls::ClientCertificate>,
@@ -103,7 +108,7 @@ impl FlUrl {
         let url: StrOrString<'s> = url.into();
 
         #[cfg(all(unix, feature = "with-ssh"))]
-        let (url, credentials) = {
+        let (url, credentials, resolved_ip) = {
             let endpoint =
                 rust_extensions::remote_endpoint::RemoteEndpointHostString::try_parse(url.as_str())
                     .map_err(|err| FlUrlError::InvalidUrl(err))?;
@@ -111,19 +116,26 @@ impl FlUrl {
             match endpoint {
                 rust_extensions::remote_endpoint::RemoteEndpointHostString::Direct(
                     _remote_endpoint,
-                ) => (UrlBuilder::new(url.as_str()), None),
+                ) => {
+                    let (url, resolved_ip) = extract_resolved_ip(url.as_str())?;
+                    (UrlBuilder::new(&url), None, resolved_ip)
+                }
                 rust_extensions::remote_endpoint::RemoteEndpointHostString::ViaSsh {
                     ssh_remote_host,
                     remote_host_behind_ssh,
-                } => (
-                    UrlBuilder::new(remote_host_behind_ssh.as_str()),
-                    Some(crate::non_wasm::ssh::to_ssh_credentials(&ssh_remote_host)),
-                ),
+                } => {
+                    let (url, resolved_ip) = extract_resolved_ip(remote_host_behind_ssh.as_str())?;
+                    (
+                        UrlBuilder::new(&url),
+                        Some(crate::non_wasm::ssh::to_ssh_credentials(&ssh_remote_host)),
+                        resolved_ip,
+                    )
+                }
             }
         };
 
         #[cfg(not(all(unix, feature = "with-ssh")))]
-        let url = {
+        let (url, resolved_ip) = {
             let endpoint =
                 rust_extensions::remote_endpoint::RemoteEndpointHostString::try_parse(url.as_str())
                     .map_err(|err| FlUrlError::InvalidUrl(err))?;
@@ -131,7 +143,10 @@ impl FlUrl {
             match endpoint {
                 rust_extensions::remote_endpoint::RemoteEndpointHostString::Direct(
                     _remote_endpoint,
-                ) => UrlBuilder::new(url.as_str()),
+                ) => {
+                    let (url, resolved_ip) = extract_resolved_ip(url.as_str())?;
+                    (UrlBuilder::new(&url), resolved_ip)
+                }
                 rust_extensions::remote_endpoint::RemoteEndpointHostString::ViaSsh {
                     ssh_remote_host: _,
                     remote_host_behind_ssh: _,
@@ -148,6 +163,7 @@ impl FlUrl {
             #[cfg(feature = "_tls")]
             client_cert: Default::default(),
             url_builder: url,
+            resolved_ip,
             accept_invalid_certificate: false,
             do_not_reuse_connection: false,
             connections_cache: Default::default(),
@@ -172,6 +188,13 @@ impl FlUrl {
     #[cfg(all(unix, feature = "with-ssh"))]
     pub fn via_ssh(&self) -> bool {
         self.ssh_credentials.is_some()
+    }
+
+    /// The ip a `scheme://server-name@ip/...` url pinned the connection to — the
+    /// socket goes there with no DNS lookup, while `server-name` stays the Host
+    /// header and the TLS server name.
+    pub fn get_resolved_ip(&self) -> Option<IpAddr> {
+        self.resolved_ip
     }
 
     pub fn compress(mut self) -> Self {
@@ -1368,6 +1391,7 @@ impl FlUrl {
         ConnectionParams {
             mode: self.mode,
             remote_endpoint,
+            resolved_ip: self.resolved_ip,
             host_header: self.headers.get_host_header_value(),
             #[cfg(feature = "_tls")]
             client_certificate: self.client_cert.as_ref(),
@@ -1784,5 +1808,46 @@ mod test {
         assert!(debug.contains("/upload"), "{}", debug);
         assert!(debug.contains("X-Api-Key"), "{}", debug);
         assert!(!debug.contains("Body"), "{}", debug);
+    }
+
+    /// `server-name@ip`: the ip only picks the socket; to everything the server
+    /// sees — Host, :authority, SNI — the url's host is the server name.
+    #[tokio::test]
+    async fn server_name_at_ip_url_keeps_the_server_name_as_host() {
+        let fl_url = FlUrl::new("https://domain.com@15.0.0.5/xxx/fff");
+
+        assert_eq!(fl_url.get_resolved_ip(), Some("15.0.0.5".parse().unwrap()));
+        assert_eq!(fl_url.url_builder.get_host(), "domain.com");
+        assert_eq!(fl_url.url_builder.get_host_port(), "domain.com");
+        assert_eq!(fl_url.url_builder.get_path_and_query(), "/xxx/fff");
+
+        let params = fl_url
+            .get_connection_params(
+                Some(443),
+                #[cfg(all(unix, feature = "with-ssh"))]
+                None,
+            )
+            .await;
+        assert_eq!(params.resolved_ip, Some("15.0.0.5".parse().unwrap()));
+        assert_eq!(params.remote_endpoint.get_port(), Some(443));
+        #[cfg(feature = "_tls")]
+        assert_eq!(params.get_server_name(), "domain.com");
+    }
+
+    #[test]
+    fn a_plain_url_has_no_resolved_ip() {
+        let fl_url = FlUrl::new("https://domain.com/xxx/fff");
+        assert_eq!(fl_url.get_resolved_ip(), None);
+    }
+
+    #[cfg(all(unix, feature = "with-ssh"))]
+    #[test]
+    fn server_name_at_ip_url_behind_ssh() {
+        let fl_url = FlUrl::new("ssh://user@ssh.example.com:22->http://domain.com@10.0.0.7:8080/xxx");
+
+        assert!(fl_url.via_ssh());
+        assert_eq!(fl_url.get_resolved_ip(), Some("10.0.0.7".parse().unwrap()));
+        assert_eq!(fl_url.url_builder.get_host_port(), "domain.com:8080");
+        assert_eq!(fl_url.url_builder.get_path_and_query(), "/xxx");
     }
 }

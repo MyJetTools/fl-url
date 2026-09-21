@@ -211,6 +211,7 @@ impl FlUrlHttpConnectionsCache {
         let connection_key = super::utils::get_ssh_connection_key(
             ssh_session.get_ssh_credentials(),
             params.remote_endpoint,
+            params.resolved_ip,
             params.mode,
         );
 
@@ -442,6 +443,7 @@ mod tests {
         ConnectionParams {
             mode,
             remote_endpoint: endpoint.to_ref(),
+            resolved_ip: None,
             host_header: None,
             #[cfg(feature = "_tls")]
             client_certificate: None,
@@ -504,6 +506,32 @@ mod tests {
             .get_http_connection(&make_params(&endpoint, FlUrlMode::Http1NoHyper))
             .await;
         assert!(!Arc::ptr_eq(&h1, &no_hyper));
+    }
+
+    #[tokio::test]
+    async fn same_host_pinned_to_different_ips_does_not_share_connections() {
+        let cache = FlUrlHttpConnectionsCache::new();
+        let endpoint = RemoteEndpointOwned::try_parse("http://domain.com:9999".to_string()).unwrap();
+
+        let mut first_ip = make_params(&endpoint, FlUrlMode::Http1Hyper);
+        first_ip.resolved_ip = Some("10.0.0.1".parse().unwrap());
+        let mut second_ip = make_params(&endpoint, FlUrlMode::Http1Hyper);
+        second_ip.resolved_ip = Some("10.0.0.2".parse().unwrap());
+        let resolved_by_dns = make_params(&endpoint, FlUrlMode::Http1Hyper);
+
+        let pooled = cache.get_http_connection(&first_ip).await;
+        cache.put_http_connection_back_sync(pooled.clone());
+
+        // Same Host, same port — but a socket to 10.0.0.1 is not a socket to
+        // 10.0.0.2, nor to whatever DNS says domain.com is.
+        let other_ip = cache.get_http_connection(&second_ip).await;
+        assert!(!Arc::ptr_eq(&pooled, &other_ip));
+
+        let by_dns = cache.get_http_connection(&resolved_by_dns).await;
+        assert!(!Arc::ptr_eq(&pooled, &by_dns));
+
+        let same_ip = cache.get_http_connection(&first_ip).await;
+        assert!(Arc::ptr_eq(&pooled, &same_ip));
     }
 
     #[tokio::test]

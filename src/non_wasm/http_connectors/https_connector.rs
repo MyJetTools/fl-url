@@ -1,3 +1,4 @@
+use std::net::IpAddr;
 use std::sync::Arc;
 
 use my_http_client::{MyHttpClientConnector, MyHttpClientError};
@@ -10,6 +11,7 @@ use tokio::net::TcpStream;
 
 pub struct HttpsConnector {
     pub remote_host: RemoteEndpointOwned,
+    pub resolved_ip: Option<IpAddr>,
     pub server_name: String,
     pub client_certificate: Option<ClientCertificate>,
     pub accept_invalid_certificate: bool,
@@ -19,6 +21,7 @@ pub struct HttpsConnector {
 impl HttpsConnector {
     pub fn new(
         remote_host: RemoteEndpointOwned,
+        resolved_ip: Option<IpAddr>,
         server_name: String,
         client_certificate: Option<ClientCertificate>,
         accept_invalid_certificate: bool,
@@ -26,6 +29,7 @@ impl HttpsConnector {
     ) -> Self {
         Self {
             remote_host,
+            resolved_ip,
             server_name,
             client_certificate,
             accept_invalid_certificate,
@@ -38,18 +42,7 @@ impl HttpsConnector {
 impl MyHttpClientConnector<TlsStream<TcpStream>> for HttpsConnector {
     async fn connect(&self) -> Result<TlsStream<TcpStream>, MyHttpClientError> {
         let host_port = self.remote_host.get_host_port();
-        let connect_result = TcpStream::connect(host_port.as_str()).await;
-
-        if let Err(err) = &connect_result {
-            return Err(
-                my_http_client::MyHttpClientError::CanNotConnectToRemoteHost(format!(
-                    "{}. Err:{}",
-                    host_port, err
-                )),
-            );
-        }
-
-        let tcp_stream = connect_result.unwrap();
+        let tcp_stream = super::connect_tcp(&self.remote_host, self.resolved_ip).await?;
 
         let client_config = my_tls::create_tls_client_config_ex(
             &self.client_certificate,

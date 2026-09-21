@@ -21,6 +21,7 @@ impl SshConnectionCreator {
         let connector = SshHttpConnector {
             ssh_session: ssh_session.clone(),
             remote_host: params.remote_endpoint.to_owned(),
+            resolved_ip: params.resolved_ip,
         };
 
         match params.mode {
@@ -53,6 +54,7 @@ impl HttpConnectionResolver<my_ssh::SshAsyncChannel, SshHttpConnector> for SshCo
         let key = super::super::utils::get_ssh_connection_key(
             ssh_session.get_ssh_credentials(),
             params.remote_endpoint,
+            params.resolved_ip,
             params.mode,
         );
         Self::create_connection(params, key)

@@ -22,6 +22,7 @@ impl HttpsConnectionCreator {
 
         let connector = HttpsConnector::new(
             params.remote_endpoint.to_owned(),
+            params.resolved_ip,
             server_name,
             params.client_certificate.map(|x| x.clone()),
             params.accept_invalid_certificate,

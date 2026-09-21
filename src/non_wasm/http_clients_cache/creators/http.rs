@@ -17,8 +17,10 @@ impl HttpConnectionCreator {
         params: &ConnectionParams<'_>,
         key: String,
     ) -> Arc<MyHttpClientWrapper<TcpStream, HttpConnector>> {
-        let http_connector =
-            crate::non_wasm::http_connectors::HttpConnector::new(params.remote_endpoint.to_owned());
+        let http_connector = crate::non_wasm::http_connectors::HttpConnector::new(
+            params.remote_endpoint.to_owned(),
+            params.resolved_ip,
+        );
 
         match params.mode {
             FlUrlMode::H2 => Arc::new(MyHttpClientWrapper::new(

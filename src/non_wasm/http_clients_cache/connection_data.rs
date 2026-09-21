@@ -1,3 +1,4 @@
+use std::net::IpAddr;
 #[cfg(all(unix, feature = "with-ssh"))]
 use std::sync::Arc;
 
@@ -11,6 +12,9 @@ use crate::FlUrlMode;
 pub struct ConnectionParams<'s> {
     pub mode: FlUrlMode,
     pub remote_endpoint: RemoteEndpoint<'s>,
+    /// Where to open the socket instead of resolving `remote_endpoint`'s host —
+    /// set by a `scheme://server-name@ip/...` url.
+    pub resolved_ip: Option<IpAddr>,
     pub host_header: Option<&'s str>,
     #[cfg(feature = "_tls")]
     pub client_certificate: Option<&'s ClientCertificate>,

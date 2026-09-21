@@ -22,6 +22,7 @@ mod http_connectors;
 mod into_fl_url;
 mod model_body_stream;
 mod my_http_client_wrapper;
+mod resolved_ip;
 mod response_body;
 
 pub use fl_response::*;
