@@ -87,6 +87,30 @@ async fn http1_no_hyper_connects_to_the_ip_and_sends_the_server_name() {
     http_request_goes_to_the_ip_with_the_server_name_as_host(FlUrlMode::Http1NoHyper).await;
 }
 
+#[tokio::test]
+async fn a_refused_connection_names_the_pinned_ip() {
+    // Bind to learn a free port, then close it: connecting there is refused.
+    let port = {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        listener.local_addr().unwrap().port()
+    };
+
+    let err = FlUrl::new(format!("http://{}@127.0.0.1:{}/api", SERVER_NAME, port))
+        .get()
+        .await
+        .err()
+        .expect("nothing listens on the port");
+
+    let err = format!("{:?}", err);
+    assert!(
+        err.contains(&format!(
+            "127.0.0.1:{} (pinned ip for {}:{})",
+            port, SERVER_NAME, port
+        )),
+        "{err}"
+    );
+}
+
 #[test]
 fn a_host_name_after_the_at_sign_is_rejected() {
     // The part after '@' is where the socket goes, so it must be an ip — a host
@@ -178,11 +202,23 @@ async fn https_connects_to_the_ip_and_uses_the_server_name_as_sni() {
 
     // The test server walks away after the ClientHello, so the request itself
     // fails — what matters is where it went and what it introduced itself as.
-    let result = FlUrl::new(format!("https://{}@127.0.0.1:{}/api", SERVER_NAME, port))
+    let err = FlUrl::new(format!("https://{}@127.0.0.1:{}/api", SERVER_NAME, port))
         .do_not_reuse_connection()
         .get()
-        .await;
-    assert!(result.is_err());
+        .await
+        .err()
+        .expect("the server walks away mid-handshake");
 
     assert_eq!(server.await.unwrap().as_deref(), Some(SERVER_NAME));
+
+    // The error names the ip the socket went to and the phase that failed —
+    // not just the server name, which was never resolved.
+    let err = format!("{:?}", err);
+    assert!(
+        err.contains(&format!(
+            "127.0.0.1:{} (pinned ip for {}:{}). TLS handshake failed",
+            port, SERVER_NAME, port
+        )),
+        "{err}"
+    );
 }

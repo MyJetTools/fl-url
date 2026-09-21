@@ -41,15 +41,11 @@ impl MyHttpClientConnector<SshAsyncChannel> for SshHttpConnector {
                 let (ssh_host, ssh_port) = ssh_credentials.get_host_port();
                 Err(
                     my_http_client::MyHttpClientError::CanNotConnectToRemoteHost(format!(
-                        "Can not connect to remote endpoint ssh:{}@{}:{}->{}{}. Err:{:?}",
+                        "Can not connect to remote endpoint ssh:{}@{}:{}->{}. Err:{:?}",
                         ssh_credentials.get_user_name(),
                         ssh_host,
                         ssh_port,
-                        self.remote_host.get_host_port().as_str(),
-                        match resolved_ip.as_deref() {
-                            Some(ip) => format!(" ({})", ip),
-                            None => String::new(),
-                        },
+                        super::describe_target(&self.remote_host, self.resolved_ip),
                         err
                     )),
                 )

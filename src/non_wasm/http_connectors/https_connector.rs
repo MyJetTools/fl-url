@@ -41,8 +41,8 @@ impl HttpsConnector {
 #[async_trait::async_trait]
 impl MyHttpClientConnector<TlsStream<TcpStream>> for HttpsConnector {
     async fn connect(&self) -> Result<TlsStream<TcpStream>, MyHttpClientError> {
-        let host_port = self.remote_host.get_host_port();
         let tcp_stream = super::connect_tcp(&self.remote_host, self.resolved_ip).await?;
+        let target = super::describe_target(&self.remote_host, self.resolved_ip);
 
         let client_config = my_tls::create_tls_client_config_ex(
             &self.client_certificate,
@@ -53,7 +53,7 @@ impl MyHttpClientConnector<TlsStream<TcpStream>> for HttpsConnector {
             return Err(
                 my_http_client::MyHttpClientError::CanNotConnectToRemoteHost(format!(
                     "{}. Err:{}",
-                    host_port, err
+                    target, err
                 )),
             );
         }
@@ -80,12 +80,15 @@ impl MyHttpClientConnector<TlsStream<TcpStream>> for HttpsConnector {
             }
         };
 
+        // The TCP connection is already up at this point, so a failure here is the
+        // peer rejecting the handshake — said explicitly, since "connection reset"
+        // alone reads like the address could not be reached at all.
         match connector.connect(server_name, tcp_stream).await {
             Ok(tls_stream) => Ok(tls_stream),
             Err(err) => Err(
                 my_http_client::MyHttpClientError::CanNotConnectToRemoteHost(format!(
-                    "{}. Err:{}",
-                    host_port, err
+                    "{}. TLS handshake failed. Err:{}",
+                    target, err
                 )),
             ),
         }
