@@ -31,6 +31,8 @@ use crate::HttpConnectionResolver;
 
 use crate::FlUrlError;
 
+use crate::RetryPolicy;
+
 use crate::FlUrlHeaders;
 
 use my_http_utils::UrlBuilder;
@@ -96,7 +98,7 @@ pub struct FlUrl {
     ssh_security_credentials_resolver:
         Option<Arc<dyn my_ssh::ssh_settings::SshSecurityCredentialsResolver + Send + Sync>>,
 
-    max_retries: usize,
+    retry: RetryPolicy,
 }
 
 impl FlUrl {
@@ -168,7 +170,7 @@ impl FlUrl {
             do_not_reuse_connection: false,
             connections_cache: Default::default(),
             not_used_connection_timeout: Duration::from_secs(30),
-            max_retries: 0,
+            retry: RetryPolicy::default(),
             request_timeout: Duration::from_secs(10),
             response_body_timeout: None,
             print_input_request: false,
@@ -238,8 +240,61 @@ impl FlUrl {
     /// is never re-sent). Note that my-http-client performs its own internal
     /// reconnect/retry cycles per attempt, so each outer retry is a full fresh
     /// cycle on top of those — keep this number small.
+    ///
+    /// Only an attempt that got no response at all is replayed, and the next one
+    /// follows at once. A response that did arrive is the result, 5xx included —
+    /// [`Self::with_retry`] is the one that waits out a restarting service. Both set
+    /// the same policy, so the later of the two calls wins.
     pub fn with_retries(mut self, max_retries: usize) -> Self {
-        self.max_retries = max_retries;
+        self.retry = RetryPolicy::transport_failures(max_retries);
+        self
+    }
+
+    /// Rides out a restart of the service behind the url. The request is replayed up
+    /// to `amount` more times, `retry_delay` apart, on either face of an outage:
+    ///
+    /// * no response at all — the transport failures [`Self::with_retries`] replays
+    ///   (connection refused or reset, timeout);
+    /// * a response with a status of 500 and up — what a reverse proxy answers while
+    ///   the container behind it is being recreated.
+    ///
+    /// Only idempotent methods are replayed: a POST or a PATCH goes out once, and
+    /// whatever came back is the result. A 4xx is an answer, not an outage, and is
+    /// returned at once.
+    ///
+    /// When the attempts run out, the last one is the result: a 5xx comes back as
+    /// `Ok(response)` for the caller to read the status of, a transport failure as
+    /// `Err`. A 5xx that gets replayed is never read — its body is aborted before the
+    /// pause: the HTTP/1 connection it came on is disposed, an h2 stream is reset while
+    /// the shared h2 connection stays pooled.
+    ///
+    /// ```no_run
+    /// # async fn doc() -> Result<(), flurl::FlUrlError> {
+    /// use std::time::Duration;
+    ///
+    /// // Up to 16 attempts, 2s apart: about 30s of outage covered.
+    /// let response = flurl::FlUrl::new("https://api.example.com")
+    ///     .append_path_segment("data")
+    ///     .with_retry(Duration::from_secs(2), 15)
+    ///     .get()
+    ///     .await?;
+    ///
+    /// if response.get_status_code() >= 500 {
+    ///     // still down after the last attempt
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// The pauses come on top of the attempts themselves. An attempt the upstream never
+    /// answers costs a request timeout ([`Self::set_timeout`]) — possibly several, since
+    /// my-http-client replays a timed-out idempotent request internally before it
+    /// reports it.
+    ///
+    /// Sets the same policy as [`Self::with_retries`], so the later of the two calls
+    /// wins. A streamed body is never replayed (see [`Self::execute_streamed`]).
+    pub fn with_retry(mut self, retry_delay: Duration, amount: usize) -> Self {
+        self.retry = RetryPolicy::transport_failures_and_server_errors(retry_delay, amount);
         self
     }
 
@@ -1115,9 +1170,10 @@ impl FlUrl {
     ///
     /// * [`Self::compress`] gzips the body as one buffer, which is exactly what
     ///   streaming avoids → [`FlUrlError::StreamedBodyCanNotBeCompressed`].
-    /// * [`Self::with_retries`] is ignored: the payload is consumed as it is sent, so
-    ///   the request is attempted exactly once. Rebuilding the stream and calling
-    ///   again is the caller's decision — it owns the source data.
+    /// * [`Self::with_retries`] and [`Self::with_retry`] are ignored: the payload is
+    ///   consumed as it is sent, so the request is attempted exactly once. Rebuilding
+    ///   the stream and calling again is the caller's decision — it owns the source
+    ///   data.
     /// * [`Self::set_timeout`] covers the **whole** call, upload included, not just
     ///   the wait for the response head. The 10s default is far too short for a real
     ///   upload; set it to the size of the transfer you expect.
@@ -1417,11 +1473,11 @@ impl FlUrl {
         }
         let mut attempt_no = 0;
         // A streamed body is consumed as it is sent, so there is nothing left to
-        // replay — `with_retries` does not apply to it, whatever it was set to.
-        let max_retries = if request.is_streamed() {
-            0
+        // replay — neither `with_retries` nor `with_retry` applies to it.
+        let retry = if request.is_streamed() {
+            RetryPolicy::default()
         } else {
-            self.max_retries
+            self.retry
         };
         let request_timeout = self.request_timeout;
         let params: ConnectionParams<'_> = self
@@ -1449,8 +1505,8 @@ impl FlUrl {
                             .do_streamed_request(request, *content_size, request_timeout)
                             .await
                     }
-                    // Unreachable while max_retries is pinned to 0 above; kept as an
-                    // error rather than an unwrap so a future change to the retry
+                    // Unreachable while the retry policy is pinned to none above; kept
+                    // as an error rather than an unwrap so a future change to the retry
                     // policy can not silently resend a half-consumed body.
                     None => Err(my_http_client::MyHttpClientError::CanNotExecuteRequest(
                         "A streamed request body has already been consumed and can not be replayed"
@@ -1461,6 +1517,23 @@ impl FlUrl {
 
             match response {
                 Ok(response) => {
+                    // `with_retry` replays a 5xx the way it replays a transport
+                    // failure. The response is dropped unread together with its
+                    // connection handle, which aborts the body before the pause: an
+                    // HTTP/1 connection is checked out exclusively and is disposed
+                    // with it, an h2 stream is reset while the shared h2 connection
+                    // stays pooled for the next attempt.
+                    if attempt_no < retry.amount()
+                        && request.method_is_idempotent()
+                        && retry.retries_status(response.status().as_u16())
+                    {
+                        drop(response);
+                        drop(connection);
+                        attempt_no += 1;
+                        pause_before_next_attempt(retry.delay()).await;
+                        continue;
+                    }
+
                     let mut response =
                         FlUrlResponse::from_http1_response(self.url_builder, response);
                     response.set_body_read_timeout(self.response_body_timeout);
@@ -1488,14 +1561,23 @@ impl FlUrl {
                         http_connection_resolver.drop_connection(connection).await;
                     }
 
-                    if !error_is_safe_to_retry(&err, &request) || attempt_no >= max_retries {
+                    if !error_is_safe_to_retry(&err, &request) || attempt_no >= retry.amount() {
                         return Err(map_my_http_client_error(err));
                     }
 
                     attempt_no += 1;
+                    pause_before_next_attempt(retry.delay()).await;
                 }
             }
         }
+    }
+}
+
+/// The pause `with_retry` puts between two attempts. `with_retries` has none and
+/// replays at once, without touching the timer — exactly as it always did.
+async fn pause_before_next_attempt(delay: Duration) {
+    if !delay.is_zero() {
+        tokio::time::sleep(delay).await;
     }
 }
 

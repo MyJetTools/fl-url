@@ -28,10 +28,12 @@ pub mod body;
 mod empty_request_model;
 mod errors;
 mod fl_drop_connection_scenario;
+mod retry_policy;
 
 pub use empty_request_model::*;
 pub use errors::*;
 pub use fl_drop_connection_scenario::*;
+pub(crate) use retry_policy::RetryPolicy;
 
 pub extern crate my_http_utils;
 

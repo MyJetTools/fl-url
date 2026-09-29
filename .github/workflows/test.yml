@@ -53,3 +53,28 @@ jobs:
       # unix-only `with-ssh` feature, which is never part of a wasm build.
       - name: Build for wasm32 (browser fetch backend)
         run: cargo build --target wasm32-unknown-unknown --no-default-features
+
+  test-wasm:
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - uses: actions-rust-lang/setup-rust-toolchain@v1.15.2
+        with:
+          toolchain: stable
+          target: wasm32-unknown-unknown
+
+      # The test runner has to be the exact wasm-bindgen version the build resolves
+      # (Cargo.lock is not committed, so it is read off a fresh resolution).
+      - name: Install wasm-bindgen-test-runner
+        run: |
+          WASM_BINDGEN_VERSION=$(cargo metadata --format-version 1 | jq -r '.packages[] | select(.name == "wasm-bindgen") | .version' | head -n 1)
+          cargo install wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION" --locked
+
+      # The wasm backend in headless Chrome; the runner image ships Chrome and a
+      # matching chromedriver.
+      - name: Test the wasm backend in a browser
+        env:
+          CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER: wasm-bindgen-test-runner
+        run: CHROMEDRIVER="$CHROMEWEBDRIVER/chromedriver" cargo test --target wasm32-unknown-unknown --no-default-features --test retry_wasm

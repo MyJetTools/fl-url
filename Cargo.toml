@@ -118,6 +118,10 @@ tokio = { version = "*", features = [
     "time",
 ] }
 
+# The wasm tests run the backend in a real browser (see tests/retry_wasm.rs).
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test = "0.3"
+
 # SSH is unix-only and therefore never part of the wasm build.
 [target.'cfg(unix)'.dependencies]
 my-ssh = { tag = "0.1.2", git = "https://github.com/MyJetTools/my-ssh.git", optional = true }

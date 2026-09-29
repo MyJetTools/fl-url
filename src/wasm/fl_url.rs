@@ -6,9 +6,9 @@ use rust_extensions::StrOrString;
 use my_http_utils::UrlBuilder;
 
 use crate::body::HttpRequestBody;
-use crate::wasm::fetch::{execute_fetch, get_origin};
+use crate::wasm::fetch::{build_request, execute_fetch, get_origin, sleep};
 use crate::wasm::{FlUrlHttpConnectionsCache, FlUrlResponse};
-use crate::{FlUrlError, FlUrlHeaders};
+use crate::{FlUrlError, FlUrlHeaders, RetryPolicy};
 
 /// Kept for API parity with the native backend. Under wasm the browser negotiates
 /// the HTTP version, so the mode is stored but otherwise ignored.
@@ -60,7 +60,7 @@ pub struct FlUrl {
     pub print_input_request: bool,
     pub reuse_connection_timeout_sec: i64,
     mode: FlUrlMode,
-    max_retries: usize,
+    retry: RetryPolicy,
 }
 
 impl FlUrl {
@@ -111,7 +111,7 @@ impl FlUrl {
             print_input_request: false,
             reuse_connection_timeout_sec: 120,
             mode: Default::default(),
-            max_retries: 0,
+            retry: RetryPolicy::default(),
         })
     }
 
@@ -146,8 +146,35 @@ impl FlUrl {
     /// Retries the request up to `max_retries` extra times on failure. Only
     /// idempotent methods are replayed (a POST/PATCH that may have reached the
     /// server is never re-sent).
+    ///
+    /// Only an attempt that got no response at all (a `Timeout` or a `fetch`
+    /// failure) is replayed, and the next one follows at once. A response that did
+    /// arrive is the result, 5xx included — [`Self::with_retry`] is the one that
+    /// waits out a restarting service. Both set the same policy, so the later of the
+    /// two calls wins.
     pub fn with_retries(mut self, max_retries: usize) -> Self {
-        self.max_retries = max_retries;
+        self.retry = RetryPolicy::transport_failures(max_retries);
+        self
+    }
+
+    /// Rides out a restart of the service behind the url. The request is replayed up
+    /// to `amount` more times, `retry_delay` apart, on either face of an outage: no
+    /// response at all (a `Timeout` or a `fetch` failure — what
+    /// [`Self::with_retries`] replays), or a response with a status of 500 and up,
+    /// which is what a reverse proxy answers while the container behind it is being
+    /// recreated.
+    ///
+    /// The same semantics as the native backend: only idempotent methods are
+    /// replayed, a 4xx is returned at once, and when the attempts run out the last
+    /// one is the result — a 5xx as `Ok(response)`, a transport failure as `Err`.
+    /// The pause is a `setTimeout`-driven future, and a 5xx that gets replayed is
+    /// never read: its body is aborted through the attempt's `AbortController` before
+    /// the pause. Each attempt is still bounded by [`Self::set_timeout`].
+    ///
+    /// Sets the same policy as [`Self::with_retries`], so the later of the two calls
+    /// wins.
+    pub fn with_retry(mut self, retry_delay: Duration, amount: usize) -> Self {
+        self.retry = RetryPolicy::transport_failures_and_server_errors(retry_delay, amount);
         self
     }
 
@@ -461,6 +488,7 @@ impl FlUrl {
         let request_timeout_millis = duration_to_millis(self.request_timeout);
         let body_timeout_millis = self.response_body_timeout.and_then(duration_to_millis);
 
+        let retry = self.retry;
         let mut attempt_no = 0;
         let (response, controller) = loop {
             let attempt_body = if body_bytes.is_empty() {
@@ -469,22 +497,41 @@ impl FlUrl {
                 Some(body_bytes.as_slice())
             };
 
-            match execute_fetch(
+            // A request the browser refuses to build is returned at once: nothing
+            // went out, and a replay would be refused the same way.
+            let (request, controller) = build_request(
                 &url,
                 method,
                 &header_list,
                 attempt_body,
-                request_timeout_millis,
                 self.print_input_request,
-            )
-            .await
-            {
-                Ok(pair) => break pair,
+            )?;
+
+            match execute_fetch(&request, controller, request_timeout_millis).await {
+                Ok((response, controller)) => {
+                    // `with_retry` replays a 5xx the way it replays a transport
+                    // failure. The response is never read: aborting its controller
+                    // ends the body download before the pause.
+                    if attempt_no < retry.amount()
+                        && idempotent
+                        && retry.retries_status(response.status())
+                    {
+                        if let Some(controller) = controller {
+                            controller.abort();
+                        }
+                        attempt_no += 1;
+                        pause_before_next_attempt(retry.delay()).await;
+                        continue;
+                    }
+
+                    break (response, controller);
+                }
                 Err(err) => {
-                    if !error_is_safe_to_retry(&err, idempotent) || attempt_no >= self.max_retries {
+                    if !error_is_safe_to_retry(&err, idempotent) || attempt_no >= retry.amount() {
                         return Err(err);
                     }
                     attempt_no += 1;
+                    pause_before_next_attempt(retry.delay()).await;
                 }
             }
         };
@@ -593,14 +640,23 @@ fn needs_origin_prefix(url: &str) -> bool {
     !(url.starts_with("http://") || url.starts_with("https://"))
 }
 
-/// Only idempotent methods are replayed by the outer retry loop, and only for
-/// transport-level failures (a timeout / a `fetch` error), never for a response
-/// that was actually received.
+/// Only idempotent methods are replayed by the outer retry loop, and a failed
+/// attempt only for a transport-level failure (a timeout / a `fetch` error). A
+/// response that was actually received is replayed only by `with_retry`, and only
+/// for a 5xx — see the loop in `run`.
 fn error_is_safe_to_retry(err: &FlUrlError, idempotent: bool) -> bool {
     if !idempotent {
         return false;
     }
     matches!(err, FlUrlError::Timeout | FlUrlError::FetchError(_))
+}
+
+/// The pause `with_retry` puts between two attempts. `with_retries` has none and
+/// replays at once, without touching the timer — exactly as it always did.
+async fn pause_before_next_attempt(delay: Duration) {
+    if !delay.is_zero() {
+        sleep(delay).await;
+    }
 }
 
 fn duration_to_millis(duration: Duration) -> Option<i32> {

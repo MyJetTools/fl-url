@@ -32,7 +32,8 @@ impl RequestToExecute {
         }
     }
 
-    /// `true` when the payload can not be replayed, whatever `with_retries` says.
+    /// `true` when the payload can not be replayed, whatever `with_retries` or
+    /// `with_retry` say.
     pub fn is_streamed(&self) -> bool {
         matches!(self, Self::Streamed { .. })
     }

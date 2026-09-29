@@ -3,6 +3,7 @@
 
 use std::cell::Cell;
 use std::rc::Rc;
+use std::time::Duration;
 
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -11,22 +12,19 @@ use web_sys::{AbortController, Headers, Request, RequestInit, Response};
 
 use crate::FlUrlError;
 
-/// Performs one `fetch` round-trip and returns the raw `Response` (headers only —
-/// the body is read lazily by [`read_response_body`]) together with the
-/// `AbortController` bound to the request, so the caller can later bound the body
-/// read on the same signal.
+/// Builds the `Request` for one attempt, bound to a fresh `AbortController` — an
+/// aborted signal stays aborted, so no two attempts can share one.
 ///
-/// `request_timeout_millis` bounds only the request→headers round-trip (mirroring
-/// the native `request_timeout`, which bounds `do_request`). The timer is cleared
-/// the instant the response resolves, so it never fires against the body read.
-pub(crate) async fn execute_fetch(
+/// A failure here is the browser refusing the request itself (a header or a url it
+/// will not send). Nothing went out, and a replay would be refused the same way, so
+/// it is not a transport failure: the retry loop returns it at once.
+pub(crate) fn build_request(
     url: &str,
     method: &str,
     headers: &[(String, String)],
     body: Option<&[u8]>,
-    request_timeout_millis: Option<i32>,
     print_input_request: bool,
-) -> Result<(Response, Option<AbortController>), FlUrlError> {
+) -> Result<(Request, Option<AbortController>), FlUrlError> {
     let init = RequestInit::new();
     init.set_method(method);
 
@@ -44,7 +42,8 @@ pub(crate) async fn execute_fetch(
     }
 
     // A controller is always attached so the (later) body read can be bounded on
-    // the same signal; it is only ever aborted if a timeout timer fires.
+    // the same signal. It is aborted only by a timeout timer, or when `with_retry`
+    // discards the response unread.
     let controller = AbortController::new().ok();
     if let Some(controller) = controller.as_ref() {
         init.set_signal(Some(&controller.signal()));
@@ -56,13 +55,29 @@ pub(crate) async fn execute_fetch(
 
     let request = Request::new_with_str_and_init(url, &init).map_err(js_to_err)?;
 
+    Ok((request, controller))
+}
+
+/// Performs one `fetch` round-trip for a request from [`build_request`] and returns
+/// the raw `Response` (headers only — the body is read lazily by
+/// [`read_response_body`]) together with the request's `AbortController`, so the
+/// caller can later bound the body read on the same signal.
+///
+/// `request_timeout_millis` bounds only the request→headers round-trip (mirroring
+/// the native `request_timeout`, which bounds `do_request`). The timer is cleared
+/// the instant the response resolves, so it never fires against the body read.
+pub(crate) async fn execute_fetch(
+    request: &Request,
+    controller: Option<AbortController>,
+    request_timeout_millis: Option<i32>,
+) -> Result<(Response, Option<AbortController>), FlUrlError> {
     let timed_out = Rc::new(Cell::new(false));
     let timer_handle = match (controller.as_ref(), request_timeout_millis) {
         (Some(controller), Some(millis)) => set_abort_timer(controller, millis, timed_out.clone()),
         _ => None,
     };
 
-    let promise = fetch_promise(&request)?;
+    let promise = fetch_promise(request)?;
     let result = JsFuture::from(promise).await;
 
     // The continuation after `.await` is a microtask and runs before any pending
@@ -80,8 +95,8 @@ pub(crate) async fn execute_fetch(
             Ok((response, controller))
         }
         Err(err) => {
-            // We only ever abort on timeout, so an AbortError here means our timer
-            // fired.
+            // Only the timer aborts a request in flight (a discarded 5xx is aborted
+            // after its response arrived), so an AbortError here means it fired.
             if timed_out.get() || is_abort_error(&err) {
                 Err(FlUrlError::Timeout)
             } else {
@@ -204,6 +219,23 @@ fn fetch_promise(request: &Request) -> Result<js_sys::Promise, FlUrlError> {
     ))
 }
 
+/// Resolves once `delay` has passed: the pause between two `with_retry` attempts.
+/// It runs on the same `setTimeout` as the request timeouts, so it works in a page
+/// and in a worker alike. A global scope with no timer at all resolves at once rather
+/// than never — the retry loop is bounded by its attempt count either way.
+pub(crate) async fn sleep(delay: Duration) {
+    // Whole milliseconds, rounded up: the pause must never come out shorter than asked.
+    let millis = delay.as_nanos().div_ceil(1_000_000).min(i32::MAX as u128) as i32;
+
+    let promise = js_sys::Promise::new(&mut |resolve, _reject| {
+        if set_timeout(&resolve, millis).is_none() {
+            let _ = resolve.call0(&JsValue::UNDEFINED);
+        }
+    });
+
+    let _ = JsFuture::from(promise).await;
+}
+
 /// Arms `controller.abort()` after `millis` via `setTimeout` and returns the timer
 /// handle (so the caller can `clearTimeout` it once the awaited op settles).
 fn set_abort_timer(controller: &AbortController, millis: i32, timed_out: Rc<Cell<bool>>) -> Option<i32> {
@@ -212,8 +244,13 @@ fn set_abort_timer(controller: &AbortController, millis: i32, timed_out: Rc<Cell
         timed_out.set(true);
         controller.abort();
     });
-    let handler = closure.unchecked_ref::<js_sys::Function>();
+    set_timeout(closure.unchecked_ref::<js_sys::Function>(), millis)
+}
 
+/// `setTimeout` on whichever global scope this is — a `Window` in a page, a
+/// `WorkerGlobalScope` in a worker. Returns the timer handle, or `None` when the
+/// scope has no timer to offer.
+fn set_timeout(handler: &js_sys::Function, millis: i32) -> Option<i32> {
     let global = js_sys::global();
     if let Some(window) = global.dyn_ref::<web_sys::Window>() {
         return window
