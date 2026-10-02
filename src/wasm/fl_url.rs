@@ -97,6 +97,8 @@ impl FlUrl {
             }
         };
 
+        crate::host_check::ensure_host_is_usable(url.as_str(), &url_builder)?;
+
         Ok(Self {
             url_builder,
             headers: FlUrlHeaders::new(),

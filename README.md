@@ -10,7 +10,7 @@ FLUrl is a Hyper-based HTTP client that provides a fluent API for building and e
 - **Connection Reuse**: Automatic connection pooling and reuse for HTTP/1.1 and HTTP/2
 - **Multiple HTTP Modes**: Support for HTTP/2, HTTP/1.1 with Hyper, and HTTP/1.1 without Hyper
 - **Body Types**: JSON, URL-encoded, multipart/form-data, and raw data
-- **SSL/TLS**: Opt-in via one of two provider features — `with-ring-tls` (ring) or `with-rust-tls` (pure Rust, no C toolchain). Client certificate support and invalid certificate acceptance. With neither, the crate never links rustls and `https://` panics
+- **SSL/TLS**: Opt-in via one of two provider features — `with-ring-tls` (ring) or `with-rust-tls` (pure Rust, no C toolchain). Client certificate support and invalid certificate acceptance. With neither, the crate never links rustls and an `https://` request fails with `FlUrlError::UnsupportedScheme`
 - **SSH Tunneling**: Optional SSH tunnel support via `with-ssh` feature
 - **Unix Socket Support**: Native Unix socket support (Unix systems only)
 - **Known IP, no DNS**: `https://domain.com@15.0.0.5/path` connects to the ip while the Host header and TLS SNI stay `domain.com` (native only) — see [Connecting to a Known IP](#connecting-to-a-known-ip-no-dns-native-only)
@@ -33,9 +33,9 @@ flurl = "0.6.1"
 **`https://` needs a TLS provider feature.** Both are off by default, so a
 project doing plain HTTP (or unix sockets, or SSH tunnels) does not pay for the
 rustls stack — `my-tls`, `rustls`, `tokio-rustls` and the provider itself all
-leave the dependency tree. A build with neither, requesting an `https://` url,
-**panics** at execute time with `FlUrl does not support https: it is compiled
-without a TLS provider feature`.
+leave the dependency tree. In a build with neither, a request to an `https://` url
+returns `FlUrlError::UnsupportedScheme` — `FlUrl does not support https: it is
+compiled without a TLS provider feature` — before a socket is opened.
 
 Pick one:
 
@@ -69,7 +69,7 @@ flurl = { version = "0.6.1", features = ["with-ssh"] }
 | `with-ring-tls` | off | TLS on the **ring** provider. Enables `https://` plus [`with_client_certificate`](#client-certificate). Mature and widely deployed; costs a bundled C/assembly build. No `aws-lc-sys` either way. |
 | `with-rust-tls` | off | The same, on a **pure-Rust** provider (`rustls-graviola`) — no C toolchain at all. Builds only on x86_64 and aarch64, and the implementation is far younger than ring. Prefer `with-ring-tls` unless dropping the C toolchain is the point. |
 | `dangerous-tls` | off | A modifier, not a TLS switch: it makes [`accept_invalid_certificate()`](#accept-invalid-certificates) actually skip server-cert verification. Combine it with a provider feature — on its own the TLS code compiles but no provider is installed, so https fails at connect time. |
-| `with-ssh` | off | [SSH tunneling](#ssh-tunneling-with-ssh-feature) (`ssh://…->http://…` urls). Unix only. |
+| `with-ssh` | off | [SSH tunneling](#ssh-tunneling-with-ssh-feature) (`ssh://…->http://…` urls). Unix only. Built on `my-ssh`, which is `russh` underneath — no `libssh2` or OpenSSL, but this is the one feature that links `aws-lc-sys` (a bundled C build). |
 
 On `wasm32` TLS is the browser's job, so neither provider feature matters there —
 the `fetch` backend handles `https://` with or without them.
@@ -185,7 +185,7 @@ use flurl::{FlUrl, FlUrlError};
 let response = FlUrl::new("http://mywebsite.com").get().await?;
 
 // try_new() returns Result for error handling
-match FlUrl::try_new("invalid-url") {
+match FlUrl::try_new(url_from_settings) {
     Ok(fl_url) => {
         // Use fl_url
     }
@@ -197,6 +197,23 @@ match FlUrl::try_new("invalid-url") {
     }
 }
 ```
+
+`try_new` returns `FlUrlError::InvalidUrl` for a url that can not be used at all:
+
+| url | why |
+| --- | --- |
+| `""`, `" "`, `http://`, `http://:8080`, `http:///path`, `http+unix://` | it names no host (for a unix socket — no socket file) |
+| a host, or a socket path, that does not fit into 255 bytes together with its port | it is too long to be a host — usually something else pasted into the url's place |
+| `ftp://host` | the scheme is not one FlUrl knows |
+| `https://domain.com@backend.internal` | a malformed [`name@ip`](#connecting-to-a-known-ip-no-dns-native-only) form |
+| `http://user@host:22->…`, `ssh://user@host:22x->…` | a malformed [ssh tunnel](#ssh-tunneling-with-ssh-feature) part |
+
+A url with no scheme is fine — `localhost:8080`, `10.0.0.1:5123/api` — and is taken
+as `http://`.
+
+A url that parses but can not be put on the wire fails the **request** instead, with
+an `Err`: a new line or another control byte in the host, a space in the path (a
+value read from a file together with its trailing new line is the usual source).
 
 ### Using String Literals (IntoFlUrl Trait)
 
@@ -344,6 +361,18 @@ let response = FlUrl::new("https://api.example.com/data")
     .get()
     .await?;
 ```
+
+A header that must not be put on the wire fails the request with
+`FlUrlError::RequestBuild` — nothing is sent, and the header is not silently dropped:
+
+- a value with a CR, LF or NUL in it — typically an api key read from a file together
+  with its trailing new line;
+- a name that is empty or is not an HTTP token (a space, a `:`, a non-ASCII letter).
+
+`with_header` itself can not report this (it returns the builder), so the error comes
+from the call that sends the request. The message names the header and the byte, never
+the value. The same applies to the header fields of a
+[request model](#model-driven-requests).
 
 ## Request Bodies
 
@@ -862,7 +891,8 @@ let response = FlUrl::new("https://api.example.com/data")
 ## SSL/TLS Configuration (needs a TLS provider feature)
 
 Everything in this section requires `with-ring-tls` or `with-rust-tls`. Without one
-`with_client_certificate` does not exist and an `https://` request panics.
+`with_client_certificate` does not exist and an `https://` request fails with
+`FlUrlError::UnsupportedScheme`.
 
 ### Accept Invalid Certificates
 
@@ -968,6 +998,20 @@ let response = FlUrl::new("http+unix:///var/run/docker.sock")
     .get()
     .await?;
 ```
+
+The socket file can be named in any of these ways; they all reach the same file:
+
+| form | examples |
+| --- | --- |
+| the path itself | `/var/run/docker.sock`, `~/docker.sock` (`~` is resolved against `$HOME`) |
+| a scheme — `http+unix`, `unix` or `unix+http`, in any case — and the path | `http+unix:///var/run/docker.sock`, `unix:///var/run/docker.sock`, `unix+http://var/run/docker.sock` |
+
+After a scheme the path is absolute however many slashes are written: `unix:/var/run/x.sock`,
+`unix://var/run/x.sock` and `unix:///var/run/x.sock` are all `/var/run/x.sock`.
+
+The http path goes in with `append_path_segment`, as above. A url that names no socket
+file — `http+unix://`, `unix://`, `/` — is rejected by `FlUrl::try_new` with
+`FlUrlError::InvalidUrl`.
 
 ## Connecting to a Known IP (no DNS, native only)
 

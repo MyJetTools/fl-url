@@ -15,10 +15,19 @@ pub enum FlUrlError {
     CanNotEstablishConnection(String),
     CanNotConvertToUtf8(std::str::Utf8Error),
     ReadingHyperBodyError(String),
+    /// The url can not be used: it names no host, its scheme is unknown, its
+    /// `name@ip` or ssh tunnel part is malformed — all of these come from
+    /// `FlUrl::try_new` — or it carries a byte that must not be put on the wire (a
+    /// new line in the host, a space in the path), which fails the request.
     InvalidUrl(String),
+    /// The url is valid, but this build or this target can not serve its scheme:
+    /// `https://` without a TLS provider feature, an ssh tunnel without `with-ssh`,
+    /// `ws://`, a unix socket where there are none.
     UnsupportedScheme(String),
-    /// A `my_http_utils` request model failed to build (e.g. a field validator
-    /// rejected its value) inside `FlUrl::execute_request`.
+    /// The request could not be built, so nothing was sent: a `my_http_utils`
+    /// request model failed to build (e.g. a field validator rejected its value)
+    /// inside `FlUrl::execute_request`, or a header can not be put on the wire — a
+    /// value with a CR, LF or NUL in it, a name that is not an HTTP token.
     RequestBuild(String),
 
     /// `.compress()` was combined with a streamed request body. Gzipping needs the

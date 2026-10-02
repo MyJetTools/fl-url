@@ -4,7 +4,7 @@
 //! pooling, unix sockets, plus TLS + client certificates behind a provider
 //! feature (`with-ring-tls` or `with-rust-tls`) and (on unix) SSH tunneling
 //! behind `with-ssh`. With neither TLS feature there is no `HttpsConnector` and
-//! `FlUrl::execute` panics on an `https://` url.
+//! `FlUrl::execute` refuses an `https://` url with `FlUrlError::UnsupportedScheme`.
 //! It is compiled only for non-wasm targets; `crate::lib` aliases the types
 //! defined here to the crate root so `flurl::FlUrl`, `flurl::FlUrlResponse`, …
 //! resolve to this backend.

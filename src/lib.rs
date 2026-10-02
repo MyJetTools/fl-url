@@ -8,7 +8,8 @@
 //!   sockets, and — behind feature gates — TLS + client certificates
 //!   (`with-ring-tls` for ring, or `with-rust-tls` for a pure-Rust provider) and
 //!   (on unix) SSH tunneling (`with-ssh`). With neither TLS feature the crate
-//!   links no TLS stack at all and an `https://` request panics.
+//!   links no TLS stack at all and an `https://` request fails with
+//!   [`FlUrlError::UnsupportedScheme`].
 //! * **wasm32** (`cfg(target_arch = "wasm32")`) — the browser `fetch` backend in
 //!   [`mod@wasm`]. Connection pooling, TLS and redirects are handled by the
 //!   browser, so those knobs become no-ops; every request-building and
@@ -28,6 +29,7 @@ pub mod body;
 mod empty_request_model;
 mod errors;
 mod fl_drop_connection_scenario;
+mod host_check;
 mod retry_policy;
 
 pub use empty_request_model::*;

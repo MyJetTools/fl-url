@@ -30,7 +30,7 @@ impl MyHttpClientConnector<SshAsyncChannel> for SshHttpConnector {
 
         let ssh_channel = self
             .ssh_session
-            .connect_to_remote_host(host, port, Duration::from_secs(30))
+            .open_remote_tcp_stream(host, port, Duration::from_secs(30))
             .await;
 
         match ssh_channel {

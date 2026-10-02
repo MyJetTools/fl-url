@@ -21,6 +21,7 @@ use tokio::net::TcpStream;
 use super::FlUrlResponse;
 use crate::body::HttpRequestBody;
 use crate::non_wasm::compiled_http_request::{CompiledHttpRequest, RequestToExecute};
+use crate::non_wasm::fl_url_headers::find_forbidden_header_value_byte;
 use crate::non_wasm::http_connectors::*;
 use crate::non_wasm::model_body_stream::ModelBodyStream;
 use crate::non_wasm::resolved_ip::extract_resolved_ip;
@@ -110,7 +111,7 @@ impl FlUrl {
         let url: StrOrString<'s> = url.into();
 
         #[cfg(all(unix, feature = "with-ssh"))]
-        let (url, credentials, resolved_ip) = {
+        let (url_builder, credentials, resolved_ip) = {
             let endpoint =
                 rust_extensions::remote_endpoint::RemoteEndpointHostString::try_parse(url.as_str())
                     .map_err(|err| FlUrlError::InvalidUrl(err))?;
@@ -126,6 +127,15 @@ impl FlUrl {
                     ssh_remote_host,
                     remote_host_behind_ssh,
                 } => {
+                    // `ssh://user@:22->...` parses, but there is nowhere to open the
+                    // tunnel to.
+                    if ssh_remote_host.get_host().trim().is_empty() {
+                        return Err(FlUrlError::InvalidUrl(format!(
+                            "Invalid url '{}': it names no ssh host",
+                            url.as_str()
+                        )));
+                    }
+
                     let (url, resolved_ip) = extract_resolved_ip(remote_host_behind_ssh.as_str())?;
                     (
                         UrlBuilder::new(&url),
@@ -137,7 +147,7 @@ impl FlUrl {
         };
 
         #[cfg(not(all(unix, feature = "with-ssh")))]
-        let (url, resolved_ip) = {
+        let (url_builder, resolved_ip) = {
             let endpoint =
                 rust_extensions::remote_endpoint::RemoteEndpointHostString::try_parse(url.as_str())
                     .map_err(|err| FlUrlError::InvalidUrl(err))?;
@@ -160,11 +170,13 @@ impl FlUrl {
             }
         };
 
+        crate::host_check::ensure_host_is_usable(url.as_str(), &url_builder)?;
+
         let result = Self {
             headers: FlUrlHeaders::new(),
             #[cfg(feature = "_tls")]
             client_cert: Default::default(),
-            url_builder: url,
+            url_builder,
             resolved_ip,
             accept_invalid_certificate: false,
             do_not_reuse_connection: false,
@@ -417,8 +429,9 @@ impl FlUrl {
     }
 
     /// Without a TLS provider feature this is inert: the request never reaches a
-    /// TLS handshake because `https://` panics at execute time. It also needs
-    /// `dangerous-tls` to have any effect at all — see that feature's docs.
+    /// TLS handshake because `https://` is refused at execute time with
+    /// [`FlUrlError::UnsupportedScheme`]. It also needs `dangerous-tls` to have any
+    /// effect at all — see that feature's docs.
     pub fn accept_invalid_certificate(mut self) -> Self {
         self.accept_invalid_certificate = true;
         self
@@ -643,10 +656,10 @@ impl FlUrl {
             }
             #[cfg(not(feature = "_tls"))]
             Scheme::Https => {
-                panic!(
+                return Err(FlUrlError::UnsupportedScheme(format!(
                     "FlUrl does not support https: it is compiled without a TLS provider feature. Enable 'with-ring-tls' (ring) or 'with-rust-tls' (pure Rust). Url: {}",
                     self.url_builder
-                )
+                )))
             }
             #[cfg(feature = "_tls")]
             Scheme::Https => {
@@ -862,6 +875,8 @@ impl FlUrl {
                 .uri(path_and_query),
         };
 
+        self.headers.ensure_valid()?;
+
         for (key, value) in self.headers.iter() {
             result = result.header(key, value);
         }
@@ -925,10 +940,32 @@ impl FlUrl {
 
         let path_and_query = self.get_path_and_query_with_leading_slash();
 
+        // MyHttpRequestBuilder panics on a request line or a header it must not put
+        // on the wire. The url is where both of these come from, and the url comes
+        // from settings — so it is checked here and the request fails with an error,
+        // the way it does in the hyper modes.
+        if let Some(byte) = find_forbidden_request_target_byte(&path_and_query) {
+            return Err(invalid_url(
+                &self.url_builder,
+                format!("the path and query contain forbidden byte 0x{:02x}", byte),
+            ));
+        }
+
+        self.headers.ensure_valid()?;
+
         let mut builder = MyHttpRequestBuilder::new(method, &path_and_query);
 
         if !self.headers.has_host_header() {
-            builder.append_header("Host", self.url_builder.get_host_port());
+            let host_port = self.url_builder.get_host_port();
+
+            if let Some(byte) = find_forbidden_header_value_byte(host_port) {
+                return Err(invalid_url(
+                    &self.url_builder,
+                    format!("the host contains forbidden control byte 0x{:02x}", byte),
+                ));
+            }
+
+            builder.append_header("Host", host_port);
         }
 
         if self.url_builder.is_unix_socket() {
@@ -1260,6 +1297,8 @@ impl FlUrl {
         let mut result = my_http_client::http::request::Builder::new()
             .method(method.clone())
             .uri(path_and_query);
+
+        self.headers.ensure_valid()?;
 
         for (key, value) in self.headers.iter() {
             result = result.header(key, value);
@@ -1606,6 +1645,22 @@ fn map_my_http_client_error(err: my_http_client::MyHttpClientError) -> FlUrlErro
     }
 }
 
+/// CR, LF, NUL and a space: exactly what `MyHttpRequestBuilder::new` refuses in a
+/// request line, with a panic. Any of them would end the line early.
+fn find_forbidden_request_target_byte(path_and_query: &str) -> Option<u8> {
+    path_and_query
+        .bytes()
+        .find(|byte| matches!(byte, b'\r' | b'\n' | 0 | b' '))
+}
+
+fn invalid_url(url_builder: &UrlBuilder, reason: String) -> FlUrlError {
+    FlUrlError::InvalidUrl(format!(
+        "Invalid url '{}': {}",
+        url_builder.to_string().escape_debug(),
+        reason
+    ))
+}
+
 #[cfg(test)]
 mod test {
 
@@ -1931,5 +1986,32 @@ mod test {
         assert_eq!(fl_url.get_resolved_ip(), Some("10.0.0.7".parse().unwrap()));
         assert_eq!(fl_url.url_builder.get_host_port(), "domain.com:8080");
         assert_eq!(fl_url.url_builder.get_path_and_query(), "/xxx");
+    }
+
+    /// `find_forbidden_request_target_byte` repeats the rule of
+    /// `MyHttpRequestBuilder::new`, so the two can drift. It has to refuse exactly
+    /// what the builder panics on: less would bring the panic back, more would fail
+    /// requests that used to go out.
+    #[test]
+    fn the_request_target_check_matches_my_http_client() {
+        for code in 0..=0x2ffu32 {
+            let Some(c) = char::from_u32(code) else {
+                continue;
+            };
+
+            let path = format!("/a{c}b?c=d");
+
+            let builder_path = path.clone();
+            let builder_panics = std::panic::catch_unwind(move || {
+                super::MyHttpRequestBuilder::new(hyper::Method::GET, builder_path.as_str());
+            })
+            .is_err();
+
+            assert_eq!(
+                super::find_forbidden_request_target_byte(path.as_str()).is_some(),
+                builder_panics,
+                "path with {c:?}"
+            );
+        }
     }
 }
