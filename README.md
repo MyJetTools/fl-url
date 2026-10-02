@@ -23,11 +23,12 @@ FLUrl is a Hyper-based HTTP client that provides a fluent API for building and e
 
 ## Installation
 
-Add to your `Cargo.toml`:
+`flurl` is not published on crates.io — it is pulled from git, pinned to a release
+tag. Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-flurl = "0.6.1"
+flurl = { tag = "0.7.0", git = "https://github.com/MyJetTools/fl-url.git" }
 ```
 
 **`https://` needs a TLS provider feature.** Both are off by default, so a
@@ -42,14 +43,18 @@ Pick one:
 ```toml
 [dependencies]
 # ring — the default recommendation: mature, very widely deployed.
-flurl = { version = "0.6.1", features = ["with-ring-tls"] }
+flurl = { tag = "0.7.0", git = "https://github.com/MyJetTools/fl-url.git", features = [
+    "with-ring-tls",
+] }
 ```
 
 ```toml
 [dependencies]
 # pure Rust — no C toolchain anywhere, via rustls-graviola.
 # x86_64 and aarch64 only; a younger, less deployed crypto implementation.
-flurl = { version = "0.6.1", features = ["with-rust-tls"] }
+flurl = { tag = "0.7.0", git = "https://github.com/MyJetTools/fl-url.git", features = [
+    "with-rust-tls",
+] }
 ```
 
 Enabling both is not an error (`--all-features` does it): my-tls resolves the
@@ -59,7 +64,9 @@ For SSH tunneling support:
 
 ```toml
 [dependencies]
-flurl = { version = "0.6.1", features = ["with-ssh"] }
+flurl = { tag = "0.7.0", git = "https://github.com/MyJetTools/fl-url.git", features = [
+    "with-ssh",
+] }
 ```
 
 ### Feature flags
@@ -111,7 +118,7 @@ needed — the target is detected automatically):
 
 ```toml
 [dependencies]
-flurl = "0.7"
+flurl = { tag = "0.7.0", git = "https://github.com/MyJetTools/fl-url.git" }
 ```
 
 ### What differs under wasm
