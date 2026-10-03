@@ -39,9 +39,13 @@ impl RequestToExecute {
     }
 
     pub fn method_is_idempotent(&self) -> bool {
+        self.method().is_idempotent()
+    }
+
+    pub fn method(&self) -> &Method {
         match self {
-            Self::Compiled(request) => request.method_is_idempotent(),
-            Self::Streamed { method, .. } => method.is_idempotent(),
+            Self::Compiled(request) => &request.method,
+            Self::Streamed { method, .. } => method,
         }
     }
 

@@ -68,6 +68,12 @@ impl ResponseBody {
         }
     }
 
+    /// The `Content-Length` of the response, when it carries one that reads as a number
+    /// and frames the body (see [`content_length`]).
+    pub(crate) fn content_length(&self) -> Option<u64> {
+        content_length(self.headers())
+    }
+
     pub fn get_header(&self, header: &str) -> Result<Option<&str>, FlUrlReadingHeaderError> {
         match self.headers().get(header) {
             Some(value) => Ok(Some(value.to_str()?)),
@@ -112,9 +118,13 @@ impl ResponseBody {
         }
     }
 
+    /// `announced_size` is what the response said its body is - `None` when it said
+    /// nothing, or when what it said is not about a body it carries (a HEAD response).
     pub(crate) async fn convert_to_slice_if_needed(
         &mut self,
         body_read_timeout: Option<Duration>,
+        max_body_size: usize,
+        announced_size: Option<u64>,
     ) -> Result<(), FlUrlError> {
         // The placeholder lives only until the line that replaces it below, with no
         // await in between, so no one ever sees it.
@@ -142,9 +152,14 @@ impl ResponseBody {
                     body: None,
                 };
 
-                let read_future = my_hyper_utils::box_body_to_vec(incoming, |err| {
-                    FlUrlError::ReadingHyperBodyError(err)
-                });
+                // A body that announces it is too large is refused before a byte of
+                // it is read; one that does not is cut off once it grows past the
+                // limit. Either way body stays None and the connection is disposed.
+                if announced_size.is_some_and(|size| size > max_body_size as u64) {
+                    return Err(body_too_large(max_body_size));
+                }
+
+                let read_future = read_body_limited(incoming, max_body_size);
 
                 let body_result = match body_read_timeout {
                     Some(timeout) => match tokio::time::timeout(timeout, read_future).await {
@@ -178,7 +193,7 @@ impl ResponseBody {
     /// transform: it runs only after the body has been fully read off the wire
     /// and the connection settled, so a decode error does not affect connection
     /// reuse.
-    pub(crate) fn decode_gzip_if_needed(&mut self) -> Result<(), FlUrlError> {
+    pub(crate) fn decode_gzip_if_needed(&mut self, max_body_size: usize) -> Result<(), FlUrlError> {
         let Self::Body { headers, body, .. } = self else {
             return Ok(());
         };
@@ -201,7 +216,7 @@ impl ResponseBody {
             return Ok(());
         }
 
-        let decoded = decompress_gzip_body(compressed.as_slice())?;
+        let decoded = decompress_gzip_body(compressed.as_slice(), max_body_size)?;
 
         // The stored headers must describe the body we actually hold, not the
         // compressed wire form.
@@ -254,13 +269,15 @@ impl ResponseBody {
         }
     }
 
+    // These helpers have no size limit to be given, so they keep reading a body of any
+    // size, as they always did; the limit is a setting of FlUrl's buffered reads.
     pub async fn convert_body_and_get_as_slice(&mut self) -> Result<&[u8], FlUrlError> {
-        self.convert_to_slice_if_needed(None).await?;
+        self.convert_to_slice_if_needed(None, usize::MAX, None).await?;
         self.get_loaded_body_as_slice()
     }
 
     pub async fn convert_body_and_receive_it(&mut self) -> Result<Vec<u8>, FlUrlError> {
-        self.convert_to_slice_if_needed(None).await?;
+        self.convert_to_slice_if_needed(None, usize::MAX, None).await?;
         self.take_loaded_body()
     }
     pub fn into_http_body(self) -> Result<HyperResponse, FlUrlError> {
@@ -289,10 +306,7 @@ impl ResponseBody {
                 let version = response.version();
                 let (parts, body) = response.into_parts();
 
-                let body = my_hyper_utils::box_body_to_vec(body, |err| {
-                    FlUrlError::ReadingHyperBodyError(err)
-                })
-                .await?;
+                let body = read_body_limited(body, usize::MAX).await?;
 
                 (status_code, version, parts.headers, body)
             }
@@ -311,6 +325,51 @@ impl ResponseBody {
 
         Ok(full_body_response(status_code, version, headers, body))
     }
+}
+
+fn body_too_large(limit: usize) -> FlUrlError {
+    FlUrlError::ResponseBodyTooLarge { limit }
+}
+
+/// The `Content-Length` the response announced, when it carries one that reads as a
+/// number. Next to a `Transfer-Encoding` it is not what frames the body (RFC 9112
+/// §6.3), so then it announces nothing. Read as `u64` so that a size past `usize` on
+/// a 32-bit target still counts as too large rather than as no size at all.
+fn content_length(headers: &HeaderMap) -> Option<u64> {
+    if headers.contains_key(TRANSFER_ENCODING) {
+        return None;
+    }
+    headers.get(CONTENT_LENGTH)?.to_str().ok()?.trim().parse().ok()
+}
+
+/// Reads the body into memory, failing as soon as it grows past `max_body_size`
+/// instead of buffering whatever the server sends.
+async fn read_body_limited(
+    mut body: http_body_util::combinators::BoxBody<Bytes, String>,
+    max_body_size: usize,
+) -> Result<Vec<u8>, FlUrlError> {
+    let mut result = Vec::new();
+
+    while let Some(frame) = body.frame().await {
+        let frame = frame.map_err(FlUrlError::ReadingHyperBodyError)?;
+
+        let Ok(data) = frame.into_data() else {
+            continue;
+        };
+
+        if data.len() > max_body_size - result.len() {
+            return Err(body_too_large(max_body_size));
+        }
+
+        if result.is_empty() {
+            // A body that arrives as one frame is taken over without a copy.
+            result = Vec::from(data);
+        } else {
+            result.extend_from_slice(&data);
+        }
+    }
+
+    Ok(result)
 }
 
 fn body_not_available() -> FlUrlError {
@@ -372,16 +431,24 @@ impl hyper::body::Body for UnavailableBody {
     }
 }
 
-fn decompress_gzip_body(data: &[u8]) -> Result<Vec<u8>, FlUrlError> {
+fn decompress_gzip_body(data: &[u8], max_body_size: usize) -> Result<Vec<u8>, FlUrlError> {
     use std::io::Read;
 
     // MultiGzDecoder (not GzDecoder) so concatenated gzip members — a valid,
     // spec-allowed encoding some servers emit — are all decoded, not just the
     // first.
-    let mut decoder = flate2::read::MultiGzDecoder::new(data);
+    let decoder = flate2::read::MultiGzDecoder::new(data);
+    // The decoded body is held to the same limit: a few kilobytes of gzip can
+    // inflate into gigabytes. One byte past the limit is enough to tell.
+    let mut decoder = decoder.take((max_body_size as u64).saturating_add(1));
     let mut result = Vec::new();
     decoder.read_to_end(&mut result).map_err(|err| {
         FlUrlError::ReadingHyperBodyError(format!("Failed to decompress gzip body: {}", err))
     })?;
+
+    if result.len() > max_body_size {
+        return Err(body_too_large(max_body_size));
+    }
+
     Ok(result)
 }

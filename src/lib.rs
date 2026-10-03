@@ -38,6 +38,10 @@ pub(crate) use retry_policy::RetryPolicy;
 
 pub extern crate my_http_utils;
 
+/// The largest response body a buffered read (`get_body_as_slice`, `get_json`, …)
+/// accepts unless `set_max_response_body_size` sets another limit: 10 MB.
+pub const DEFAULT_MAX_RESPONSE_BODY_SIZE: usize = 10 * 1024 * 1024;
+
 #[cfg(not(target_arch = "wasm32"))]
 mod consts;
 

@@ -21,9 +21,32 @@ jobs:
         run: |
           cargo build --all-features
 
-      - name: Test out our build
-        run: |
-          cargo test
+      # Every feature set below compiles in a different subset of tests/; together
+      # they run every file there at least once. Tests that reach the internet are
+      # #[ignore]d and stay out of CI.
+
+      # No TLS, no ssh: tests/https_without_tls.rs and the plain-http suites.
+      - name: Test without features
+        run: cargo test
+
+      # ssh without TLS: the `not(feature = "_tls")` half of
+      # tests/ssh_tunnel_target_scheme.rs.
+      - name: Test with ssh, without TLS
+        run: cargo test --features with-ssh
+
+      # ring + ssh + dangerous-tls: client certificates, SNI in tests/resolved_ip.rs,
+      # the ssh tunnel suites including https through the tunnel.
+      - name: Test with ssh and ring TLS
+        run: cargo test --features with-ssh,with-ring-tls,dangerous-tls
+
+      # The pure-Rust provider on its own.
+      - name: Test with rust TLS
+        run: cargo test --features with-rust-tls
+
+      # Any neighbour in a build (my-web-socket-client) turns this on, and a `101`
+      # answer goes a different way with it — tests/websocket_upgrade.rs covers both.
+      - name: Test with my-http-client websocket support
+        run: cargo test --features my-http-client/with-websocket
 
   build-windows:
 
@@ -37,6 +60,10 @@ jobs:
 
       - name: Build on Windows (without unix-only with-ssh feature)
         run: cargo build --no-default-features
+
+      # ring is bundled C/assembly — the part of the build that can break on Windows.
+      - name: Build on Windows with ring TLS
+        run: cargo build --features with-ring-tls,dangerous-tls
 
   build-wasm:
 

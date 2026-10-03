@@ -112,11 +112,28 @@ pub(crate) async fn execute_fetch(
 /// is bounded on the request's `AbortController`; the resulting abort is surfaced
 /// as [`FlUrlError::Timeout`]. With no body timeout the read is unbounded,
 /// matching the native default (`response_body_timeout = None`).
+///
+/// A body bigger than `max_body_size` fails with [`FlUrlError::ResponseBodyTooLarge`]:
+/// before the download when `Content-Length` says so, otherwise before it is copied
+/// into wasm memory. `carries_body` is `false` for a response whose `Content-Length`
+/// is not about a body it carries (a HEAD response, a 204, a 304).
 pub(crate) async fn read_response_body(
     response: &Response,
     controller: Option<&AbortController>,
     body_timeout_millis: Option<i32>,
+    max_body_size: usize,
+    carries_body: bool,
 ) -> Result<Vec<u8>, FlUrlError> {
+    if carries_body && announced_length(response).is_some_and(|len| len > max_body_size as u64) {
+        // Ends the download the browser may already have started.
+        if let Some(controller) = controller {
+            controller.abort();
+        }
+        return Err(FlUrlError::ResponseBodyTooLarge {
+            limit: max_body_size,
+        });
+    }
+
     let timed_out = Rc::new(Cell::new(false));
     let timer_handle = match (controller, body_timeout_millis) {
         (Some(controller), Some(millis)) => set_abort_timer(controller, millis, timed_out.clone()),
@@ -146,6 +163,11 @@ pub(crate) async fn read_response_body(
                     "Response.arrayBuffer() did not return an ArrayBuffer".to_string(),
                 )
             })?;
+            if array_buffer.byte_length() as usize > max_body_size {
+                return Err(FlUrlError::ResponseBodyTooLarge {
+                    limit: max_body_size,
+                });
+            }
             Ok(js_sys::Uint8Array::new(&array_buffer).to_vec())
         }
         Err(err) => {
@@ -156,6 +178,22 @@ pub(crate) async fn read_response_body(
             }
         }
     }
+}
+
+/// The size `Content-Length` announces for the body as it will be handed over. The
+/// browser decodes a `Content-Encoding` itself and the header then counts the encoded
+/// bytes, so such a response announces nothing here.
+///
+/// Read as `u64`: wasm32's `usize` is 32 bits, and a size of 4 GB or more must still
+/// count as too large rather than as no size at all.
+fn announced_length(response: &Response) -> Option<u64> {
+    let headers = response.headers();
+    if headers.has("content-encoding").unwrap_or(true)
+        || headers.has("transfer-encoding").unwrap_or(true)
+    {
+        return None;
+    }
+    headers.get("content-length").ok()??.trim().parse().ok()
 }
 
 /// Reads all response headers into a `(name, value)` list. The browser lower-cases

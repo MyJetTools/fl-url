@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fmt::Debug, time::Duration};
 
-use hyper::{header::CONNECTION, StatusCode};
+use hyper::{header::CONNECTION, Method, StatusCode};
 use serde::de::DeserializeOwned;
 use my_http_utils::UrlBuilder;
 
@@ -14,6 +14,10 @@ pub struct FlUrlResponse {
     status_code: StatusCode,
     response: ResponseBody,
     body_read_timeout: Option<Duration>,
+    max_body_size: usize,
+    // What `Content-Length` says the body is, for a response which carries a body at
+    // all. Lets a buffered read refuse a body too large before reading any of it.
+    announced_body_size: Option<u64>,
     decompress_gzip: bool,
     // Owns the checked-out connection until the body is fully consumed. Dropped
     // without returning (dispose) on error, `Connection: close`, or when the
@@ -42,6 +46,11 @@ impl FlUrlResponse {
             response: ResponseBody::Hyper(response.into_response()),
             url,
             body_read_timeout: None,
+            // A response made here from the outside has no FlUrl settings to take a
+            // limit from, so it reads a body of any size, as it always did; FlUrl's own
+            // requests set the limit they were given.
+            max_body_size: usize::MAX,
+            announced_body_size: None,
             decompress_gzip: false,
             connection_returner: None,
         }
@@ -49,6 +58,27 @@ impl FlUrlResponse {
 
     pub(crate) fn set_body_read_timeout(&mut self, timeout: Option<Duration>) {
         self.body_read_timeout = timeout;
+    }
+
+    pub(crate) fn set_max_body_size(&mut self, max_body_size: usize) {
+        self.max_body_size = max_body_size;
+    }
+
+    /// Takes the size `Content-Length` announces as the size of the body - unless the
+    /// response carries no body for all it says: the answer to a HEAD request, a 1xx,
+    /// a 204 or a 304 describes a body which is not there.
+    pub(crate) fn set_request_method(&mut self, method: &Method) {
+        let status = self.status_code.as_u16();
+        let carries_body = *method != Method::HEAD
+            && !(100..200).contains(&status)
+            && status != 204
+            && status != 304;
+
+        self.announced_body_size = if carries_body {
+            self.response.content_length()
+        } else {
+            None
+        };
     }
 
     pub(crate) fn set_decompress_gzip(&mut self, decompress_gzip: bool) {
@@ -65,7 +95,11 @@ impl FlUrlResponse {
     async fn load_body(&mut self) -> Result<(), FlUrlError> {
         let load_result = self
             .response
-            .convert_to_slice_if_needed(self.body_read_timeout)
+            .convert_to_slice_if_needed(
+                self.body_read_timeout,
+                self.max_body_size,
+                self.announced_body_size,
+            )
             .await;
 
         match load_result {
@@ -84,7 +118,7 @@ impl FlUrlResponse {
                 // connection is settled: a decode failure is a data error, not a
                 // connection problem — the socket was already fully drained.
                 if self.decompress_gzip {
-                    self.response.decode_gzip_if_needed()?;
+                    self.response.decode_gzip_if_needed(self.max_body_size)?;
                 }
                 Ok(())
             }

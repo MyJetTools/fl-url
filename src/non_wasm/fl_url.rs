@@ -264,6 +264,17 @@ impl FlUrl {
         self.map(|inner| inner.set_response_body_timeout(timeout))
     }
 
+    /// The largest response body a buffered read (`get_body_as_slice`, `get_json`,
+    /// `get_body_as_str`, `receive_body`) accepts, in bytes; a bigger one fails the
+    /// read with [`FlUrlError::ResponseBodyTooLarge`]. 10 MB by default
+    /// ([`crate::DEFAULT_MAX_RESPONSE_BODY_SIZE`]); `usize::MAX` lifts the limit. A
+    /// streamed body (`get_body_as_stream`) is not limited — it is never held whole.
+    ///
+    /// [`FlUrlError::ResponseBodyTooLarge`]: crate::FlUrlError::ResponseBodyTooLarge
+    pub fn set_max_response_body_size(self, max_size: usize) -> Self {
+        self.map(|inner| inner.set_max_response_body_size(max_size))
+    }
+
     pub fn do_not_reuse_connection(self) -> Self {
         self.map(|inner| inner.do_not_reuse_connection())
     }

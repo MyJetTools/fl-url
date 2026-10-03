@@ -10,11 +10,12 @@ pub enum FlUrlError {
     Timeout,
     SerializationError(serde_json::Error),
     IoError(std::io::Error),
-    HttpsInvalidDomainName,
-    InvalidHttp1HandShake(String),
-    CanNotEstablishConnection(String),
     CanNotConvertToUtf8(std::str::Utf8Error),
     ReadingHyperBodyError(String),
+    /// A buffered read met a response body bigger than `set_max_response_body_size`
+    /// allows ([`crate::DEFAULT_MAX_RESPONSE_BODY_SIZE`] by default). `limit` is that
+    /// size in bytes; a gzip body is measured both as it came and once decoded.
+    ResponseBodyTooLarge { limit: usize },
     /// The url can not be used: it names no host, its scheme is unknown, its
     /// `name@ip` or ssh tunnel part is malformed, or it carries a byte that must not
     /// be put on the wire (a new line in the host, a space in the path). `FlUrl::new`
@@ -38,8 +39,6 @@ pub enum FlUrlError {
     StreamedBodyCanNotBeCompressed,
 
     #[cfg(not(target_arch = "wasm32"))]
-    HyperError(hyper::Error),
-    #[cfg(not(target_arch = "wasm32"))]
     HttpError(hyper::http::Error),
     #[cfg(all(not(target_arch = "wasm32"), feature = "_tls"))]
     RustTlsError(my_tls::tokio_rustls::rustls::Error),
@@ -55,16 +54,6 @@ pub enum FlUrlError {
 }
 
 impl FlUrlError {
-    pub fn is_hyper_canceled(&self) -> bool {
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            if let FlUrlError::HyperError(e) = self {
-                return e.is_canceled();
-            }
-        }
-        false
-    }
-
     pub fn is_timeout(&self) -> bool {
         if matches!(self, FlUrlError::Timeout) {
             return true;
@@ -134,13 +123,6 @@ impl From<my_http_client::MyHttpClientError> for FlUrlError {
 impl From<my_http_client::RequestBuildError> for FlUrlError {
     fn from(src: my_http_client::RequestBuildError) -> Self {
         Self::RequestBuild(src.to_string())
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-impl From<hyper::Error> for FlUrlError {
-    fn from(src: hyper::Error) -> Self {
-        Self::HyperError(src)
     }
 }
 

@@ -22,6 +22,10 @@ pub struct FlUrlResponse {
     // response-body timeout is configured.
     controller: Option<web_sys::AbortController>,
     body_timeout_millis: Option<i32>,
+    max_body_size: usize,
+    // `false` for a response whose `Content-Length` describes a body it does not carry:
+    // the answer to a HEAD request, a 204 or a 304.
+    carries_body: bool,
     body: Option<Vec<u8>>,
 }
 
@@ -40,8 +44,14 @@ impl FlUrlResponse {
         response: web_sys::Response,
         controller: Option<web_sys::AbortController>,
         body_timeout_millis: Option<i32>,
+        max_body_size: usize,
+        method: &str,
     ) -> Self {
         let status_code = response.status();
+        let carries_body = !method.eq_ignore_ascii_case("HEAD")
+            && !(100..200).contains(&status_code)
+            && status_code != 204
+            && status_code != 304;
         let headers = collect_headers(&response.headers());
         Self {
             url,
@@ -50,6 +60,8 @@ impl FlUrlResponse {
             response: Some(response),
             controller,
             body_timeout_millis,
+            max_body_size,
+            carries_body,
             body: None,
         }
     }
@@ -63,8 +75,14 @@ impl FlUrlResponse {
                     FlUrlError::FetchError("response body has already been consumed".to_string())
                 })?;
 
-                read_response_body(&response, self.controller.as_ref(), self.body_timeout_millis)
-                    .await?
+                read_response_body(
+                    &response,
+                    self.controller.as_ref(),
+                    self.body_timeout_millis,
+                    self.max_body_size,
+                    self.carries_body,
+                )
+                .await?
             }
         };
 

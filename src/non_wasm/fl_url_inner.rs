@@ -56,6 +56,8 @@ pub(crate) struct FlUrlInner {
     pub request_timeout: Duration,
     // Bounds how long reading the response body may take. `None` = unbounded.
     pub response_body_timeout: Option<Duration>,
+    // The largest body a buffered read accepts.
+    pub max_response_body_size: usize,
     pub do_not_reuse_connection: bool,
     pub connections_cache: Option<Arc<FlUrlHttpConnectionsCache>>,
     pub compress_body: bool,
@@ -151,6 +153,7 @@ impl FlUrlInner {
             retry: RetryPolicy::default(),
             request_timeout: Duration::from_secs(10),
             response_body_timeout: None,
+            max_response_body_size: crate::DEFAULT_MAX_RESPONSE_BODY_SIZE,
             print_input_request: false,
             compress_body: false,
             decompress_gzip_response: false,
@@ -300,6 +303,11 @@ impl FlUrlInner {
 
     pub fn set_response_body_timeout(mut self, timeout: Duration) -> Self {
         self.response_body_timeout = Some(timeout);
+        self
+    }
+
+    pub fn set_max_response_body_size(mut self, max_size: usize) -> Self {
+        self.max_response_body_size = max_size;
         self
     }
 
@@ -1412,6 +1420,8 @@ impl FlUrlInner {
                     let mut response =
                         FlUrlResponse::from_http1_response(self.url_builder, response);
                     response.set_body_read_timeout(self.response_body_timeout);
+                    response.set_max_body_size(self.max_response_body_size);
+                    response.set_request_method(request.method());
                     response.set_decompress_gzip(self.decompress_gzip_response);
                     // The connection stays checked out until the response body
                     // is fully consumed; the returner puts it back (or disposes
@@ -1503,6 +1513,7 @@ mod test {
 
     #[cfg(feature = "_tls")]
     #[tokio::test]
+    #[ignore = "hits the network (jetdev.eu); run with --ignored"]
     async fn test_h1() {
         let mut fl_url_resp = FlUrl::new("https://jetdev.eu/img/logo.png")
             .do_not_reuse_connection()
@@ -1518,6 +1529,7 @@ mod test {
 
     #[cfg(feature = "_tls")]
     #[tokio::test]
+    #[ignore = "hits the network (jetdev.eu); run with --ignored"]
     async fn test_h2() {
         let mut fl_url_resp = FlUrl::new("https://jetdev.eu/img/logo.png")
             .update_mode(crate::non_wasm::fl_url::FlUrlMode::H2)
@@ -1532,6 +1544,7 @@ mod test {
 
     #[cfg(feature = "_tls")]
     #[tokio::test]
+    #[ignore = "hits the network (jetdev.eu); run with --ignored"]
     async fn test_head() {
         let mut fl_url_resp = FlUrl::new("https://jetdev.eu/img/logo.png")
             .head()

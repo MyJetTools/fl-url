@@ -118,6 +118,10 @@ tokio = { version = "*", features = [
     "time",
 ] }
 
+# Gzips a response body for tests/max_response_body_size.rs.
+[dev-dependencies]
+flate2 = { version = "*" }
+
 # The wasm tests run the backend in a real browser (see tests/retry_wasm.rs).
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 wasm-bindgen-test = "0.3"

@@ -158,6 +158,20 @@ impl FlUrl {
         self.map(|inner| inner.set_response_body_timeout(timeout))
     }
 
+    /// The largest response body a buffered read accepts, in bytes; a bigger one
+    /// fails the read with [`FlUrlError::ResponseBodyTooLarge`]. 10 MB by default
+    /// ([`crate::DEFAULT_MAX_RESPONSE_BODY_SIZE`]); `usize::MAX` lifts the limit. The
+    /// browser downloads the body whole before it can be measured, so the limit keeps
+    /// it out of wasm memory, not out of the browser's — unless the response
+    /// announces its size in `Content-Length` and is not compressed, in which case it
+    /// is refused unread (the `Content-Length` of a compressed response counts the
+    /// encoded bytes, not the body the browser hands over).
+    ///
+    /// [`FlUrlError::ResponseBodyTooLarge`]: crate::FlUrlError::ResponseBodyTooLarge
+    pub fn set_max_response_body_size(self, max_size: usize) -> Self {
+        self.map(|inner| inner.set_max_response_body_size(max_size))
+    }
+
     /// No-op under wasm (the browser owns connection reuse). Kept for API parity.
     pub fn do_not_reuse_connection(self) -> Self {
         self.map(|inner| inner.do_not_reuse_connection())
