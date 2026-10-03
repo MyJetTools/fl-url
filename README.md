@@ -129,6 +129,9 @@ native knobs are kept for signature parity but are **no-ops** under wasm:
 `update_mode`, `accept_gzip` (the browser decompresses transparently),
 `set_not_used_connection_timeout`.
 
+Redirects are followed by the browser, so under wasm you get the response at the end
+of them; natively FlUrl returns the redirect as it is — see [Redirects](#redirects).
+
 These **do** work under wasm: `set_timeout` bounds the request→headers round-trip
 via `AbortController` + `setTimeout`; `set_response_body_timeout` bounds the body
 read on the same signal (unbounded by default, as on native); `with_retries` and
@@ -822,6 +825,31 @@ for (key, value) in headers {
     println!("{}: {:?}", key, value);
 }
 ```
+
+### Redirects
+
+FlUrl does not follow redirects. A `3xx` answer comes back as it is, with its
+`Location` header, and no request goes to the address it names:
+
+```rust
+let mut response = FlUrl::new("https://api.example.com/old-path")
+    .get()
+    .await?;
+
+if (300..400).contains(&response.get_status_code()) {
+    let location = response.get_header("Location")?;
+    println!("Moved to: {:?}", location);
+}
+```
+
+To go where the redirect points, read `Location` and make the next request yourself.
+A relative `Location` (`/other`) is resolved against the url of the request. When the
+new address is on another host, do not carry over `Authorization`, `Cookie` and
+other credentials that were meant for the first one.
+
+Under wasm the request is made by the browser's `fetch`, which follows redirects
+itself: the response you get is the one at the end of the redirects, not the
+redirect.
 
 ## Connection Management
 
