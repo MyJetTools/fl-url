@@ -19,7 +19,6 @@ pub(crate) struct FlUrlInner {
     pub url_builder: UrlBuilder,
     pub headers: FlUrlHeaders,
     pub accept_invalid_certificate: bool,
-    pub not_used_connection_timeout: Duration,
     pub request_timeout: Duration,
     pub response_body_timeout: Option<Duration>,
     pub do_not_reuse_connection: bool,
@@ -67,7 +66,6 @@ impl FlUrlInner {
             url_builder,
             headers: FlUrlHeaders::new(),
             accept_invalid_certificate: false,
-            not_used_connection_timeout: Duration::from_secs(30),
             request_timeout: Duration::from_secs(10),
             response_body_timeout: None,
             do_not_reuse_connection: false,
@@ -90,7 +88,6 @@ impl FlUrlInner {
     }
 
     pub fn set_not_used_connection_timeout(mut self, timeout: Duration) -> Self {
-        self.not_used_connection_timeout = timeout;
         self.reuse_connection_timeout_sec = (timeout.as_secs_f64().ceil() as i64).max(1);
         self
     }
