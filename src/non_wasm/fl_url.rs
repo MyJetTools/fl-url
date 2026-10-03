@@ -405,7 +405,7 @@ impl FlUrl {
     ///
     /// ```no_run
     /// # async fn doc() -> Result<(), flurl::FlUrlError> {
-    /// use my_http_client::RequestBodyStream;
+    /// use flurl::my_http_client::RequestBodyStream;
     ///
     /// let (publisher, body) = RequestBodyStream::new(4);
     ///
@@ -464,7 +464,7 @@ impl FlUrl {
     /// passing a length rather than letting it go out chunked:
     ///
     /// ```no_run
-    /// # async fn doc(len: usize, body: my_http_client::RequestBodyStream<Vec<u8>>)
+    /// # async fn doc(len: usize, body: flurl::my_http_client::RequestBodyStream<Vec<u8>>)
     /// # -> Result<(), flurl::FlUrlError> {
     /// let response = flurl::FlUrl::new("https://api.example.com")
     ///     .append_path_segment("files")

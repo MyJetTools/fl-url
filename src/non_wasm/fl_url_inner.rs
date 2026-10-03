@@ -53,8 +53,6 @@ pub(crate) struct FlUrlInner {
     #[cfg(feature = "_tls")]
     pub client_cert: Option<my_tls::ClientCertificate>,
     pub accept_invalid_certificate: bool,
-    // If we are trying to reuse connection, but it was not used for this time, we will drop it
-    pub not_used_connection_timeout: Duration,
     pub request_timeout: Duration,
     // Bounds how long reading the response body may take. `None` = unbounded.
     pub response_body_timeout: Option<Duration>,
@@ -150,7 +148,6 @@ impl FlUrlInner {
             accept_invalid_certificate: false,
             do_not_reuse_connection: false,
             connections_cache: Default::default(),
-            not_used_connection_timeout: Duration::from_secs(30),
             retry: RetryPolicy::default(),
             request_timeout: Duration::from_secs(10),
             response_body_timeout: None,
@@ -191,7 +188,6 @@ impl FlUrlInner {
     }
 
     pub fn set_not_used_connection_timeout(mut self, timeout: Duration) -> Self {
-        self.not_used_connection_timeout = timeout;
         // Round up and clamp to at least 1s: as_secs() truncation would turn a
         // sub-second timeout into 0, which evicts the whole per-key pool on
         // every checkout (pooling silently disabled).
@@ -335,8 +331,8 @@ impl FlUrlInner {
         }
 
         // A key that can not be loaded is a broken setting, so it is found here, by
-        // my-tls' own loader, rather than in the middle of a connection attempt: there
-        // it would be retried as an outage, and my-tls 0.1.5 unwraps it into a panic.
+        // my-tls' own loader, rather than in the middle of a connection attempt, where
+        // it would be retried as an outage.
         if let Err(err) =
             my_tls::ssl::calc_cert_key(&certificate.private_key, certificate.cert_chain.clone())
         {
@@ -519,11 +515,8 @@ impl FlUrlInner {
     // `mut` is for the ssh credentials, which only a `with-ssh` build has.
     #[cfg_attr(not(all(unix, feature = "with-ssh")), allow(unused_mut))]
     async fn execute(mut self, request: RequestToExecute) -> Result<FlUrlResponse, FlUrlError> {
-        #[cfg(all(unix, feature = "with-ssh"))]
-        if let Some(ssh_credentials) = self.ssh_credentials.take() {
-            return self.execute_ssh(request, ssh_credentials).await;
-        }
-
+        // The scheme decides what is spoken, with or without an ssh tunnel. The tunnel
+        // only decides how the target is reached.
         let response = match self.url_builder.get_scheme() {
             Scheme::Ws => {
                 return Err(FlUrlError::UnsupportedScheme(
@@ -537,6 +530,18 @@ impl FlUrlInner {
                 ))
             }
             Scheme::Http => {
+                #[cfg(all(unix, feature = "with-ssh"))]
+                if let Some(ssh_credentials) = self.ssh_credentials.take() {
+                    return self
+                        .execute_ssh::<my_ssh::SshAsyncChannel, SshHttpConnector>(
+                            request,
+                            ssh_credentials,
+                            Arc::new(crate::non_wasm::http_clients_cache::creators::SshConnectionCreator),
+                            crate::consts::HTTP_DEFAULT_PORT.into(),
+                        )
+                        .await;
+                }
+
                 if self.do_not_reuse_connection {
                     self.execute_with_retry::<TcpStream, HttpConnector>(
                         request,
@@ -567,6 +572,20 @@ impl FlUrlInner {
             }
             #[cfg(feature = "_tls")]
             Scheme::Https => {
+                // Behind a tunnel the TLS session runs inside its channel, end to end
+                // with the target.
+                #[cfg(all(unix, feature = "with-ssh"))]
+                if let Some(ssh_credentials) = self.ssh_credentials.take() {
+                    return self
+                        .execute_ssh::<TlsStream<my_ssh::SshAsyncChannel>, SshHttpsConnector>(
+                            request,
+                            ssh_credentials,
+                            Arc::new(crate::non_wasm::http_clients_cache::creators::SshHttpsConnectionCreator),
+                            crate::consts::HTTPS_DEFAULT_PORT.into(),
+                        )
+                        .await;
+                }
+
                 if self.do_not_reuse_connection {
                     self.execute_with_retry::<TlsStream<TcpStream>, HttpsConnector>(
                         request,
@@ -597,6 +616,19 @@ impl FlUrlInner {
             }
             #[cfg(unix)]
             Scheme::UnixSocket => {
+                // Behind a tunnel it is a socket on the ssh server.
+                #[cfg(all(unix, feature = "with-ssh"))]
+                if let Some(ssh_credentials) = self.ssh_credentials.take() {
+                    return self
+                        .execute_ssh::<my_ssh::SshAsyncChannel, SshHttpConnector>(
+                            request,
+                            ssh_credentials,
+                            Arc::new(crate::non_wasm::http_clients_cache::creators::SshConnectionCreator),
+                            None,
+                        )
+                        .await;
+                }
+
                 if self.do_not_reuse_connection {
                     self.execute_with_retry::<UnixSocketStream, UnixSocketConnector>(
                         request,
@@ -624,34 +656,39 @@ impl FlUrlInner {
         Ok(response)
     }
 
+    /// The request through an ssh tunnel. `creator` makes its connection when
+    /// connections are not reused; otherwise the cache does.
     #[cfg(all(unix, feature = "with-ssh"))]
-    async fn execute_ssh(
+    async fn execute_ssh<
+        TStream: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + Sync + 'static,
+        TConnector: MyHttpClientConnector<TStream> + Send + Sync + 'static,
+    >(
         mut self,
         request: RequestToExecute,
         mut ssh_credentials: my_ssh::SshCredentials,
-    ) -> Result<FlUrlResponse, FlUrlError> {
+        creator: Arc<dyn HttpConnectionResolver<TStream, TConnector>>,
+        default_port: Option<u16>,
+    ) -> Result<FlUrlResponse, FlUrlError>
+    where
+        FlUrlHttpConnectionsCache: HttpConnectionResolver<TStream, TConnector>,
+    {
         if let Some(private_key_resolver) = self.ssh_security_credentials_resolver.take() {
             ssh_credentials = private_key_resolver
                 .update_credentials(&ssh_credentials)
                 .await;
         }
 
-        if self.do_not_reuse_connection {
-            return self
-                .execute_with_retry::<my_ssh::SshAsyncChannel, SshHttpConnector>(
-                    request,
-                    Arc::new(crate::non_wasm::http_clients_cache::creators::SshConnectionCreator),
-                    crate::consts::HTTP_DEFAULT_PORT.into(),
-                    Some(Arc::new(ssh_credentials)),
-                )
-                .await;
-        }
+        let connection_resolver: Arc<dyn HttpConnectionResolver<TStream, TConnector>> =
+            if self.do_not_reuse_connection {
+                creator
+            } else {
+                self.get_connections_cache()
+            };
 
-        let clients_cache = self.get_connections_cache();
-        self.execute_with_retry::<my_ssh::SshAsyncChannel, SshHttpConnector>(
+        self.execute_with_retry::<TStream, TConnector>(
             request,
-            clients_cache,
-            crate::consts::HTTP_DEFAULT_PORT.into(),
+            connection_resolver,
+            default_port,
             Some(Arc::new(ssh_credentials)),
         )
         .await
@@ -1286,6 +1323,8 @@ impl FlUrlInner {
             accept_invalid_certificate: self.accept_invalid_certificate,
             #[cfg(all(unix, feature = "with-ssh"))]
             ssh_session,
+            #[cfg(all(unix, feature = "with-ssh"))]
+            is_unix_socket: self.url_builder.is_unix_socket(),
             reuse_connection_timeout_seconds: self.reuse_connection_timeout_sec,
         }
     }

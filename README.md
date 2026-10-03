@@ -76,7 +76,7 @@ flurl = { tag = "0.7.0", git = "https://github.com/MyJetTools/fl-url.git", featu
 | `with-ring-tls` | off | TLS on the **ring** provider. Enables `https://` plus [`with_client_certificate`](#client-certificate). Mature and widely deployed; costs a bundled C/assembly build. No `aws-lc-sys` either way. |
 | `with-rust-tls` | off | The same, on a **pure-Rust** provider (`rustls-graviola`) — no C toolchain at all. Builds only on x86_64 and aarch64, and the implementation is far younger than ring. Prefer `with-ring-tls` unless dropping the C toolchain is the point. |
 | `dangerous-tls` | off | A modifier, not a TLS switch: it makes [`accept_invalid_certificate()`](#accept-invalid-certificates) actually skip server-cert verification. Combine it with a provider feature — on its own the TLS code compiles but no provider is installed, so https fails at connect time. |
-| `with-ssh` | off | [SSH tunneling](#ssh-tunneling-with-ssh-feature) (`ssh://…->http://…` urls). Unix only. Built on `my-ssh`, which is `russh` underneath — no `libssh2` or OpenSSL, but this is the one feature that links `aws-lc-sys` (a bundled C build). |
+| `with-ssh` | off | [SSH tunneling](#ssh-tunneling-with-ssh-feature) (`ssh://…->http://…`, `ssh://…->https://…` and `ssh://…->/path/to.sock` urls). Unix only. Built on `my-ssh`, which is `russh` underneath — no `libssh2` or OpenSSL, but this is the one feature that links `aws-lc-sys` (a bundled C build). |
 
 On `wasm32` TLS is the browser's job, so neither provider feature matters there —
 the `fetch` backend handles `https://` with or without them.
@@ -110,8 +110,7 @@ let users: Vec<User> = response.get_json().await?;
 
 Neither backend module is public: both alias their types to the crate root — use
 `flurl::FlUrl`, never a backend path — and the shared pieces
-(`FlUrlError`, the request `body` types, the drop-connection scenario) live at the
-root and are used by both. Native-only dependencies (hyper, tokio, my-tls, …) are
+(`FlUrlError` and the request `body` types) live at the root and are used by both. Native-only dependencies (hyper, tokio, my-tls, …) are
 excluded from the wasm build; the wasm build pulls only `web-sys` / `wasm-bindgen`.
 
 Add it to a wasm project exactly like a normal dependency (no extra feature
@@ -495,21 +494,14 @@ For a body that must not be materialized, `post_request_streamed` /
 `hyper::body::Body<Data = Bytes>` and write it to the socket as it is produced. Peak
 memory is one chunk plus whatever the producer buffers, whatever the size of the body.
 
-`my_http_client::RequestBodyStream` is the usual producer — a body over an mpsc
-channel, where the channel is the backpressure: `publish` waits once `buffer` chunks
-are queued for the socket. **Dropping the publisher is what ends the body.**
-
-`my_http_client` is a crate of its own, and `flurl` does not re-export it. To name
-`RequestBodyStream`, add it to `Cargo.toml` next to `flurl` — the same repository and
-tag `flurl` itself is built on:
-
-```toml
-[dependencies]
-my-http-client = { tag = "0.1.0", git = "https://github.com/my-jet-tools/my-http-client.git" }
-```
+`RequestBodyStream` is the usual producer — a body over an mpsc channel, where the
+channel is the backpressure: `publish` waits once `buffer` chunks are queued for the
+socket. **Dropping the publisher is what ends the body.** It comes from my-http-client,
+which is re-exported as `flurl::my_http_client` (native only) — no line for it in
+`Cargo.toml`.
 
 ```rust
-use my_http_client::RequestBodyStream;
+use flurl::my_http_client::RequestBodyStream;
 
 let (publisher, body) = RequestBodyStream::new(4);
 
@@ -532,8 +524,8 @@ let response = FlUrl::new("https://api.example.com")
 ```
 
 A proxied `hyper::body::Incoming`, a `StreamBody` over a file reader, or any other
-`Body` implementation works just as well — and needs no `my-http-client` in
-`Cargo.toml`. `hyper` itself is re-exported as `flurl::hyper`.
+`Body` implementation works just as well. `hyper` itself is re-exported as
+`flurl::hyper`.
 
 #### Framing: the `content_length` argument
 
@@ -896,9 +888,7 @@ a request timeout.
 Either kind is dropped once it has sat in the pool unused for longer than 120 seconds
 — see [Connection Timeout](#connection-timeout) to change that.
 
-These rules are fixed: there is no way to plug in a rule of your own. The crate
-exports a `DropConnectionScenario` trait and its `DefaultDropConnectionScenario`, but
-nothing takes an implementation of the trait.
+These rules are fixed: there is no way to plug in a rule of your own.
 
 ## HTTP Modes
 
@@ -962,7 +952,7 @@ verification.
 use flurl::my_tls::ClientCertificate;
 
 // A PKCS#12 file (.p12 / .pfx): the private key together with its certificate chain
-let cert = ClientCertificate::load_pks12_from_file("client.p12", "password").await?;
+let cert = ClientCertificate::from_pks12_file("client.p12", "password").await?;
 
 let response = FlUrl::new("https://api.example.com/data")
     .with_client_certificate(cert)
@@ -973,11 +963,14 @@ let response = FlUrl::new("https://api.example.com/data")
 `ClientCertificate` is `my-tls`' type, re-exported as `flurl::my_tls`. It is built from
 a PKCS#12 container only — there is no constructor that takes a pair of PEM files:
 
-| constructor | a file that can not be read, a wrong password, a broken container |
+| constructor | reads |
 | --- | --- |
-| `ClientCertificate::load_pks12_from_file(file_name, password).await` | `Err(String)` |
-| `ClientCertificate::from_pks12_file(file_name, password).await` | panics |
-| `ClientCertificate::from_pkcs12(bytes, password)` | panics |
+| `ClientCertificate::from_pks12_file(file_name, password).await` | a file |
+| `ClientCertificate::from_pkcs12(bytes, password)` | bytes already in memory |
+
+Both return `Result<ClientCertificate, my_tls::MyTlsError>`: a file that can not be
+read, a wrong password or a broken container is an error, and its message names the
+reason, never the password.
 
 A key and a certificate kept as PEM files are packed into one with
 `openssl pkcs12 -export -inkey client.key -in client.crt -out client.p12`.
@@ -1004,10 +997,26 @@ so it is not retried as an outage the way a failed connection is.
 let response = FlUrl::new("ssh://user@ssh.example.com:22->http://localhost:8080/api/data")
     .get()
     .await?;
+
+// The same through TLS: the session runs inside the tunnel
+let response = FlUrl::new("ssh://user@ssh.example.com:22->https://internal.example.com/api/data")
+    .get()
+    .await?;
 ```
 
-The target behind the tunnel is spoken to in plain HTTP. There is no TLS layer over a
-tunnel, so a `->https://…` target is not encrypted by it — keep the target `http://`.
+Behind the tunnel a url means what it means without one:
+
+- `http://`, or no scheme at all: plain HTTP to the target, which the ssh server
+  connects to;
+- `https://`: the TLS session runs inside the tunnel, end to end with the target, and
+  the ssh server only passes the bytes on. The certificate check, the server name,
+  `with_client_certificate` and `accept_invalid_certificate` are those of the target,
+  and a TLS provider feature is needed, as without a tunnel;
+- a unix socket on the ssh server: see
+  [Unix Socket on the SSH Server](#unix-socket-on-the-ssh-server).
+
+`ws://` and `wss://` fail the request with `FlUrlError::UnsupportedScheme`, as they do
+without a tunnel.
 
 With no credentials given, the session is opened with the keys of the running ssh
 agent (`$SSH_AUTH_SOCK`). The methods below give it a password or a private key
@@ -1089,6 +1098,28 @@ this; override it to replace the credentials as a whole.
 `my_ssh` is re-exported as `flurl::my_ssh`. The trait is an `async_trait` one, so the
 `async-trait` crate has to be in `Cargo.toml`.
 
+### Unix Socket on the SSH Server
+
+After the `->` a unix socket is named in any of the forms
+[Unix Socket Support](#unix-socket-support-unix-systems-only) lists:
+
+```rust
+let response = FlUrl::new("ssh://user@ssh.example.com:22->/var/run/docker.sock")
+    .append_path_segment("containers")
+    .append_path_segment("json")
+    .get()
+    .await?;
+```
+
+The ssh server opens the socket, so the path is a path on that machine:
+
+- `~` in it is the home of the ssh user there. It is read by running `echo $HOME` over
+  the session, so an account that may only forward can not use `~`; an absolute path
+  works without it.
+- The ssh user needs access to the socket file, and sshd has to allow forwarding to a
+  socket: `AllowStreamLocalForwarding`, which is on by default. A socket the server
+  refuses fails the request with an error.
+
 ## Unix Socket Support (Unix systems only)
 
 ```rust
@@ -1152,8 +1183,9 @@ Pooled connections are keyed by the ip as well, so `domain.com@10.0.0.1` and
 `domain.com@10.0.0.2` never share a connection. `fl_url.get_resolved_ip()` returns
 the ip a url pinned.
 
-The same form works behind an SSH tunnel (`ssh://user@host->http://domain.com@10.0.0.7:8080/`):
-the ssh server is asked to connect to the ip instead of resolving the name.
+The same form works behind an SSH tunnel (`ssh://user@host->https://domain.com@10.0.0.7:8443/`):
+the ssh server is asked to connect to the ip instead of resolving the name, and the
+name is still what the TLS session is opened for.
 
 Under wasm the browser owns DNS and TLS, so the form is not available there — the
 browser refuses a url with an `@` in it.
@@ -1385,7 +1417,8 @@ match FlUrl::new("https://api.example.com/data").get().await {
   read `response.get_status_code()`.
 - **`FlUrlError` is `#[non_exhaustive]`**, so a `match` on it needs a catch-all arm.
 - **A failed connection** — refused, reset, a TLS handshake that did not go through —
-  is `FlUrlError::MyHttpClientError` on native and `FlUrlError::FetchError` under
+  is `FlUrlError::MyHttpClientError` on native (its payload is
+  `flurl::my_http_client::MyHttpClientError`) and `FlUrlError::FetchError` under
   wasm. Each variant exists on its own backend only, so code meant for both leaves
   them to the catch-all arm.
 - **`err.is_timeout()`** is `true` for a timeout however it was reported.

@@ -3,8 +3,8 @@
 //!
 //! A certificate is read from a file that settings name, so a broken one is a broken
 //! setting. Its key used to be loaded in the middle of the first connection attempt,
-//! where my-tls `0.1.5` unwraps it — a panic for every request made with it. Now it is
-//! checked when it is given, by my-tls' own loader, and the request fails with
+//! where my-tls up to `f096172` unwrapped it — a panic for every request made with it.
+//! Now it is checked when it is given, by my-tls' own loader, and the request fails with
 //! `FlUrlError::RequestBuild` before a socket is opened. A second certificate used to
 //! be a panic as well.
 //!

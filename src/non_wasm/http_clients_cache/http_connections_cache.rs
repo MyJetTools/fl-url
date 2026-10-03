@@ -29,6 +29,11 @@ pub struct FlUrlHttpConnectionsCacheInner {
     unix_socket: AHashMap<String, Vec<ConnectionItem<UnixSocketStream, UnixSocketConnector>>>,
     #[cfg(all(unix, feature = "with-ssh"))]
     ssh: AHashMap<String, Vec<ConnectionItem<my_ssh::SshAsyncChannel, SshHttpConnector>>>,
+    #[cfg(all(unix, feature = "with-ssh", feature = "_tls"))]
+    ssh_https: AHashMap<
+        String,
+        Vec<ConnectionItem<TlsStream<my_ssh::SshAsyncChannel>, SshHttpsConnector>>,
+    >,
 }
 
 impl Default for FlUrlHttpConnectionsCacheInner {
@@ -42,6 +47,8 @@ impl Default for FlUrlHttpConnectionsCacheInner {
             unix_socket: Default::default(),
             #[cfg(all(unix, feature = "with-ssh"))]
             ssh: Default::default(),
+            #[cfg(all(unix, feature = "with-ssh", feature = "_tls"))]
+            ssh_https: Default::default(),
         }
     }
 }
@@ -78,6 +85,8 @@ impl FlUrlHttpConnectionsCache {
         write_access.unix_socket.clear();
         #[cfg(all(unix, feature = "with-ssh"))]
         write_access.ssh.clear();
+        #[cfg(all(unix, feature = "with-ssh", feature = "_tls"))]
+        write_access.ssh_https.clear();
     }
 
     /// Removes idle connections that outlived `reuse_connection_timeout` and
@@ -101,6 +110,12 @@ impl FlUrlHttpConnectionsCache {
         );
         #[cfg(all(unix, feature = "with-ssh"))]
         gc_map(&mut write_access.ssh, now, reuse_connection_timeout_seconds);
+        #[cfg(all(unix, feature = "with-ssh", feature = "_tls"))]
+        gc_map(
+            &mut write_access.ssh_https,
+            now,
+            reuse_connection_timeout_seconds,
+        );
     }
 
     pub async fn get_http_connection(
@@ -261,6 +276,66 @@ impl FlUrlHttpConnectionsCache {
     ) {
         let mut write_access = self.inner.lock();
         remove_connection(&mut write_access.ssh, connection);
+    }
+
+    /// `Err` when `params` carry no ssh session: there is nowhere to open the tunnel.
+    #[cfg(all(unix, feature = "with-ssh", feature = "_tls"))]
+    pub async fn get_ssh_https_connection(
+        &self,
+        params: &ConnectionParams<'_>,
+    ) -> Result<
+        Arc<MyHttpClientWrapper<TlsStream<my_ssh::SshAsyncChannel>, SshHttpsConnector>>,
+        my_http_client::MyHttpClientError,
+    > {
+        let Some(ssh_session) = params.ssh_session.clone() else {
+            return Err(super::creators::no_ssh_session());
+        };
+
+        let connection_key =
+            super::utils::get_ssh_https_connection_key(ssh_session.get_ssh_credentials(), params);
+
+        let mut write_access = self.inner.lock();
+
+        Ok(checkout_connection(
+            &mut write_access.ssh_https,
+            connection_key.as_str(),
+            params.reuse_connection_timeout_seconds,
+            params.mode.is_h2(),
+            || {
+                super::creators::SshHttpsConnectionCreator::create_connection(
+                    params,
+                    ssh_session.clone(),
+                    connection_key.to_string(),
+                )
+            },
+        ))
+    }
+
+    #[cfg(all(unix, feature = "with-ssh", feature = "_tls"))]
+    pub fn put_ssh_https_connection_back_sync(
+        &self,
+        connection: Arc<MyHttpClientWrapper<TlsStream<my_ssh::SshAsyncChannel>, SshHttpsConnector>>,
+    ) {
+        let mut write_access = self.inner.lock();
+        let max_connections = write_access.max_connections;
+        put_connection_back(&mut write_access.ssh_https, max_connections, connection);
+    }
+
+    #[cfg(all(unix, feature = "with-ssh", feature = "_tls"))]
+    pub async fn put_ssh_https_connection_back(
+        &self,
+        connection: Arc<MyHttpClientWrapper<TlsStream<my_ssh::SshAsyncChannel>, SshHttpsConnector>>,
+    ) {
+        self.put_ssh_https_connection_back_sync(connection);
+    }
+
+    #[cfg(all(unix, feature = "with-ssh", feature = "_tls"))]
+    pub fn drop_ssh_https_connection_sync(
+        &self,
+        connection: &Arc<MyHttpClientWrapper<TlsStream<my_ssh::SshAsyncChannel>, SshHttpsConnector>>,
+    ) {
+        let mut write_access = self.inner.lock();
+        remove_connection(&mut write_access.ssh_https, connection);
     }
 
     #[cfg(unix)]
@@ -456,6 +531,8 @@ mod tests {
             reuse_connection_timeout_seconds: 120,
             #[cfg(all(unix, feature = "with-ssh"))]
             ssh_session: None,
+            #[cfg(all(unix, feature = "with-ssh"))]
+            is_unix_socket: false,
         }
     }
 

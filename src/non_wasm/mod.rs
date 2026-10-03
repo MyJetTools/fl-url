@@ -36,6 +36,11 @@ pub use response_body::*;
 
 pub extern crate hyper;
 
+/// Its types are part of fl-url's own api — `FlUrlError::MyHttpClientError`,
+/// `RequestBodyStream` for a streamed body — so it comes with fl-url, at the version
+/// fl-url is built on.
+pub extern crate my_http_client;
+
 #[cfg(feature = "_tls")]
 pub extern crate my_tls;
 

@@ -71,6 +71,13 @@ pub fn get_unix_socket_connection_key(params: &ConnectionParams<'_>) -> String {
     )
 }
 
+/// `user@host:port` of the ssh server the tunnel goes through.
+#[cfg(all(unix, feature = "with-ssh"))]
+fn ssh_tag(ssh_credentials: &my_ssh::SshCredentials) -> String {
+    let (host, port) = ssh_credentials.get_host_port();
+    format!("{}@{}:{}", ssh_credentials.get_user_name(), host, port)
+}
+
 #[cfg(all(unix, feature = "with-ssh"))]
 pub fn get_ssh_connection_key(
     ssh_credentials: &my_ssh::SshCredentials,
@@ -78,14 +85,24 @@ pub fn get_ssh_connection_key(
     resolved_ip: Option<IpAddr>,
     mode: crate::FlUrlMode,
 ) -> String {
-    let (host, port) = ssh_credentials.get_host_port();
-
     format!(
-        "{}@{}:{}->{}|{}",
-        ssh_credentials.get_user_name(),
-        host,
-        port,
+        "{}->{}|{}",
+        ssh_tag(ssh_credentials),
         endpoint_tag(remote_endpoint, resolved_ip),
         mode_tag(mode)
+    )
+}
+
+/// `https://` behind a tunnel: the TLS identity is baked into the connector here as
+/// well, so the key is the https one, behind the ssh server's.
+#[cfg(all(unix, feature = "with-ssh", feature = "_tls"))]
+pub fn get_ssh_https_connection_key(
+    ssh_credentials: &my_ssh::SshCredentials,
+    params: &ConnectionParams<'_>,
+) -> String {
+    format!(
+        "{}->{}",
+        ssh_tag(ssh_credentials),
+        get_https_connection_key(params)
     )
 }

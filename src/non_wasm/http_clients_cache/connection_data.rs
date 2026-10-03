@@ -22,6 +22,10 @@ pub struct ConnectionParams<'s> {
     pub reuse_connection_timeout_seconds: i64,
     #[cfg(all(unix, feature = "with-ssh"))]
     pub ssh_session: Option<Arc<my_ssh::SshSession>>,
+    /// `remote_endpoint` is the path of a unix socket. Its scheme does not tell: the
+    /// endpoint of a socket url is made of the path alone.
+    #[cfg(all(unix, feature = "with-ssh"))]
+    pub is_unix_socket: bool,
 }
 
 #[cfg(feature = "_tls")]
