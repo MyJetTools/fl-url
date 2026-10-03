@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
-use my_http_client::{http1::MyHttpClient, http1_hyper::MyHttpHyperClient, http2::MyHttp2Client};
+use my_http_client::{
+    http1::MyHttpClient, http1_hyper::MyHttpHyperClient, http2::MyHttp2Client, MyHttpClientError,
+};
 use tokio::net::TcpStream;
 
 use crate::{
@@ -44,9 +46,9 @@ impl HttpConnectionResolver<TcpStream, HttpConnector> for HttpConnectionCreator 
     async fn get_http_connection(
         &self,
         params: &ConnectionParams<'_>,
-    ) -> Arc<MyHttpClientWrapper<TcpStream, HttpConnector>> {
+    ) -> Result<Arc<MyHttpClientWrapper<TcpStream, HttpConnector>>, MyHttpClientError> {
         let key = super::super::utils::get_http_connection_key(params);
-        Self::create_connection(params, key)
+        Ok(Self::create_connection(params, key))
     }
 
     async fn put_connection_back(
@@ -61,8 +63,8 @@ impl HttpConnectionResolver<TcpStream, HttpConnector> for FlUrlHttpConnectionsCa
     async fn get_http_connection(
         &self,
         params: &ConnectionParams<'_>,
-    ) -> Arc<MyHttpClientWrapper<TcpStream, HttpConnector>> {
-        self.get_http_connection(params).await
+    ) -> Result<Arc<MyHttpClientWrapper<TcpStream, HttpConnector>>, MyHttpClientError> {
+        Ok(self.get_http_connection(params).await)
     }
 
     async fn put_connection_back(

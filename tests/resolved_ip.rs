@@ -115,8 +115,11 @@ async fn a_refused_connection_names_the_pinned_ip() {
 fn a_host_name_after_the_at_sign_is_rejected() {
     // The part after '@' is where the socket goes, so it must be an ip — a host
     // name there would need exactly the DNS lookup this form exists to skip.
-    let result = FlUrl::try_new("https://domain.com@backend.internal/xxx");
-    assert!(matches!(result, Err(FlUrlError::InvalidUrl(_))));
+    let fl_url = FlUrl::new("https://domain.com@backend.internal/xxx");
+    assert!(matches!(
+        fl_url.get_error(),
+        Some(FlUrlError::InvalidUrl(_))
+    ));
 }
 
 /// Reads the TLS ClientHello off the socket and returns the SNI host name in it.

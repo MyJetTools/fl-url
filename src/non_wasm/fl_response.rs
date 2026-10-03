@@ -39,7 +39,7 @@ impl FlUrlResponse {
     ) -> Self {
         Self {
             status_code: response.status(),
-            response: ResponseBody::Hyper(Some(response.into_response())),
+            response: ResponseBody::Hyper(response.into_response()),
             url,
             body_read_timeout: None,
             decompress_gzip: false,
@@ -124,6 +124,8 @@ impl FlUrlResponse {
         false
     }
 
+    /// The response as hyper's, its body still streaming from the connection. After a
+    /// buffered read the response is made of what that read loaded.
     pub fn into_hyper_response(mut self) -> my_http_client::HyperResponse {
         use http_body_util::BodyExt;
 
@@ -197,16 +199,13 @@ impl FlUrlResponse {
         Ok(std::str::from_utf8(bytes)?)
     }
 
+    /// The body as a stream of chunks, read off the connection as they come. After a
+    /// buffered read (`get_body_as_slice`, `get_json`, …) the stream gives what that
+    /// read loaded — or, when it failed, fails its first chunk with the reason.
     pub fn get_body_as_stream(self) -> FlResponseAsStream {
-        let response = match self.response {
-            ResponseBody::Hyper(response) => response.unwrap(),
-            ResponseBody::Body { .. } => {
-                panic!("Can not get body as stream when body is materialized");
-            }
-        };
         FlResponseAsStream::create(
             self.url,
-            response,
+            self.response.into_hyper_response(),
             self.body_read_timeout,
             self.connection_returner,
         )

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use my_http_client::MyHttpClientConnector;
+use my_http_client::{MyHttpClientConnector, MyHttpClientError};
 
 use crate::non_wasm::my_http_client_wrapper::MyHttpClientWrapper;
 
@@ -12,10 +12,12 @@ pub trait HttpConnectionResolver<
     TConnector: MyHttpClientConnector<TStream> + Send + Sync + 'static,
 >: Send + Sync
 {
+    /// `Err` when no connection can be made out of these params at all — an ssh
+    /// connection asked for with no ssh session in them. Nothing has been sent then.
     async fn get_http_connection(
         &self,
         params: &ConnectionParams<'_>,
-    ) -> Arc<MyHttpClientWrapper<TStream, TConnector>>;
+    ) -> Result<Arc<MyHttpClientWrapper<TStream, TConnector>>, MyHttpClientError>;
 
     /// Returns a healthy connection to the pool once its response body has been
     /// fully consumed. Non-pooling resolvers drop it (which disposes it).

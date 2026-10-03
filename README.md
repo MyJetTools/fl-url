@@ -15,7 +15,7 @@ FLUrl is a Hyper-based HTTP client that provides a fluent API for building and e
 - **Unix Socket Support**: Native Unix socket support (Unix systems only)
 - **Known IP, no DNS**: `https://domain.com@15.0.0.5/path` connects to the ip while the Host header and TLS SNI stay `domain.com` (native only) — see [Connecting to a Known IP](#connecting-to-a-known-ip-no-dns-native-only)
 - **Retry Logic**: `with_retries(n)` replays a request that got no response; `with_retry(delay, n)` also replays a 5xx, `delay` apart, to ride out a restart of the service — see [Retry Logic](#retry-logic)
-- **Request Compression**: Automatic gzip compression for request bodies
+- **Request Compression**: `compress()` gzips a request body of 64 bytes and up
 - **Streaming Responses**: Support for streaming response bodies (native only)
 - **Streaming Request Bodies**: Send a body of any size at constant memory, framed with `Content-Length` or chunked (native only) — see [Streamed Body](#streamed-body-native-only)
 - **Debug Support**: Built-in request debugging capabilities
@@ -105,10 +105,11 @@ let users: Vec<User> = response.get_json().await?;
 
 | Target | Backend (`cfg`) | Transport |
 | --- | --- | --- |
-| non-wasm | [`flurl::non_wasm`] — full hyper/tokio impl | HTTP/1.1 & HTTP/2, TLS, client certs, connection pooling, unix sockets, SSH |
-| `wasm32-unknown-unknown` | [`flurl::wasm`] | the browser `fetch` API via `web-sys` |
+| non-wasm | `src/non_wasm/` — full hyper/tokio impl | HTTP/1.1 & HTTP/2, TLS, client certs, connection pooling, unix sockets, SSH |
+| `wasm32-unknown-unknown` | `src/wasm/` | the browser `fetch` API via `web-sys` |
 
-Both backends alias their types to the crate root, and the shared pieces
+Neither backend module is public: both alias their types to the crate root — use
+`flurl::FlUrl`, never a backend path — and the shared pieces
 (`FlUrlError`, the request `body` types, the drop-connection scenario) live at the
 root and are used by both. Native-only dependencies (hyper, tokio, my-tls, …) are
 excluded from the wasm build; the wasm build pulls only `web-sys` / `wasm-bindgen`.
@@ -138,7 +139,8 @@ request body.
 
 Native-only surface that is **not available** under wasm (browsers can't express
 it): `with_client_certificate` (native + a TLS provider feature), all `*_ssh_*` methods, unix-socket URLs,
-`get_body_as_stream` / `FlResponseAsStream`, and `into_hyper_response`.
+`get_body_as_stream` / `FlResponseAsStream`, `into_hyper_response`, the
+`*_request_streamed` / `execute_streamed` methods and `get_resolved_ip`.
 
 Futures returned under wasm are `!Send` (the browser is single-threaded), so drive
 them with `wasm_bindgen_futures::spawn_local` / your framework's async context
@@ -183,29 +185,51 @@ let response = FlUrl::new("http://mywebsite.com")
     .await?;
 ```
 
-### Error Handling for URL Creation
+### Errors Come From the Request
+
+`FlUrl` is a builder: `FlUrl::new` and every method chained after it return the
+builder, never a `Result`. What one of them can not use — the url, a header, a client
+certificate — is remembered instead: from the first such error on every step is
+skipped, and the call that sends the request returns that error without sending
+anything. So one `?`, or one `match`, at the end covers the whole chain:
 
 ```rust
 use flurl::{FlUrl, FlUrlError};
 
-// new() panics on invalid URL
-let response = FlUrl::new("http://mywebsite.com").get().await?;
-
-// try_new() returns Result for error handling
-match FlUrl::try_new(url_from_settings) {
-    Ok(fl_url) => {
-        // Use fl_url
+match FlUrl::new(url_from_settings)
+    .append_path_segment("api")
+    .with_header("X-Api-Key", api_key)
+    .get()
+    .await
+{
+    Ok(response) => {
+        // A response arrived
     }
-    Err(FlUrlError::InvalidUrl(e)) => {
-        eprintln!("Invalid URL: {}", e);
+    Err(FlUrlError::InvalidUrl(reason)) => {
+        // The url from settings can not be used
+        eprintln!("Invalid URL: {}", reason);
     }
-    Err(e) => {
-        eprintln!("Error: {}", e);
+    Err(err) => {
+        eprintln!("Error: {}", err);
     }
 }
 ```
 
-`try_new` returns `FlUrlError::InvalidUrl` for a url that can not be used at all:
+`FlUrl::new` does not panic on a url it can not use.
+
+To check a url without sending anything — at start-up, say — ask the builder for the
+error it is carrying. `get_url_builder()` gives the url as it stands, and is `None`
+once there is an error:
+
+```rust
+use flurl::FlUrl;
+
+if let Some(err) = FlUrl::new(url_from_settings).get_error() {
+    eprintln!("Invalid url in settings: {}", err);
+}
+```
+
+The request fails with `FlUrlError::InvalidUrl` for a url that can not be used at all:
 
 | url | why |
 | --- | --- |
@@ -216,11 +240,13 @@ match FlUrl::try_new(url_from_settings) {
 | `http://user@host:22->…`, `ssh://user@host:22x->…` | a malformed [ssh tunnel](#ssh-tunneling-with-ssh-feature) part |
 
 A url with no scheme is fine — `localhost:8080`, `10.0.0.1:5123/api` — and is taken
-as `http://`.
+as `http://`. That is the native backend; under wasm a url that does not start with
+`http://` or `https://` is resolved against the page origin instead — see
+[Relative URLs](#relative-urls-origin-resolution-wasm-only).
 
-A url that parses but can not be put on the wire fails the **request** instead, with
-an `Err`: a new line or another control byte in the host, a space in the path (a
-value read from a file together with its trailing new line is the usual source).
+A url that parses but can not be put on the wire fails the request as well: a new
+line or another control byte in the host, a space in the path (a value read from a
+file together with its trailing new line is the usual source).
 
 ### Using String Literals (IntoFlUrl Trait)
 
@@ -342,7 +368,7 @@ let response = FlUrl::new("https://api.example.com")
 let response = FlUrl::new("https://api.example.com/search")
     .append_query_param("q", Some("rust"))
     .append_query_param("page", Some("1"))
-    .append_query_param("sort", None) // Adds parameter without value
+    .append_query_param("sort", None::<&str>) // Adds parameter without value
     .get()
     .await?;
 // Results in: https://api.example.com/search?q=rust&page=1&sort
@@ -380,6 +406,9 @@ A header that must not be put on the wire fails the request with
 from the call that sends the request. The message names the header and the byte, never
 the value. The same applies to the header fields of a
 [request model](#model-driven-requests).
+
+That check is the native backend's. Under wasm a header goes to the browser as it is,
+and one the browser refuses fails the request with `FlUrlError::FetchError`.
 
 ## Request Bodies
 
@@ -437,7 +466,7 @@ let response = FlUrl::new("https://api.example.com/profile")
 // Form with file upload
 let form_data = new_form_data()
     .append_form_data_field("title", "My Document")
-    .append_form_data_file("file", "document.pdf", "application/pdf", file_bytes);
+    .append_form_data_file("file", "document.pdf", "application/pdf", &file_bytes);
 
 let response = FlUrl::new("https://api.example.com/upload")
     .post(form_data)
@@ -470,6 +499,15 @@ memory is one chunk plus whatever the producer buffers, whatever the size of the
 channel, where the channel is the backpressure: `publish` waits once `buffer` chunks
 are queued for the socket. **Dropping the publisher is what ends the body.**
 
+`my_http_client` is a crate of its own, and `flurl` does not re-export it. To name
+`RequestBodyStream`, add it to `Cargo.toml` next to `flurl` — the same repository and
+tag `flurl` itself is built on:
+
+```toml
+[dependencies]
+my-http-client = { tag = "0.1.0", git = "https://github.com/my-jet-tools/my-http-client.git" }
+```
+
 ```rust
 use my_http_client::RequestBodyStream;
 
@@ -494,7 +532,8 @@ let response = FlUrl::new("https://api.example.com")
 ```
 
 A proxied `hyper::body::Incoming`, a `StreamBody` over a file reader, or any other
-`Body` implementation works just as well.
+`Body` implementation works just as well — and needs no `my-http-client` in
+`Cargo.toml`. `hyper` itself is re-exported as `flurl::hyper`.
 
 #### Framing: the `content_length` argument
 
@@ -555,7 +594,13 @@ request with a `my_http_utils` model (any type deriving
 fills the URL path/query, headers, and body; the `HttpVerb` selects the method. The
 base host and any static route prefix are still configured on the builder beforehand.
 
+`my_http_utils` is re-exported as `flurl::my_http_utils`, so it does not have to be in
+`Cargo.toml` — and taking it from there is what makes the model implement the very
+trait `execute_request` accepts. The derive expands to paths that start with
+`my_http_utils::`, so that name has to be in scope: `use flurl::my_http_utils;`.
+
 ```rust
+use flurl::my_http_utils;
 use flurl::{FlUrl, HttpVerb};
 use my_http_utils::macros::MyHttpInput;
 
@@ -600,6 +645,7 @@ stream go to the socket as they arrive, and the payload is never materialized. I
 the same model the server parses the incoming body with, used from the other end.
 
 ```rust
+use flurl::my_http_utils;
 use flurl::{FlUrl, HttpVerb};
 use my_http_utils::http_input::HttpBodyAsStream;
 use my_http_utils::macros::MyHttpInput;
@@ -761,6 +807,10 @@ while let Some(chunk) = stream.get_next_chunk().await? {
 }
 ```
 
+The chunks are read off the connection as they come. Called after a buffered read
+(`get_body_as_slice`, `get_json`, …), `get_body_as_stream` gives the body that read
+loaded; after one that failed, its first chunk fails with the reason.
+
 ### Get Headers
 
 ```rust
@@ -774,7 +824,7 @@ let content_type = response.get_header("Content-Type")?;
 // Get header case-insensitive
 let content_type = response.get_header_case_insensitive("content-type")?;
 
-// Get all headers
+// Get all headers. The names come back lower-cased: `content-type`
 let headers = response.get_headers();
 for (key, value) in headers {
     println!("{}: {:?}", key, value);
@@ -785,17 +835,19 @@ for (key, value) in headers {
 
 ### Connection Reuse
 
-By default, FLUrl reuses connections based on schema+domain to avoid the cost of establishing new connections and TLS handshakes.
+By default, FLUrl reuses connections to avoid the cost of establishing new connections and TLS handshakes. A connection is reused by a request to the same scheme, host and port, made in the same [HTTP mode](#http-modes).
 
 ```rust
-// Connection will be reused for subsequent requests to the same domain
-let response1 = FlUrl::new("https://api.example.com/endpoint1")
+let mut response1 = FlUrl::new("https://api.example.com/endpoint1")
     .get()
     .await?;
 
+// The connection goes back to the pool once the body has been read to the end
+let body = response1.get_body_as_slice().await?;
+
 let response2 = FlUrl::new("https://api.example.com/endpoint2")
     .get()
-    .await?; // Reuses connection from response1
+    .await?; // Reuses the connection response1 came on
 ```
 
 ### Disable Connection Reuse
@@ -820,47 +872,37 @@ let response = FlUrl::new("https://api.example.com/data")
     .await?;
 ```
 
-### Drop Connection Scenarios
+### When a Connection Is Dropped
 
-Implement custom logic to determine when connections should be dropped:
+An HTTP/1.1 connection serves one request at a time. It is taken out of the pool for
+the request and goes back only once the response body has been read to the end — by
+`get_body_as_slice`, `get_json`, `get_body_as_str`, `receive_body`, or by a stream
+read to its last chunk. Instead of going back it is closed, and the next request opens
+a new one, when:
 
-```rust
-use flurl::{DropConnectionScenario, FlUrlResponse};
+- the response has a status above 400 other than 404 — `401`, `403`, `500`, `503` and
+  so on, but not `400` and not `404`;
+- the response carries `Connection: close`;
+- the response is dropped with its body unread, or reading the body fails or times out;
+- the request itself fails;
+- the request was made with `do_not_reuse_connection()`;
+- the pool already holds its maximum of idle connections to that endpoint — 5 by
+  default, `FlUrlHttpConnectionsCache::new_with_max_connections(n)` for another limit.
 
-pub struct MyCustomDropConnectionScenario;
+An HTTP/2 connection is shared instead: it stays in the pool while requests are
+multiplexed over it, and leaves it when a request on it fails with anything other than
+a request timeout.
 
-impl DropConnectionScenario for MyCustomDropConnectionScenario {
-    fn should_we_drop_it(&self, result: &FlUrlResponse) -> bool {
-        let status_code = result.get_status_code();
-        
-        // Drop connection on server errors (5xx) except 500
-        if status_code >= 500 && status_code != 500 {
-            return true;
-        }
-        
-        // Drop connection on specific client errors
-        if status_code == 401 || status_code == 403 {
-            return true;
-        }
-        
-        false
-    }
-}
+Either kind is dropped once it has sat in the pool unused for longer than 120 seconds
+— see [Connection Timeout](#connection-timeout) to change that.
 
-// Note: override_drop_connection_scenario method needs to be implemented
-// in the FlUrl struct if not already present
-```
-
-The default drop connection scenario drops connections on:
-- Status codes > 400 (except 404)
-- Status code 499
-
-**Note**: The connection is automatically dropped and reestablished if:
-- There is a Hyper error
-- The response matches the drop connection scenario criteria
-- The connection hasn't been used for more than the configured timeout (default: 30 seconds)
+These rules are fixed: there is no way to plug in a rule of your own. The crate
+exports a `DropConnectionScenario` trait and its `DefaultDropConnectionScenario`, but
+nothing takes an implementation of the trait.
 
 ## HTTP Modes
+
+The default is `FlUrlMode::Http1Hyper`.
 
 ### HTTP/2
 
@@ -917,18 +959,41 @@ verification.
 ### Client Certificate
 
 ```rust
-use my_tls::ClientCertificate;
+use flurl::my_tls::ClientCertificate;
 
-let cert = ClientCertificate::from_pem_files(
-    "client.crt",
-    "client.key"
-)?;
+// A PKCS#12 file (.p12 / .pfx): the private key together with its certificate chain
+let cert = ClientCertificate::load_pks12_from_file("client.p12", "password").await?;
 
 let response = FlUrl::new("https://api.example.com/data")
     .with_client_certificate(cert)
     .get()
     .await?;
 ```
+
+`ClientCertificate` is `my-tls`' type, re-exported as `flurl::my_tls`. It is built from
+a PKCS#12 container only — there is no constructor that takes a pair of PEM files:
+
+| constructor | a file that can not be read, a wrong password, a broken container |
+| --- | --- |
+| `ClientCertificate::load_pks12_from_file(file_name, password).await` | `Err(String)` |
+| `ClientCertificate::from_pks12_file(file_name, password).await` | panics |
+| `ClientCertificate::from_pkcs12(bytes, password)` | panics |
+
+A key and a certificate kept as PEM files are packed into one with
+`openssl pkcs12 -export -inkey client.key -in client.crt -out client.p12`.
+
+`with_client_certificate` checks the certificate when it is given. What is wrong with
+it becomes the error of the request — `FlUrlError::RequestBuild`, before a socket is
+opened:
+
+| case | message |
+| --- | --- |
+| the url is not `https://` — a client certificate is presented in the TLS handshake | `Client certificate can only be used with https. Url: …` |
+| its private key can not be loaded — a broken or an unsupported key in the file | `Client certificate can not be used: …` |
+| the request has been given a certificate already | `Client certificate is already set` |
+
+A key that can not be loaded is found there, not in the middle of a connection attempt,
+so it is not retried as an outage the way a failed connection is.
 
 ## SSH Tunneling (with-ssh feature)
 
@@ -940,6 +1005,14 @@ let response = FlUrl::new("ssh://user@ssh.example.com:22->http://localhost:8080/
     .get()
     .await?;
 ```
+
+The target behind the tunnel is spoken to in plain HTTP. There is no TLS layer over a
+tunnel, so a `->https://…` target is not encrypted by it — keep the target `http://`.
+
+With no credentials given, the session is opened with the keys of the running ssh
+agent (`$SSH_AUTH_SOCK`). The methods below give it a password or a private key
+instead. On a url that is not an ssh tunnel they do nothing, so the same code works
+whether settings name `ssh://…->http://…` or a plain `http://…`.
 
 ### SSH with Password
 
@@ -972,20 +1045,31 @@ let response = FlUrl::new("ssh://user@ssh.example.com:22->http://localhost:8080/
 
 ### SSH Credentials Resolver
 
+A resolver supplies the credentials at the moment the request is sent, by the ssh
+line of the tunnel — `user@host:port`:
+
 ```rust
 use std::sync::Arc;
-use my_ssh::ssh_settings::SshSecurityCredentialsResolver;
+use flurl::my_ssh::ssh_settings::{SshPrivateKey, SshSecurityCredentialsResolver};
 
 struct MySshResolver;
 
 #[async_trait::async_trait]
 impl SshSecurityCredentialsResolver for MySshResolver {
-    async fn update_credentials(
-        &self,
-        credentials: &my_ssh::SshCredentials,
-    ) -> my_ssh::SshCredentials {
-        // Custom logic to update credentials
-        credentials.clone()
+    // ssh_line is `user@host:port` of the tunnel
+    async fn resolve_ssh_private_key(&self, ssh_line: &str) -> Option<SshPrivateKey> {
+        if ssh_line != "user@ssh.example.com:22" {
+            return None;
+        }
+
+        Some(SshPrivateKey {
+            content: std::fs::read_to_string("id_rsa").ok()?,
+            pass_phrase: None,
+        })
+    }
+
+    async fn resolve_ssh_password(&self, ssh_line: &str) -> Option<String> {
+        None
     }
 }
 
@@ -995,6 +1079,15 @@ let response = FlUrl::new("ssh://user@ssh.example.com:22->http://localhost:8080/
     .get()
     .await?;
 ```
+
+Both methods are required. The private key is asked for first and the password only
+when there is none; when both return `None` the credentials stay what they were — the
+ssh agent, or whatever `set_ssh_password` / `set_ssh_private_key` set. The trait has a
+third method, `update_credentials`, with a default implementation that does exactly
+this; override it to replace the credentials as a whole.
+
+`my_ssh` is re-exported as `flurl::my_ssh`. The trait is an `async_trait` one, so the
+`async-trait` crate has to be in `Cargo.toml`.
 
 ## Unix Socket Support (Unix systems only)
 
@@ -1017,7 +1110,7 @@ After a scheme the path is absolute however many slashes are written: `unix:/var
 `unix://var/run/x.sock` and `unix:///var/run/x.sock` are all `/var/run/x.sock`.
 
 The http path goes in with `append_path_segment`, as above. A url that names no socket
-file — `http+unix://`, `unix://`, `/` — is rejected by `FlUrl::try_new` with
+file — `http+unix://`, `unix://`, `/` — fails the request with
 `FlUrlError::InvalidUrl`.
 
 ## Connecting to a Known IP (no DNS, native only)
@@ -1052,9 +1145,8 @@ let response = FlUrl::new("https://domain.com@[2001:db8::1]:8443")
 
 The part after `@` must be an ip — a host name there would need exactly the DNS
 lookup this form exists to skip — and the part before it a bare server name (no
-port, no `user:password`). Anything else is rejected by `FlUrl::try_new` with
-`FlUrlError::InvalidUrl` (`FlUrl::new` panics). An `@` in the path or the query is
-not affected.
+port, no `user:password`). Anything else fails the request with
+`FlUrlError::InvalidUrl`. An `@` in the path or the query is not affected.
 
 Pooled connections are keyed by the ip as well, so `domain.com@10.0.0.1` and
 `domain.com@10.0.0.2` never share a connection. `fl_url.get_resolved_ip()` returns
@@ -1073,11 +1165,19 @@ browser refuses a url with an `@` in it.
 ```rust
 use std::time::Duration;
 
-let response = FlUrl::new("https://api.example.com/data")
+let mut response = FlUrl::new("https://api.example.com/data")
     .set_timeout(Duration::from_secs(30))
+    .set_response_body_timeout(Duration::from_secs(60))
     .get()
     .await?;
+
+let body = response.get_body_as_slice().await?;
 ```
+
+| method | bounds | default | when it runs out |
+| --- | --- | --- | --- |
+| `set_timeout` | the request up to the response head — for a [streamed body](#what-does-not-apply-to-a-streamed-body) the upload as well | 10 seconds | the request fails with `FlUrlError::Timeout` |
+| `set_response_body_timeout` | reading the response body: a buffered read as a whole, a stream chunk by chunk | unbounded | the read fails with `FlUrlError::Timeout` |
 
 ### Connection Timeout
 
@@ -1089,6 +1189,11 @@ let response = FlUrl::new("https://api.example.com/data")
     .get()
     .await?;
 ```
+
+How long a pooled connection may sit unused and still be handed out — 120 seconds by
+default. The value is taken in whole seconds, rounded up, and is at least one. It
+belongs to the request it is set on: taking a connection for that request drops the
+ones to the same endpoint that have been idle for longer.
 
 ### Retry Logic
 
@@ -1158,10 +1263,27 @@ the timeout — so pair `with_retry` with a shorter `set_timeout` where that mat
 ```rust
 let body = HttpRequestBody::as_json(&large_data);
 let response = FlUrl::new("https://api.example.com/data")
-    .compress() // Automatically gzip compress body if > 64 bytes
+    .compress() // gzips the body when it is 64 bytes or longer
     .post(body)
     .await?;
 ```
+
+### Response Decompression
+
+```rust
+let mut response = FlUrl::new("https://api.example.com/data")
+    .accept_gzip()
+    .get()
+    .await?;
+
+let body = response.get_body_as_slice().await?; // already decompressed
+```
+
+`accept_gzip()` sends `Accept-Encoding: gzip`, unless the request already carries that
+header, and decompresses a `Content-Encoding: gzip` response on the buffered reads —
+`get_body_as_slice`, `get_json`, `get_body_as_str`, `receive_body`. A body read with
+`get_body_as_stream` is passed on as it came. Under wasm the method does nothing: the
+browser negotiates and decompresses by itself.
 
 ### Debug Request Output
 
@@ -1171,6 +1293,8 @@ let response = FlUrl::new("https://api.example.com/data")
     .get()
     .await?;
 ```
+
+Under wasm it writes the method and the url to the browser console instead.
 
 ### Request Debug String
 
@@ -1185,7 +1309,20 @@ let response = FlUrl::new("https://api.example.com/data")
     .post_with_debug(body, &mut debug_string)
     .await?;
 println!("Request details: {}", debug_string);
-// [POST] PathAndQuery: '/data'; Headers: 'Content-Type: application/json; 'Body: {"a":1}
+```
+
+The two backends lay the headers out differently. Native ends every header with a
+CRLF, so the dump takes several lines:
+
+```
+[POST] PathAndQuery: '/data'; Headers: 'Content-Type: application/json
+Body: {"a":1}
+```
+
+Under wasm it is one line:
+
+```
+[POST] PathAndQuery: '/data'; Headers: 'Content-Type: application/json; 'Body: {"a":1}
 ```
 
 | method | debug twin |
@@ -1209,8 +1346,9 @@ The streamed variants are the one exception to "the body is in the dump": a stre
 payload exists only as it is written to the socket, so printing it would mean
 buffering the very thing streaming avoids. Their dump is the request head alone.
 
-The `IntoFlUrl` shortcuts on `&str` / `String` carry the same twins, so
-`"https://api.example.com/data".get_with_debug(&mut debug_string).await?` works too.
+The `IntoFlUrl` shortcuts on `&str` / `String` — `get`, `head`, `delete`, `post` and
+`put`; there is no `patch` among them — carry their twins too, so
+`"https://api.example.com/data".get_with_debug(&mut debug_string).await?` works as well.
 
 Everything except the streamed methods (which are native-only) exists on both the
 native and the wasm backend.
@@ -1222,26 +1360,39 @@ use flurl::{FlUrl, FlUrlError};
 
 match FlUrl::new("https://api.example.com/data").get().await {
     Ok(response) => {
-        // Handle success
+        // A response arrived — whatever its status code
     }
     Err(FlUrlError::Timeout) => {
-        // Handle timeout
+        // No response within `set_timeout`
     }
-    Err(FlUrlError::HyperError(e)) => {
-        // Handle Hyper error
-        if e.is_canceled() {
-            // Request was canceled
-        }
+    Err(FlUrlError::InvalidUrl(reason)) | Err(FlUrlError::UnsupportedScheme(reason)) => {
+        // The url can not be used, or this build can not serve its scheme
     }
-    Err(FlUrlError::SerializationError(e)) => {
-        // Handle JSON serialization error
+    Err(FlUrlError::RequestBuild(reason)) => {
+        // The request could not be built — nothing was sent
     }
-    Err(e) => {
-        // Handle other errors
-        eprintln!("Error: {}", e.to_string());
+    Err(err) => {
+        // Everything else, a failed connection included
+        eprintln!("Error: {}", err);
     }
 }
 ```
+
+- **The errors of the builder come out here too** — a url that can not be used, a
+  header that must not go on the wire, a client certificate for a url that is not
+  `https://`. See [Errors Come From the Request](#errors-come-from-the-request).
+- **A status code is not an error.** `404` and `500` come back as `Ok(response)`;
+  read `response.get_status_code()`.
+- **`FlUrlError` is `#[non_exhaustive]`**, so a `match` on it needs a catch-all arm.
+- **A failed connection** — refused, reset, a TLS handshake that did not go through —
+  is `FlUrlError::MyHttpClientError` on native and `FlUrlError::FetchError` under
+  wasm. Each variant exists on its own backend only, so code meant for both leaves
+  them to the catch-all arm.
+- **`err.is_timeout()`** is `true` for a timeout however it was reported.
+- **Reading the body has errors of its own**: `get_json` fails with
+  `FlUrlError::SerializationError` on a body that is not the expected JSON,
+  `get_body_as_str` with `FlUrlError::CanNotConvertToUtf8`, any read with
+  `FlUrlError::Timeout` once `set_response_body_timeout` runs out.
 
 ## Examples
 
@@ -1297,17 +1448,17 @@ async fn get_user(id: u64) -> Result<User, Box<dyn std::error::Error>> {
 
 ### Connection Reuse Details
 
-- Connections are cached and reused based on `schema + domain + port`
-- Default connection reuse timeout: 120 seconds
-- Default unused connection timeout: 30 seconds
-- Connections are automatically cleaned up when not used
-- Each connection cache is thread-safe and shared across all `FlUrl` instances (unless a custom cache is provided)
+- Connections are pooled per scheme, host, port and HTTP mode. For `https://` the TLS server name and the client certificate are part of the key too, and for a [`name@ip`](#connecting-to-a-known-ip-no-dns-native-only) url so is the ip
+- An idle connection is reused for up to 120 seconds by default — see [Connection Timeout](#connection-timeout)
+- At most 5 idle HTTP/1.1 connections are kept per endpoint by default; an HTTP/2 connection is one per endpoint and shared
+- An expired connection is dropped the next time one is taken for the same endpoint. For endpoints that are never called again, `flurl::shared_connections_cache().gc(ttl_seconds)` sweeps the process-wide cache and `.clear()` empties it
+- One process-wide cache is shared by all `FlUrl` instances, unless `set_connections_cache` gives a request a cache of its own. It is thread-safe
 
 ### Body Compression
 
-- Compression is only applied if the body size is >= 64 bytes
+- `compress()` is only applied if the body size is >= 64 bytes; a shorter body goes out as it is
 - Uses gzip compression
-- Automatically sets `Content-Encoding: gzip` header
+- Sets the `Content-Encoding: gzip` header, unless the request already carries a `Content-Encoding`
 - Compression threshold can be adjusted by modifying the source code
 
 ### HTTP Version Support
@@ -1318,7 +1469,8 @@ async fn get_user(id: u64) -> Result<User, Box<dyn std::error::Error>> {
 
 ### Thread Safety
 
-- `FlUrl` instances are not thread-safe (use `Send` but not `Sync`)
+- A `FlUrl` is one request: every builder method and every method that sends takes it by value, so an instance is never shared — build a new one per request
+- On native `FlUrl` is `Send + Sync` and the futures of its requests are `Send`, so a request can be built in one task and sent from another, or handed to `tokio::spawn`. Under wasm the futures are `!Send`
 - Connection cache (`FlUrlHttpConnectionsCache`) is thread-safe
 - Multiple async tasks can safely use different `FlUrl` instances concurrently
 

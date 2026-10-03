@@ -206,16 +206,18 @@ fn an_ipv6_literal_with_no_port_keeps_its_brackets() {
         ("http://[2001:db8::1]/path?a=b", "[2001:db8::1]"),
     ] {
         let fl_url = FlUrl::new(url);
+        let url_builder = fl_url.get_url_builder().unwrap();
 
-        assert_eq!(fl_url.url_builder.get_host(), host_port, "{url}");
-        assert_eq!(fl_url.url_builder.get_host_port(), host_port, "{url}");
+        assert_eq!(url_builder.get_host(), host_port, "{url}");
+        assert_eq!(url_builder.get_host_port(), host_port, "{url}");
     }
 }
 
 #[test]
 fn an_ipv6_literal_with_a_port_is_split_at_the_port() {
     let fl_url = FlUrl::new("http://[::1]:8080/path");
+    let url_builder = fl_url.get_url_builder().unwrap();
 
-    assert_eq!(fl_url.url_builder.get_host(), "[::1]");
-    assert_eq!(fl_url.url_builder.get_host_port(), "[::1]:8080");
+    assert_eq!(url_builder.get_host(), "[::1]");
+    assert_eq!(url_builder.get_host_port(), "[::1]:8080");
 }

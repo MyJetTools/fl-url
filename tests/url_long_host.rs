@@ -1,4 +1,4 @@
-//! `FlUrl::try_new` on a url whose host is too long to be a host.
+//! A `FlUrl` made of a url whose host is too long to be a host.
 //!
 //! `host:port` travels through rust-extensions as a `ShortString`, which panics past
 //! 255 bytes — and it did, on the first request. A value that long in a url's place
@@ -15,12 +15,12 @@ fn host(len: usize) -> String {
 }
 
 fn assert_too_long(url: String) {
-    match FlUrl::try_new(url.as_str()) {
-        Err(FlUrlError::InvalidUrl(message)) => {
+    match FlUrl::new(url.as_str()).get_error() {
+        Some(FlUrlError::InvalidUrl(message)) => {
             assert!(message.ends_with("the host is too long"), "{message}")
         }
-        Err(err) => panic!("unexpected error {err:?}"),
-        Ok(_) => panic!("a url of {} bytes must be rejected", url.len()),
+        Some(err) => panic!("unexpected error {err:?}"),
+        None => panic!("a url of {} bytes must be rejected", url.len()),
     }
 }
 
@@ -49,7 +49,35 @@ fn the_longest_host_that_fits_is_accepted() {
         format!("https://{}", host(251)),
         format!("/{}", host(254)),
     ] {
-        assert!(FlUrl::try_new(url.as_str()).is_ok(), "{} bytes", url.len());
+        assert!(
+            FlUrl::new(url.as_str()).get_error().is_none(),
+            "{} bytes",
+            url.len()
+        );
+    }
+}
+
+// What used to panic, on the first request: now the request returns the error.
+#[tokio::test]
+async fn a_request_to_a_host_that_does_not_fit_returns_the_error() {
+    for mode in [
+        FlUrlMode::Http1Hyper,
+        FlUrlMode::Http1NoHyper,
+        FlUrlMode::H2,
+    ] {
+        let result = FlUrl::new(format!("http://{}", host(253)))
+            .update_mode(mode)
+            .append_path_segment("api")
+            .get()
+            .await;
+
+        match result {
+            Err(FlUrlError::InvalidUrl(message)) => {
+                assert!(message.ends_with("the host is too long"), "{mode:?}: {message}")
+            }
+            Err(err) => panic!("{mode:?}: unexpected error {err:?}"),
+            Ok(_) => panic!("{mode:?}: the request must fail"),
+        }
     }
 }
 

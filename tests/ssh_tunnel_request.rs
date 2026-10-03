@@ -1,7 +1,7 @@
 //! A request through an ssh tunnel that can not be opened has to fail with an error.
 //!
 //! Both cases below used to panic inside my-ssh on the first request, and both start
-//! from a url that `FlUrl::try_new` rightly accepts:
+//! from a url that `FlUrl` rightly accepts:
 //!
 //! * the ssh host is a host name, not an ip — the form the README shows,
 //!   `ssh://user@ssh.example.com:22->http://localhost:8080`. my-ssh parsed the host

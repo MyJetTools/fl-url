@@ -199,13 +199,17 @@ impl FlUrlHttpConnectionsCache {
         remove_connection(&mut write_access.https, connection);
     }
 
+    /// `Err` when `params` carry no ssh session: there is nowhere to open the tunnel.
     #[cfg(all(unix, feature = "with-ssh"))]
     pub async fn get_ssh_connection(
         &self,
         params: &ConnectionParams<'_>,
-    ) -> Arc<MyHttpClientWrapper<my_ssh::SshAsyncChannel, SshHttpConnector>> {
+    ) -> Result<
+        Arc<MyHttpClientWrapper<my_ssh::SshAsyncChannel, SshHttpConnector>>,
+        my_http_client::MyHttpClientError,
+    > {
         let Some(ssh_session) = params.ssh_session.clone() else {
-            panic!("ssh_credentials is none");
+            return Err(super::creators::no_ssh_session());
         };
 
         let connection_key = super::utils::get_ssh_connection_key(
@@ -217,7 +221,7 @@ impl FlUrlHttpConnectionsCache {
 
         let mut write_access = self.inner.lock();
 
-        checkout_connection(
+        Ok(checkout_connection(
             &mut write_access.ssh,
             connection_key.as_str(),
             params.reuse_connection_timeout_seconds,
@@ -225,10 +229,11 @@ impl FlUrlHttpConnectionsCache {
             || {
                 super::creators::SshConnectionCreator::create_connection(
                     params,
+                    ssh_session.clone(),
                     connection_key.to_string(),
                 )
             },
-        )
+        ))
     }
 
     #[cfg(all(unix, feature = "with-ssh"))]
@@ -452,6 +457,31 @@ mod tests {
             #[cfg(all(unix, feature = "with-ssh"))]
             ssh_session: None,
         }
+    }
+
+    /// The ssh path takes the session out of the params. Without one there is nowhere
+    /// to open the tunnel, and that is an error of the request, not a panic.
+    #[cfg(all(unix, feature = "with-ssh"))]
+    #[tokio::test]
+    async fn an_ssh_connection_with_no_session_is_an_error() {
+        use super::super::creators::SshConnectionCreator;
+        use super::super::HttpConnectionResolver;
+
+        let endpoint = RemoteEndpointOwned::try_parse("http://localhost:9999".to_string()).unwrap();
+        let params = make_params(&endpoint, FlUrlMode::Http1Hyper);
+
+        let cache = FlUrlHttpConnectionsCache::new();
+        assert!(matches!(
+            cache.get_ssh_connection(&params).await,
+            Err(my_http_client::MyHttpClientError::CanNotConnectToRemoteHost(_))
+        ));
+
+        let resolver: &dyn HttpConnectionResolver<my_ssh::SshAsyncChannel, SshHttpConnector> =
+            &SshConnectionCreator;
+        assert!(matches!(
+            resolver.get_http_connection(&params).await,
+            Err(my_http_client::MyHttpClientError::CanNotConnectToRemoteHost(_))
+        ));
     }
 
     #[tokio::test]

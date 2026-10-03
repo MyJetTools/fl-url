@@ -1,14 +1,21 @@
 use std::collections::HashMap;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 use std::time::Duration;
 
+use bytes::Bytes;
 use http_body_util::BodyExt;
+use hyper::header::{HeaderValue, CONTENT_LENGTH, TRANSFER_ENCODING};
 use hyper::HeaderMap;
 use my_http_client::HyperResponse;
 
 use crate::{FlUrlError, FlUrlReadingHeaderError};
 
+const BODY_NOT_AVAILABLE: &str =
+    "Response body is not available (already consumed or failed to read)";
+
 pub enum ResponseBody {
-    Hyper(Option<my_hyper_utils::MyHttpResponse>),
+    Hyper(my_hyper_utils::MyHttpResponse),
     Body {
         status_code: http::StatusCode,
         version: http::Version,
@@ -18,54 +25,61 @@ pub enum ResponseBody {
 }
 
 impl ResponseBody {
-    pub fn as_hyper_response(&self) -> &my_hyper_utils::MyHttpResponse {
-        match &self {
-            Self::Hyper(response) => response.as_ref().unwrap(),
-            Self::Body { .. } => {
-                panic!("Body is already disposed");
-            }
+    /// `None` once the body has been read into memory: there is no hyper response to
+    /// lend any more. [`Self::into_hyper_response`] makes one of what was read.
+    pub fn as_hyper_response(&self) -> Option<&my_hyper_utils::MyHttpResponse> {
+        match self {
+            Self::Hyper(response) => Some(response),
+            Self::Body { .. } => None,
         }
     }
 
+    /// The response as hyper's. A body read into memory already is made into one
+    /// again; a body whose read failed comes back as one whose first frame fails with
+    /// the reason.
     pub fn into_hyper_response(self) -> my_hyper_utils::MyHttpResponse {
         match self {
-            Self::Hyper(response) => {
-                let response = response.unwrap();
-                response
-            }
-            Self::Body { .. } => {
-                panic!("Body is already disposed");
-            }
+            Self::Hyper(response) => response,
+            Self::Body {
+                status_code,
+                version,
+                headers,
+                body: Some(body),
+            } => full_body_response(status_code, version, headers, body)
+                .map(|body| body.map_err(|err| err.to_string()).boxed()),
+            Self::Body {
+                status_code,
+                version,
+                headers,
+                body: None,
+            } => with_head(
+                status_code,
+                version,
+                headers,
+                UnavailableBody(Some(BODY_NOT_AVAILABLE.to_string())).boxed(),
+            ),
+        }
+    }
+
+    fn headers(&self) -> &HeaderMap {
+        match self {
+            Self::Hyper(response) => response.headers(),
+            Self::Body { headers, .. } => headers,
         }
     }
 
     pub fn get_header(&self, header: &str) -> Result<Option<&str>, FlUrlReadingHeaderError> {
-        let headers = match self {
-            Self::Hyper(response) => response.as_ref().unwrap().headers(),
-            Self::Body { headers, .. } => headers,
-        };
-
-        let result = headers.get(header);
-
-        if result.is_none() {
-            return Ok(None);
+        match self.headers().get(header) {
+            Some(value) => Ok(Some(value.to_str()?)),
+            None => Ok(None),
         }
-
-        let value = result.unwrap().to_str()?;
-
-        Ok(Some(value))
     }
 
     pub fn get_header_case_insensitive(
         &self,
         header: &str,
     ) -> Result<Option<&str>, FlUrlReadingHeaderError> {
-        let headers = match self {
-            Self::Hyper(response) => response.as_ref().unwrap().headers(),
-            Self::Body { headers, .. } => headers,
-        };
-
-        for (name, value) in headers.iter() {
+        for (name, value) in self.headers().iter() {
             if rust_extensions::str_utils::compare_strings_case_insensitive(name.as_str(), header) {
                 let value = value.to_str()?;
                 return Ok(Some(value));
@@ -79,22 +93,9 @@ impl ResponseBody {
         &'s self,
         hash_map: &mut HashMap<&'s str, Option<&'s str>>,
     ) {
-        match self {
-            ResponseBody::Hyper(incoming) => {
-                if let Some(incoming) = incoming {
-                    for (key, value) in incoming.headers() {
-                        if let Ok(value) = value.to_str() {
-                            hash_map.insert(key.as_str(), Some(value));
-                        }
-                    }
-                }
-            }
-            ResponseBody::Body { headers, .. } => {
-                for (key, value) in headers {
-                    if let Ok(value) = value.to_str() {
-                        hash_map.insert(key.as_str(), Some(value));
-                    }
-                }
+        for (key, value) in self.headers() {
+            if let Ok(value) = value.to_str() {
+                hash_map.insert(key.as_str(), Some(value));
             }
         }
     }
@@ -103,33 +104,11 @@ impl ResponseBody {
         &self,
         hash_map: &mut HashMap<String, Option<String>>,
     ) {
-        match self {
-            ResponseBody::Hyper(incoming) => {
-                if let Some(incoming) = incoming {
-                    for (key, value) in incoming.headers() {
-                        hash_map.insert(
-                            key.as_str().to_string(),
-                            if let Ok(value) = value.to_str() {
-                                Some(value.to_string())
-                            } else {
-                                None
-                            },
-                        );
-                    }
-                }
-            }
-            ResponseBody::Body { headers, .. } => {
-                for (key, value) in headers {
-                    hash_map.insert(
-                        key.as_str().to_string(),
-                        if let Ok(value) = value.to_str() {
-                            Some(value.to_string())
-                        } else {
-                            None
-                        },
-                    );
-                }
-            }
+        for (key, value) in self.headers() {
+            hash_map.insert(
+                key.as_str().to_string(),
+                value.to_str().ok().map(|value| value.to_string()),
+            );
         }
     }
 
@@ -137,10 +116,17 @@ impl ResponseBody {
         &mut self,
         body_read_timeout: Option<Duration>,
     ) -> Result<(), FlUrlError> {
-        match self {
-            Self::Hyper(response) => {
-                let response = response.take().unwrap();
+        // The placeholder lives only until the line that replaces it below, with no
+        // await in between, so no one ever sees it.
+        let placeholder = Self::Body {
+            status_code: http::StatusCode::OK,
+            version: http::Version::HTTP_11,
+            headers: HeaderMap::new(),
+            body: None,
+        };
 
+        match std::mem::replace(self, placeholder) {
+            Self::Hyper(response) => {
                 let status_code = response.status();
                 let version = response.version();
 
@@ -148,8 +134,7 @@ impl ResponseBody {
 
                 // Written BEFORE the await: if the read future is dropped mid-way
                 // (cancellation) or fails, the enum stays in a valid state —
-                // headers remain reachable and body reads return an error
-                // instead of panicking on a taken-out `Hyper(None)`.
+                // headers remain reachable and body reads return an error.
                 *self = Self::Body {
                     status_code,
                     version,
@@ -181,7 +166,10 @@ impl ResponseBody {
 
                 Ok(())
             }
-            Self::Body { .. } => Ok(()),
+            materialized => {
+                *self = materialized;
+                Ok(())
+            }
         }
     }
 
@@ -277,29 +265,17 @@ impl ResponseBody {
     }
     pub fn into_http_body(self) -> Result<HyperResponse, FlUrlError> {
         match self {
-            ResponseBody::Hyper(mut response) => {
-                let result = response.take().unwrap();
-                Ok(result)
-            }
+            ResponseBody::Hyper(response) => Ok(response),
             ResponseBody::Body {
                 status_code,
                 version,
                 headers,
                 body,
             } => {
-                let result = my_hyper_utils::compile_full_body(
-                    status_code,
-                    version,
-                    headers,
-                    body.unwrap_or_default(),
-                    |builder, full_body| {
-                        builder
-                            .body(full_body.map_err(|itm| itm.to_string()).boxed())
-                            .unwrap()
-                    },
-                );
+                let body = body.ok_or_else(body_not_available)?;
 
-                Ok(result)
+                Ok(full_body_response(status_code, version, headers, body)
+                    .map(|body| body.map_err(|err| err.to_string()).boxed()))
             }
         }
     }
@@ -307,9 +283,8 @@ impl ResponseBody {
     pub async fn into_http_full_body(
         self,
     ) -> Result<http::Response<http_body_util::Full<hyper::body::Bytes>>, FlUrlError> {
-        match self {
+        let (status_code, version, headers, body) = match self {
             ResponseBody::Hyper(response) => {
-                let response = response.unwrap();
                 let status_code = response.status();
                 let version = response.version();
                 let (parts, body) = response.into_parts();
@@ -319,33 +294,81 @@ impl ResponseBody {
                 })
                 .await?;
 
-                let result = my_hyper_utils::compile_full_body(
-                    status_code,
-                    version,
-                    parts.headers,
-                    body,
-                    |builder, full_body| builder.body(full_body).unwrap(),
-                );
-
-                Ok(result)
+                (status_code, version, parts.headers, body)
             }
             ResponseBody::Body {
                 status_code,
                 version,
                 headers,
                 body,
-            } => {
-                let result = my_hyper_utils::compile_full_body(
-                    status_code,
-                    version,
-                    headers,
-                    body.unwrap_or_default(),
-                    |builder, full_body| builder.body(full_body).unwrap(),
-                );
+            } => (
+                status_code,
+                version,
+                headers,
+                body.ok_or_else(body_not_available)?,
+            ),
+        };
 
-                Ok(result)
-            }
-        }
+        Ok(full_body_response(status_code, version, headers, body))
+    }
+}
+
+fn body_not_available() -> FlUrlError {
+    FlUrlError::ReadingHyperBodyError(BODY_NOT_AVAILABLE.to_string())
+}
+
+/// A response made of a body that is in memory as a whole. The head is the one that
+/// came over the wire, framed by the length now: no `Transfer-Encoding`, and a
+/// `Content-Length` unless it carries one already — a HEAD response keeps the length
+/// it was given, and a decoded gzip body has had its own put in by the decoder.
+fn full_body_response(
+    status_code: http::StatusCode,
+    version: http::Version,
+    mut headers: HeaderMap,
+    body: Vec<u8>,
+) -> http::Response<http_body_util::Full<Bytes>> {
+    headers.remove(TRANSFER_ENCODING);
+
+    if !body.is_empty() && !headers.contains_key(CONTENT_LENGTH) {
+        headers.insert(CONTENT_LENGTH, HeaderValue::from(body.len()));
+    }
+
+    with_head(
+        status_code,
+        version,
+        headers,
+        http_body_util::Full::new(Bytes::from(body)),
+    )
+}
+
+/// Puts a head together with a body. A builder would take the same, but it reports
+/// what it did not take through a `Result` — and none of these can be refused.
+fn with_head<TBody>(
+    status_code: http::StatusCode,
+    version: http::Version,
+    headers: HeaderMap,
+    body: TBody,
+) -> http::Response<TBody> {
+    let mut response = http::Response::new(body);
+    *response.status_mut() = status_code;
+    *response.version_mut() = version;
+    *response.headers_mut() = headers;
+    response
+}
+
+/// What a body that could not be read turns into when its response is handed on: it
+/// has nothing to give but the reason, and its first frame fails with it.
+struct UnavailableBody(Option<String>);
+
+impl hyper::body::Body for UnavailableBody {
+    type Data = Bytes;
+    type Error = String;
+
+    fn poll_frame(
+        mut self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+    ) -> Poll<Option<Result<hyper::body::Frame<Bytes>, String>>> {
+        Poll::Ready(self.0.take().map(Err))
     }
 }
 
@@ -362,69 +385,3 @@ fn decompress_gzip_body(data: &[u8]) -> Result<Vec<u8>, FlUrlError> {
     })?;
     Ok(result)
 }
-
-/*
-fn compile_full_body<TResult>(
-    status_code: http::StatusCode,
-    version: http::Version,
-    headers: HeaderMap,
-    body: Vec<u8>,
-    compiler: impl Fn(
-        http::response::Builder,
-        http_body_util::Full<hyper::body::Bytes>,
-    ) -> http::Response<TResult>,
-) -> http::Response<TResult> {
-    let mut builder = http::response::Builder::new()
-        .status(status_code)
-        .version(version);
-
-    let mut has_content_len = false;
-
-    for header in headers {
-        if let Some(header_name) = header.0 {
-            if header_name
-                .as_str()
-                .eq_ignore_ascii_case(CONTENT_LENGTH.as_str())
-            {
-                has_content_len = true;
-            }
-
-            if header_name
-                .as_str()
-                .eq_ignore_ascii_case(TRANSFER_ENCODING.as_str())
-            {
-                continue;
-            }
-
-            builder = builder.header(header_name, header.1);
-        }
-    }
-
-    if body.len() > 0 {
-        if !has_content_len {
-            builder = builder.header(CONTENT_LENGTH, body.len());
-        }
-    }
-
-    let full_body = http_body_util::Full::new(hyper::body::Bytes::from(body));
-
-    compiler(builder, full_body)
-}
-
-async fn body_to_vec(
-    body: http_body_util::combinators::BoxBody<bytes::Bytes, String>,
-) -> Result<Vec<u8>, FlUrlError> {
-    let collected = body.collect().await;
-
-    match collected {
-        Ok(bytes) => {
-            let bytes = bytes.to_bytes();
-            Ok(bytes.into())
-        }
-        Err(err) => {
-            let err = FlUrlError::ReadingHyperBodyError(err);
-            Err(err)
-        }
-    }
-}
- */

@@ -3,8 +3,8 @@
 //! This is the full hyper/tokio implementation — HTTP/1.1 & HTTP/2, connection
 //! pooling, unix sockets, plus TLS + client certificates behind a provider
 //! feature (`with-ring-tls` or `with-rust-tls`) and (on unix) SSH tunneling
-//! behind `with-ssh`. With neither TLS feature there is no `HttpsConnector` and
-//! `FlUrl::execute` refuses an `https://` url with `FlUrlError::UnsupportedScheme`.
+//! behind `with-ssh`. With neither TLS feature there is no `HttpsConnector` and a
+//! request to an `https://` url is refused with `FlUrlError::UnsupportedScheme`.
 //! It is compiled only for non-wasm targets; `crate::lib` aliases the types
 //! defined here to the crate root so `flurl::FlUrl`, `flurl::FlUrlResponse`, …
 //! resolve to this backend.
@@ -17,6 +17,7 @@ mod fl_response;
 mod fl_response_as_stream;
 mod fl_url;
 mod fl_url_headers;
+mod fl_url_inner;
 mod http_clients_cache;
 mod http_connectors;
 mod into_fl_url;

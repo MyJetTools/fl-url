@@ -305,3 +305,70 @@ async fn a_request_the_browser_refuses_to_build_is_not_replayed() {
 
     restore_fetch();
 }
+
+/// A url that can not be used leaves the builder with an error instead of a request:
+/// every step after it is skipped, the request returns that error, and `fetch` is
+/// never called — so there is nothing to replay either.
+#[wasm_bindgen_test]
+async fn a_url_that_can_not_be_used_is_the_error_of_the_request() {
+    script_fetch(vec![]);
+
+    let started = js_sys::Date::now();
+
+    // Absolute, so no origin gets involved — and it names no host.
+    let fl_url = FlUrl::new("https://")
+        .append_path_segment("api")
+        .with_header("X-Api-Key", "secret")
+        .with_retry(RETRY_DELAY, 5);
+
+    assert!(
+        matches!(fl_url.get_error(), Some(FlUrlError::InvalidUrl(_))),
+        "{:?}",
+        fl_url.get_error()
+    );
+    assert!(fl_url.get_url_builder().is_none());
+
+    let result = fl_url.post(HttpRequestBody::as_json(&["payload"])).await;
+
+    let elapsed = js_sys::Date::now() - started;
+
+    match result {
+        Err(FlUrlError::InvalidUrl(message)) => {
+            assert_eq!(message, "Invalid url 'https://': it names no host")
+        }
+        other => panic!("{:?}", other),
+    }
+    assert_eq!(fetch_calls(), 0, "the request never reached fetch");
+    assert!(
+        elapsed < millis(RETRY_DELAY),
+        "a request with no url to go to was waited on for {} ms",
+        elapsed
+    );
+
+    // A url that can be used carries no error, and is there to be read.
+    let fl_url = FlUrl::new(URL).append_path_segment("users");
+    assert!(fl_url.get_error().is_none());
+    assert_eq!(
+        fl_url.get_url_builder().unwrap().get_path_and_query(),
+        "/api/data/users"
+    );
+
+    restore_fetch();
+}
+
+/// The body is read once and kept: every later read gives the same bytes, and
+/// `receive_body` hands them over.
+#[wasm_bindgen_test]
+async fn the_body_is_read_once_and_kept() {
+    script_fetch(vec![200]);
+
+    let mut response = FlUrl::new(URL).get().await.unwrap();
+
+    assert_eq!(response.get_body_as_str().await.unwrap(), "200");
+    assert_eq!(response.get_body_as_slice().await.unwrap(), b"200");
+    assert_eq!(response.get_json::<u16>().await.unwrap(), 200);
+    assert_eq!(response.receive_body().await.unwrap(), b"200");
+    assert_eq!(fetch_calls(), 1);
+
+    restore_fetch();
+}

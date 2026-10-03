@@ -1,9 +1,9 @@
 //! A url or a header with a byte that must not be put on the wire: a new line at
 //! the end of a value read from a file, a space in a path.
 //!
-//! my-http-client guards its request line and its header block against these with a
-//! panic. Both the url and the header values come from settings as often as from
-//! code, so here the request has to fail with an error — in every mode.
+//! my-http-client refuses to put these into its request line and its header block —
+//! it used to panic on them. Both the url and the header values come from settings as
+//! often as from code, so the request has to fail with an error — in every mode.
 #![cfg(not(target_arch = "wasm32"))]
 
 use flurl::{FlUrl, FlUrlError, FlUrlMode, HttpVerb};

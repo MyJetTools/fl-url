@@ -28,7 +28,7 @@ fn endpoint_tag(remote_endpoint: RemoteEndpoint<'_>, resolved_ip: Option<IpAddr>
 /// Connections are only interchangeable when both the endpoint and the way the
 /// client was built match, so the key includes the mode the wrapper was created
 /// with — a request compiled for one mode routed to a wrapper of another would
-/// fail (see `CompiledHttpRequest::as_hyper` / `as_my_http_client_request`).
+/// fail with an error (see `CompiledHttpRequest::as_hyper` / `as_my_http_client_request`).
 pub fn get_http_connection_key(params: &ConnectionParams<'_>) -> String {
     format!(
         "{}|{}",

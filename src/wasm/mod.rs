@@ -16,6 +16,7 @@ mod fetch;
 mod fl_response;
 mod fl_url;
 mod fl_url_headers;
+mod fl_url_inner;
 mod into_fl_url;
 
 pub use connections_cache::*;

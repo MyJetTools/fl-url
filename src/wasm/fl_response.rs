@@ -54,18 +54,21 @@ impl FlUrlResponse {
         }
     }
 
-    async fn load_body(&mut self) -> Result<(), FlUrlError> {
-        if self.body.is_some() {
-            return Ok(());
-        }
-        let response = self.response.take().ok_or_else(|| {
-            FlUrlError::FetchError("response body has already been consumed".to_string())
-        })?;
-        let bytes =
-            read_response_body(&response, self.controller.as_ref(), self.body_timeout_millis)
-                .await?;
-        self.body = Some(bytes);
-        Ok(())
+    /// Reads the body on the first call and keeps it for the next ones.
+    async fn load_body(&mut self) -> Result<&mut Vec<u8>, FlUrlError> {
+        let body = match self.body.take() {
+            Some(body) => body,
+            None => {
+                let response = self.response.take().ok_or_else(|| {
+                    FlUrlError::FetchError("response body has already been consumed".to_string())
+                })?;
+
+                read_response_body(&response, self.controller.as_ref(), self.body_timeout_millis)
+                    .await?
+            }
+        };
+
+        Ok(self.body.insert(body))
     }
 
     pub fn get_status_code(&self) -> u16 {
@@ -105,26 +108,22 @@ impl FlUrlResponse {
     }
 
     pub async fn get_body_as_slice(&mut self) -> Result<&[u8], FlUrlError> {
-        self.load_body().await?;
-        Ok(self.body.as_ref().unwrap().as_slice())
+        Ok(self.load_body().await?.as_slice())
     }
 
     pub async fn get_json<TResponse: DeserializeOwned>(&mut self) -> Result<TResponse, FlUrlError> {
-        self.load_body().await?;
-        let body = self.body.as_ref().unwrap().as_slice();
-        let result = serde_json::from_slice(body)?;
+        let body = self.load_body().await?;
+        let result = serde_json::from_slice(body.as_slice())?;
         Ok(result)
     }
 
     pub async fn receive_body(mut self) -> Result<Vec<u8>, FlUrlError> {
-        self.load_body().await?;
-        Ok(self.body.take().unwrap())
+        Ok(std::mem::take(self.load_body().await?))
     }
 
     pub async fn get_body_as_str(&mut self) -> Result<&str, FlUrlError> {
-        self.load_body().await?;
-        let bytes = self.body.as_ref().unwrap().as_slice();
-        Ok(std::str::from_utf8(bytes)?)
+        let body = self.load_body().await?;
+        Ok(std::str::from_utf8(body.as_slice())?)
     }
 
     #[deprecated(note = "Use get_body_as_str")]

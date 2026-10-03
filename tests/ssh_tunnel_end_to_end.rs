@@ -1,6 +1,6 @@
 //! Real requests through a real ssh tunnel.
 //!
-//! The other ssh tests stop at `try_new`, or at a tunnel that fails to open. Here an
+//! The other ssh tests stop at the url, or at a tunnel that fails to open. Here an
 //! ssh server is stood up — on russh, the crate my-ssh itself is built on — that
 //! takes any password and serves `direct-tcpip` channels the way sshd does, with an
 //! http server behind it. A request to `ssh://user@host:port->http://target` then has

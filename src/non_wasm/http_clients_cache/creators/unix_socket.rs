@@ -5,7 +5,9 @@ use crate::{
     non_wasm::http_connectors::{UnixSocketConnector, UnixSocketStream},
     non_wasm::my_http_client_wrapper::MyHttpClientWrapper,
 };
-use my_http_client::{http1::MyHttpClient, http1_hyper::MyHttpHyperClient, http2::MyHttp2Client};
+use my_http_client::{
+    http1::MyHttpClient, http1_hyper::MyHttpHyperClient, http2::MyHttp2Client, MyHttpClientError,
+};
 
 use super::super::*;
 
@@ -40,9 +42,10 @@ impl HttpConnectionResolver<UnixSocketStream, UnixSocketConnector> for UnixSocke
     async fn get_http_connection(
         &self,
         params: &ConnectionParams<'_>,
-    ) -> Arc<MyHttpClientWrapper<UnixSocketStream, UnixSocketConnector>> {
+    ) -> Result<Arc<MyHttpClientWrapper<UnixSocketStream, UnixSocketConnector>>, MyHttpClientError>
+    {
         let key = super::super::utils::get_unix_socket_connection_key(params);
-        Self::create_connection(params, key)
+        Ok(Self::create_connection(params, key))
     }
 
     async fn put_connection_back(
@@ -57,8 +60,9 @@ impl HttpConnectionResolver<UnixSocketStream, UnixSocketConnector> for FlUrlHttp
     async fn get_http_connection(
         &self,
         params: &ConnectionParams<'_>,
-    ) -> Arc<MyHttpClientWrapper<UnixSocketStream, UnixSocketConnector>> {
-        self.get_unix_socket_connection(params).await
+    ) -> Result<Arc<MyHttpClientWrapper<UnixSocketStream, UnixSocketConnector>>, MyHttpClientError>
+    {
+        Ok(self.get_unix_socket_connection(params).await)
     }
 
     async fn put_connection_back(

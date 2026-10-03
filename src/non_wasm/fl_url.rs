@@ -1,42 +1,19 @@
 use bytes::Bytes;
-use http_body_util::Full;
 use hyper::Method;
 
-use hyper::Uri;
-use hyper::Version;
-use my_http_client::http1::MyHttpRequestBuilder;
-use my_http_client::MyHttpClientConnector;
-#[cfg(feature = "_tls")]
-use my_tls::tokio_rustls::client::TlsStream;
-
-use rust_extensions::remote_endpoint::Scheme;
 use rust_extensions::StrOrString;
 
-use std::io::Write;
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::net::TcpStream;
-
-use super::FlUrlResponse;
-use crate::body::HttpRequestBody;
-use crate::non_wasm::compiled_http_request::{CompiledHttpRequest, RequestToExecute};
-use crate::non_wasm::fl_url_headers::find_forbidden_header_value_byte;
-use crate::non_wasm::http_connectors::*;
-use crate::non_wasm::model_body_stream::ModelBodyStream;
-use crate::non_wasm::resolved_ip::extract_resolved_ip;
-
-use crate::non_wasm::http_clients_cache::*;
-
-use crate::HttpConnectionResolver;
-
-use crate::FlUrlError;
-
-use crate::RetryPolicy;
-
-use crate::FlUrlHeaders;
 
 use my_http_utils::UrlBuilder;
+
+use super::fl_url_inner::FlUrlInner;
+use super::FlUrlResponse;
+use crate::body::HttpRequestBody;
+use crate::FlUrlError;
+use crate::FlUrlHttpConnectionsCache;
 
 #[derive(Debug, Clone, Copy)]
 pub enum FlUrlMode {
@@ -71,180 +48,109 @@ pub enum HttpVerb {
     Head,
 }
 
+/// A request: built step by step, then sent by one of the verb methods.
+///
+/// It is a plain builder — no step of it returns a `Result`. What a step can not use
+/// — a url that names no host, a header that must not go on the wire, a client
+/// certificate for a url that is not `https://` — becomes the state of the builder
+/// instead: from the first such error on every step is skipped, and the call that
+/// sends the request returns that error without sending anything.
+///
+/// ```no_run
+/// # async fn doc(url_from_settings: &str) -> Result<(), flurl::FlUrlError> {
+/// // Whatever is wrong with the url or with the header comes out of `get()`.
+/// let response = flurl::FlUrl::new(url_from_settings)
+///     .append_path_segment("api")
+///     .with_header("X-Api-Key", "secret")
+///     .get()
+///     .await?;
+/// # Ok(())
+/// # }
+/// ```
 pub struct FlUrl {
-    pub url_builder: UrlBuilder,
-    // Set by a `scheme://server-name@ip/...` url: the socket is opened to this ip
-    // instead of resolving the url's host, which stays the Host header and TLS SNI.
-    resolved_ip: Option<IpAddr>,
-    pub headers: FlUrlHeaders,
-    #[cfg(feature = "_tls")]
-    pub client_cert: Option<my_tls::ClientCertificate>,
-    pub accept_invalid_certificate: bool,
-    // If we are trying to reuse connection, but it was not used for this time, we will drop it
-    pub not_used_connection_timeout: Duration,
-    pub request_timeout: Duration,
-    // Bounds how long reading the response body may take. `None` = unbounded.
-    pub response_body_timeout: Option<Duration>,
-    pub do_not_reuse_connection: bool,
-    pub connections_cache: Option<Arc<FlUrlHttpConnectionsCache>>,
-    pub compress_body: bool,
-    pub decompress_gzip_response: bool,
-    pub print_input_request: bool,
-    // If we reuse connection and it has not been used more seconds than this parameter - it disposed
-    pub reuse_connection_timeout_sec: i64,
-    mode: FlUrlMode,
-    #[cfg(all(unix, feature = "with-ssh"))]
-    ssh_credentials: Option<my_ssh::SshCredentials>,
-    #[cfg(all(unix, feature = "with-ssh"))]
-    ssh_security_credentials_resolver:
-        Option<Arc<dyn my_ssh::ssh_settings::SshSecurityCredentialsResolver + Send + Sync>>,
-
-    retry: RetryPolicy,
+    // The request, for as long as everything it was given could be used — and the
+    // first error once something could not. All the logic is in `FlUrlInner`; this
+    // type only decides whether there still is an inner to hand a call to.
+    inner: Result<FlUrlInner, FlUrlError>,
 }
 
 impl FlUrl {
+    /// Never fails and never panics. A url that can not be used becomes the error the
+    /// request fails with: [`FlUrlError::InvalidUrl`], or
+    /// [`FlUrlError::UnsupportedScheme`] for an ssh tunnel in a build without
+    /// `with-ssh`.
     pub fn new<'s>(url: impl Into<StrOrString<'s>>) -> Self {
-        return Self::try_new(url).unwrap();
+        Self {
+            inner: FlUrlInner::new(url),
+        }
     }
 
-    pub fn try_new<'s>(url: impl Into<StrOrString<'s>>) -> Result<Self, FlUrlError> {
-        let url: StrOrString<'s> = url.into();
-
-        #[cfg(all(unix, feature = "with-ssh"))]
-        let (url_builder, credentials, resolved_ip) = {
-            let endpoint =
-                rust_extensions::remote_endpoint::RemoteEndpointHostString::try_parse(url.as_str())
-                    .map_err(|err| FlUrlError::InvalidUrl(err))?;
-
-            match endpoint {
-                rust_extensions::remote_endpoint::RemoteEndpointHostString::Direct(
-                    _remote_endpoint,
-                ) => {
-                    let (url, resolved_ip) = extract_resolved_ip(url.as_str())?;
-                    (UrlBuilder::new(&url), None, resolved_ip)
-                }
-                rust_extensions::remote_endpoint::RemoteEndpointHostString::ViaSsh {
-                    ssh_remote_host,
-                    remote_host_behind_ssh,
-                } => {
-                    // `ssh://user@:22->...` parses, but there is nowhere to open the
-                    // tunnel to.
-                    if ssh_remote_host.get_host().trim().is_empty() {
-                        return Err(FlUrlError::InvalidUrl(format!(
-                            "Invalid url '{}': it names no ssh host",
-                            url.as_str()
-                        )));
-                    }
-
-                    let (url, resolved_ip) = extract_resolved_ip(remote_host_behind_ssh.as_str())?;
-                    (
-                        UrlBuilder::new(&url),
-                        Some(crate::non_wasm::ssh::to_ssh_credentials(&ssh_remote_host)),
-                        resolved_ip,
-                    )
-                }
-            }
-        };
-
-        #[cfg(not(all(unix, feature = "with-ssh")))]
-        let (url_builder, resolved_ip) = {
-            let endpoint =
-                rust_extensions::remote_endpoint::RemoteEndpointHostString::try_parse(url.as_str())
-                    .map_err(|err| FlUrlError::InvalidUrl(err))?;
-
-            match endpoint {
-                rust_extensions::remote_endpoint::RemoteEndpointHostString::Direct(
-                    _remote_endpoint,
-                ) => {
-                    let (url, resolved_ip) = extract_resolved_ip(url.as_str())?;
-                    (UrlBuilder::new(&url), resolved_ip)
-                }
-                rust_extensions::remote_endpoint::RemoteEndpointHostString::ViaSsh {
-                    ssh_remote_host: _,
-                    remote_host_behind_ssh: _,
-                } => {
-                    return Err(FlUrlError::UnsupportedScheme(
-                        "To use ssh you need to enable the 'with-ssh' feature".to_string(),
-                    ))
-                }
-            }
-        };
-
-        crate::host_check::ensure_host_is_usable(url.as_str(), &url_builder)?;
-
-        let result = Self {
-            headers: FlUrlHeaders::new(),
-            #[cfg(feature = "_tls")]
-            client_cert: Default::default(),
-            url_builder,
-            resolved_ip,
-            accept_invalid_certificate: false,
-            do_not_reuse_connection: false,
-            connections_cache: Default::default(),
-            not_used_connection_timeout: Duration::from_secs(30),
-            retry: RetryPolicy::default(),
-            request_timeout: Duration::from_secs(10),
-            response_body_timeout: None,
-            print_input_request: false,
-            compress_body: false,
-            decompress_gzip_response: false,
-            #[cfg(all(unix, feature = "with-ssh"))]
-            ssh_credentials: credentials,
-            #[cfg(all(unix, feature = "with-ssh"))]
-            ssh_security_credentials_resolver: None,
-            mode: Default::default(),
-            reuse_connection_timeout_sec: 120,
-        };
-
-        Ok(result)
+    /// A step that can not fail. Skipped once the builder has met an error.
+    fn map(self, step: impl FnOnce(FlUrlInner) -> FlUrlInner) -> Self {
+        Self {
+            inner: self.inner.map(step),
+        }
     }
 
+    /// A step that can fail: its error takes the place of the inner state, and every
+    /// step after it is skipped.
+    fn and_then(self, step: impl FnOnce(FlUrlInner) -> Result<FlUrlInner, FlUrlError>) -> Self {
+        Self {
+            inner: self.inner.and_then(step),
+        }
+    }
+
+    /// The error the builder has met, if any — the one the request is going to fail
+    /// with. It lets a url that came from settings be checked without sending
+    /// anything, at start-up for one.
+    pub fn get_error(&self) -> Option<&FlUrlError> {
+        self.inner.as_ref().err()
+    }
+
+    /// The url as it stands: what [`Self::new`] was given plus everything appended to
+    /// it since. `None` once the builder has met an error.
+    pub fn get_url_builder(&self) -> Option<&UrlBuilder> {
+        self.inner.as_ref().ok().map(|inner| &inner.url_builder)
+    }
+
+    /// `false` once the builder has met an error.
     #[cfg(all(unix, feature = "with-ssh"))]
     pub fn via_ssh(&self) -> bool {
-        self.ssh_credentials.is_some()
+        match self.inner.as_ref() {
+            Ok(inner) => inner.via_ssh(),
+            Err(_) => false,
+        }
     }
 
     /// The ip a `scheme://server-name@ip/...` url pinned the connection to — the
     /// socket goes there with no DNS lookup, while `server-name` stays the Host
     /// header and the TLS server name.
     pub fn get_resolved_ip(&self) -> Option<IpAddr> {
-        self.resolved_ip
+        self.inner.as_ref().ok()?.get_resolved_ip()
     }
 
-    pub fn compress(mut self) -> Self {
-        self.compress_body = true;
-        self
+    pub fn compress(self) -> Self {
+        self.map(|inner| inner.compress())
     }
 
     /// Advertises gzip support to the server (`Accept-Encoding: gzip`) and
     /// transparently decompresses a gzip-encoded response body on buffered
     /// reads (`get_body_as_slice`, `get_json`, `get_body_as_str`, `receive_body`).
     /// Streamed bodies (`get_body_as_stream`) are NOT decompressed.
-    pub fn accept_gzip(mut self) -> Self {
-        if !self.headers.has_header("Accept-Encoding") {
-            self.headers.add("Accept-Encoding", "gzip");
-        }
-        self.decompress_gzip_response = true;
-        self
+    pub fn accept_gzip(self) -> Self {
+        self.map(|inner| inner.accept_gzip())
     }
 
-    pub fn set_not_used_connection_timeout(mut self, timeout: Duration) -> Self {
-        self.not_used_connection_timeout = timeout;
-        // Round up and clamp to at least 1s: as_secs() truncation would turn a
-        // sub-second timeout into 0, which evicts the whole per-key pool on
-        // every checkout (pooling silently disabled).
-        self.reuse_connection_timeout_sec = (timeout.as_secs_f64().ceil() as i64).max(1);
-        self
+    pub fn set_not_used_connection_timeout(self, timeout: Duration) -> Self {
+        self.map(|inner| inner.set_not_used_connection_timeout(timeout))
     }
 
-    pub fn update_mode(mut self, mode: FlUrlMode) -> Self {
-        self.mode = mode;
-        self
+    pub fn update_mode(self, mode: FlUrlMode) -> Self {
+        self.map(|inner| inner.update_mode(mode))
     }
 
-    pub fn set_connections_cache(mut self, clients_cache: Arc<FlUrlHttpConnectionsCache>) -> Self {
-        self.connections_cache = Some(clients_cache);
-        self
+    pub fn set_connections_cache(self, clients_cache: Arc<FlUrlHttpConnectionsCache>) -> Self {
+        self.map(|inner| inner.set_connections_cache(clients_cache))
     }
 
     /// Retries the request up to `max_retries` extra times on failure. Only
@@ -257,9 +163,8 @@ impl FlUrl {
     /// follows at once. A response that did arrive is the result, 5xx included —
     /// [`Self::with_retry`] is the one that waits out a restarting service. Both set
     /// the same policy, so the later of the two calls wins.
-    pub fn with_retries(mut self, max_retries: usize) -> Self {
-        self.retry = RetryPolicy::transport_failures(max_retries);
-        self
+    pub fn with_retries(self, max_retries: usize) -> Self {
+        self.map(|inner| inner.with_retries(max_retries))
     }
 
     /// Rides out a restart of the service behind the url. The request is replayed up
@@ -305,198 +210,117 @@ impl FlUrl {
     ///
     /// Sets the same policy as [`Self::with_retries`], so the later of the two calls
     /// wins. A streamed body is never replayed (see [`Self::execute_streamed`]).
-    pub fn with_retry(mut self, retry_delay: Duration, amount: usize) -> Self {
-        self.retry = RetryPolicy::transport_failures_and_server_errors(retry_delay, amount);
-        self
+    pub fn with_retry(self, retry_delay: Duration, amount: usize) -> Self {
+        self.map(|inner| inner.with_retry(retry_delay, amount))
     }
 
-    pub fn print_input_request(mut self) -> Self {
-        self.print_input_request = true;
-        self
+    pub fn print_input_request(self) -> Self {
+        self.map(|inner| inner.print_input_request())
     }
 
     #[cfg(all(unix, feature = "with-ssh"))]
     pub fn set_ssh_security_credentials_resolver(
-        mut self,
+        self,
         resolver: Arc<dyn my_ssh::ssh_settings::SshSecurityCredentialsResolver + Send + Sync>,
     ) -> Self {
-        self.ssh_security_credentials_resolver = Some(resolver);
-        self
+        self.map(|inner| inner.set_ssh_security_credentials_resolver(resolver))
+    }
+
+    /// Does nothing on a url that is not an ssh tunnel, the same as
+    /// [`Self::set_ssh_private_key`] and [`Self::set_ssh_user_password`]: whether the
+    /// url is a tunnel is decided by settings as often as by code.
+    #[cfg(all(unix, feature = "with-ssh"))]
+    pub fn set_ssh_password<'s>(self, password: impl Into<StrOrString<'s>>) -> Self {
+        self.map(|inner| inner.set_ssh_password(password))
     }
 
     #[cfg(all(unix, feature = "with-ssh"))]
-    pub fn set_ssh_password<'s>(mut self, password: impl Into<StrOrString<'s>>) -> Self {
-        let ssh_credentials = self.ssh_credentials.take();
-        if ssh_credentials.is_none() {
-            panic!("To specify ssh password you need to use ssh://user:password@host:port->http://localhost:8080 connection line");
-        }
-        let ssh_credentials = ssh_credentials.unwrap();
-
-        let (host, port) = ssh_credentials.get_host_port();
-
-        let password = password.into();
-
-        self.ssh_credentials = Some(my_ssh::SshCredentials::UserNameAndPassword {
-            ssh_remote_host: host.to_string(),
-            ssh_remote_port: port,
-            ssh_user_name: ssh_credentials.get_user_name().to_string(),
-            password: password.to_string(),
-        });
-        self
-    }
-
-    #[cfg(all(unix, feature = "with-ssh"))]
-    pub fn set_ssh_credentials(mut self, ssh_credentials: my_ssh::SshCredentials) -> Self {
-        self.ssh_credentials = Some(ssh_credentials);
-        self
+    pub fn set_ssh_credentials(self, ssh_credentials: my_ssh::SshCredentials) -> Self {
+        self.map(|inner| inner.set_ssh_credentials(ssh_credentials))
     }
 
     #[cfg(all(unix, feature = "with-ssh"))]
     pub fn set_ssh_private_key<'s>(
-        mut self,
+        self,
         private_key: String,
         passphrase: Option<String>,
     ) -> Self {
-        let ssh_credentials = self.ssh_credentials.take();
-        if ssh_credentials.is_none() {
-            return self;
-        }
-        let ssh_credentials = ssh_credentials.unwrap();
-
-        let (host, port) = ssh_credentials.get_host_port();
-
-        self.ssh_credentials = Some(my_ssh::SshCredentials::PrivateKey {
-            ssh_remote_host: host.to_string(),
-            ssh_remote_port: port,
-            ssh_user_name: ssh_credentials.get_user_name().to_string(),
-            private_key,
-            passphrase,
-        });
-        self
+        self.map(|inner| inner.set_ssh_private_key(private_key, passphrase))
     }
 
     #[cfg(all(unix, feature = "with-ssh"))]
-    pub fn set_ssh_user_password<'s>(mut self, password: String) -> Self {
-        let ssh_credentials = self.ssh_credentials.take();
-        if ssh_credentials.is_none() {
-            return self;
-        }
-        let ssh_credentials = ssh_credentials.unwrap();
-
-        let (host, port) = ssh_credentials.get_host_port();
-
-        self.ssh_credentials = Some(my_ssh::SshCredentials::UserNameAndPassword {
-            ssh_remote_host: host.to_string(),
-            ssh_remote_port: port,
-            ssh_user_name: ssh_credentials.get_user_name().to_string(),
-            password,
-        });
-        self
+    pub fn set_ssh_user_password<'s>(self, password: String) -> Self {
+        self.map(|inner| inner.set_ssh_user_password(password))
     }
 
-    pub fn set_timeout(mut self, timeout: Duration) -> Self {
-        self.request_timeout = timeout;
-        self
+    pub fn set_timeout(self, timeout: Duration) -> Self {
+        self.map(|inner| inner.set_timeout(timeout))
     }
 
     /// Bounds how long reading the response body may take. Applies both to
     /// buffered reads (`get_body_as_slice`, `get_json`, …) and to each chunk of
     /// a streamed body. Unbounded by default.
-    pub fn set_response_body_timeout(mut self, timeout: Duration) -> Self {
-        self.response_body_timeout = Some(timeout);
-        self
+    pub fn set_response_body_timeout(self, timeout: Duration) -> Self {
+        self.map(|inner| inner.set_response_body_timeout(timeout))
     }
 
-    pub fn do_not_reuse_connection(mut self) -> Self {
-        self.do_not_reuse_connection = true;
-        self
+    pub fn do_not_reuse_connection(self) -> Self {
+        self.map(|inner| inner.do_not_reuse_connection())
     }
 
     /// Only available with a TLS provider feature (`with-ring-tls` or
     /// `with-rust-tls`) — without one the crate does not link a TLS stack at all,
     /// so there is no certificate type to pass in.
+    ///
+    /// The certificate is checked here, and what is wrong with it fails the request
+    /// with [`FlUrlError::RequestBuild`] before a socket is opened:
+    ///
+    /// * the url is not `https://` — a client certificate is presented in a TLS
+    ///   handshake, and whether the url is `https://` is decided by settings as often
+    ///   as by code;
+    /// * its private key can not be loaded — a broken or an unsupported key, read from
+    ///   a file that settings name. Found here, it is not retried as an outage the way
+    ///   a failed connection is;
+    /// * the request has been given a certificate already.
     #[cfg(feature = "_tls")]
-    pub fn with_client_certificate(mut self, certificate: my_tls::ClientCertificate) -> Self {
-        if self.client_cert.is_some() {
-            panic!("Client certificate is already set");
-        }
-        if !self.url_builder.get_scheme().is_https() {
-            panic!("Client certificate can only be used with https");
-        }
-
-        self.client_cert = Some(certificate);
-        self
+    pub fn with_client_certificate(self, certificate: my_tls::ClientCertificate) -> Self {
+        self.and_then(|inner| inner.with_client_certificate(certificate))
     }
 
     /// Without a TLS provider feature this is inert: the request never reaches a
     /// TLS handshake because `https://` is refused at execute time with
     /// [`FlUrlError::UnsupportedScheme`]. It also needs `dangerous-tls` to have any
     /// effect at all — see that feature's docs.
-    pub fn accept_invalid_certificate(mut self) -> Self {
-        self.accept_invalid_certificate = true;
-        self
+    pub fn accept_invalid_certificate(self) -> Self {
+        self.map(|inner| inner.accept_invalid_certificate())
     }
 
-    pub fn append_path_segment<'s>(mut self, path_segment: impl Into<StrOrString<'s>>) -> Self {
-        self.url_builder
-            .append_path_segment(path_segment.into().as_str());
-        self
+    pub fn append_path_segment<'s>(self, path_segment: impl Into<StrOrString<'s>>) -> Self {
+        self.map(|inner| inner.append_path_segment(path_segment))
     }
 
     pub fn append_query_param<'n, 'v>(
-        mut self,
+        self,
         param_name: impl Into<StrOrString<'n>>,
         value: Option<impl Into<StrOrString<'v>>>,
     ) -> Self {
-        let param_name = param_name.into();
-
-        if let Some(value) = value {
-            let value = value.into();
-            self.url_builder
-                .append_query_param(param_name.as_str(), Some(value.as_str()));
-        } else {
-            self.url_builder
-                .append_query_param(param_name.as_str(), None);
-        };
-
-        self
+        self.map(|inner| inner.append_query_param(param_name, value))
     }
 
+    /// A header that must not go on the wire — a value with a CR, LF or NUL in it, a
+    /// name that is empty or is not an HTTP token — is not added: the request fails
+    /// with [`FlUrlError::RequestBuild`]. The message names the header and the byte,
+    /// never the value.
     pub fn with_header<'n, 'v>(
-        mut self,
+        self,
         name: impl Into<StrOrString<'n>>,
         value: impl Into<StrOrString<'v>>,
     ) -> Self {
-        let name: StrOrString<'_> = name.into();
-        let value: StrOrString<'_> = value.into();
-
-        self.headers.add(name.as_str(), value.as_str());
-        self
+        self.and_then(|inner| inner.with_header(name, value))
     }
 
-    pub fn append_raw_ending_to_url<'r>(mut self, raw: impl Into<StrOrString<'r>>) -> Self {
-        let raw: StrOrString<'r> = raw.into();
-        self.url_builder.append_raw_ending(raw.as_str());
-        self
-    }
-
-    /// Pours a `my_http_utils` request model into this `FlUrl`: the model appends its
-    /// path segments + query params to our `url_builder`, pushes its header fields
-    /// into our `headers`, and hands over its body (which it consumes). The base
-    /// host and any static route prefix must already be configured on `self`.
-    fn fill_from_model(
-        &mut self,
-        model: impl my_http_utils::schema::client::THttpRequestBuilder,
-    ) -> Result<HttpRequestBody, FlUrlError> {
-        model.fill_url(&mut self.url_builder)?;
-        model.fill_headers(&mut self.headers)?;
-        // `get_body` consumes the model, so it must be the last thing we read.
-        // The body is our own `HttpRequestBody` already — no conversion needed;
-        // `compile_*_request` reads its (possibly dynamic, e.g. FormData boundary)
-        // content type via `get_content_type()`. `FlUrlRnd` supplies the random
-        // multipart boundary suffix (my-http-utils carries no RNG of its own).
-        let body = model.get_body::<crate::body::FlUrlRnd>()?;
-        Ok(body)
+    pub fn append_raw_ending_to_url<'r>(self, raw: impl Into<StrOrString<'r>>) -> Self {
+        self.map(|inner| inner.append_raw_ending_to_url(raw))
     }
 
     /// Executes an HTTP request described by a `my_http_utils` request model (any
@@ -513,523 +337,66 @@ impl FlUrl {
     /// is ignored for those verbs.
     ///
     /// A model with a `#[http_body_as_stream]` field goes down the streamed path
-    /// instead — see [`Self::execute_model_stream`].
+    /// instead: the chunks the application writes into the stream are written to the
+    /// socket as they arrive. The framing comes from the stream itself — the
+    /// `content_length` given to `HttpBodyAsStream::create` becomes `Content-Length`,
+    /// and `None` goes out chunked — and everything else that applies to a streamed
+    /// body applies here too (see [`Self::execute_streamed`]): no `compress()`, no
+    /// retries, the timeout covers the whole upload.
     pub async fn execute_request(
-        mut self,
+        self,
         verb: HttpVerb,
         model: impl my_http_utils::schema::client::THttpRequestBuilder,
     ) -> Result<FlUrlResponse, FlUrlError> {
-        let body = self.fill_from_model(model)?;
-
-        if let HttpRequestBody::Stream(stream) = body {
-            return self.execute_model_stream(verb, stream, None).await;
-        }
-
-        match verb {
-            HttpVerb::Get => self.get().await,
-            HttpVerb::Delete => self.delete().await,
-            HttpVerb::Head => self.head().await,
-            HttpVerb::Post => self.post(body).await,
-            HttpVerb::Put => self.put(body).await,
-            HttpVerb::Patch => self.patch(body).await,
-        }
+        self.inner?.execute_request(verb, model).await
     }
 
     /// Same as [`Self::execute_request`], but dumps the compiled request — verb,
     /// path and query, headers and body — into `request_debug_string` before it goes
     /// on the wire. The dump is written for every verb, body-carrying or not.
     pub async fn execute_request_with_debug(
-        mut self,
+        self,
         verb: HttpVerb,
         model: impl my_http_utils::schema::client::THttpRequestBuilder,
         request_debug_string: &mut String,
     ) -> Result<FlUrlResponse, FlUrlError> {
-        let body = self.fill_from_model(model)?;
-
-        if let HttpRequestBody::Stream(stream) = body {
-            return self
-                .execute_model_stream(verb, stream, Some(request_debug_string))
-                .await;
-        }
-
-        match verb {
-            HttpVerb::Get => self.get_with_debug(request_debug_string).await,
-            HttpVerb::Delete => self.delete_with_debug(request_debug_string).await,
-            HttpVerb::Head => self.head_with_debug(request_debug_string).await,
-            HttpVerb::Post => self.post_with_debug(body, request_debug_string).await,
-            HttpVerb::Put => self.put_with_debug(body, request_debug_string).await,
-            HttpVerb::Patch => self.patch_with_debug(body, request_debug_string).await,
-        }
+        self.inner?
+            .execute_request_with_debug(verb, model, request_debug_string)
+            .await
     }
 
-    /// Sends a model whose body is a `#[http_body_as_stream]` field: the chunks the
-    /// application writes into the stream are pulled out of it and written to the
-    /// socket as they arrive, so the payload is never materialized.
-    ///
-    /// The framing comes from the stream itself — the `content_length` given to
-    /// `HttpBodyAsStream::create` becomes `Content-Length`, and `None` goes out
-    /// chunked. Everything else that applies to a streamed body applies here too
-    /// (see [`Self::execute_streamed`]): no `compress()`, no retries, the timeout
-    /// covers the whole upload.
-    async fn execute_model_stream(
-        self,
-        verb: HttpVerb,
-        stream: my_http_utils::http_input::HttpBodyAsStream,
-        debug: Option<&mut String>,
-    ) -> Result<FlUrlResponse, FlUrlError> {
-        // A streamed payload on a body-less verb is a mistake in the call, not
-        // something to drop quietly the way a materialized body is: the application
-        // is already writing into the stream, and nothing would ever read it.
-        let method = match verb {
-            HttpVerb::Post => Method::POST,
-            HttpVerb::Put => Method::PUT,
-            HttpVerb::Patch => Method::PATCH,
-            HttpVerb::Get | HttpVerb::Delete | HttpVerb::Head => {
-                return Err(FlUrlError::RequestBuild(format!(
-                    "{:?} carries no body, but the model streams one (#[http_body_as_stream])",
-                    verb
-                )))
-            }
-        };
-
-        // `empty()` (a model built to be parsed by a server, never sent) and a stream
-        // whose reader was already taken both land here, and the message says which.
-        let reader = stream.get_body_reader().map_err(|err| {
-            FlUrlError::RequestBuild(format!(
-                "#[http_body_as_stream] model has no body to send: {}",
-                err
-            ))
-        })?;
-
-        let content_length = reader.get_content_length().map(|len| len as usize);
-
-        self.execute_streamed_impl(
-            method,
-            ModelBodyStream::new(reader),
-            content_length,
-            debug,
-        )
-        .await
-    }
-
-    async fn execute(self, request: RequestToExecute) -> Result<FlUrlResponse, FlUrlError> {
-        #[cfg(all(unix, feature = "with-ssh"))]
-        if self.ssh_credentials.is_some() {
-            let mut self_mut = self;
-            let ssh_credentials = self_mut.ssh_credentials.take().unwrap();
-            return self_mut.execute_ssh(request, ssh_credentials).await;
-        }
-
-        let response = match self.url_builder.get_scheme() {
-            Scheme::Ws => {
-                return Err(FlUrlError::UnsupportedScheme(
-                    "WebSocket 'ws' scheme is not supported".to_string(),
-                ))
-            }
-
-            Scheme::Wss => {
-                return Err(FlUrlError::UnsupportedScheme(
-                    "WebSocket 'wss' scheme is not supported".to_string(),
-                ))
-            }
-            Scheme::Http => {
-                if self.do_not_reuse_connection {
-                    self.execute_with_retry::<TcpStream, HttpConnector>(
-                        request,
-                        Arc::new(crate::non_wasm::http_clients_cache::creators::HttpConnectionCreator),
-                        crate::consts::HTTP_DEFAULT_PORT.into(),
-                        #[cfg(all(unix, feature = "with-ssh"))]
-                        None,
-                    )
-                    .await?
-                } else {
-                    let clients_cache = self.get_connections_cache();
-                    self.execute_with_retry::<TcpStream, HttpConnector>(
-                        request,
-                        clients_cache,
-                        crate::consts::HTTP_DEFAULT_PORT.into(),
-                        #[cfg(all(unix, feature = "with-ssh"))]
-                        None,
-                    )
-                    .await?
-                }
-            }
-            #[cfg(not(feature = "_tls"))]
-            Scheme::Https => {
-                return Err(FlUrlError::UnsupportedScheme(format!(
-                    "FlUrl does not support https: it is compiled without a TLS provider feature. Enable 'with-ring-tls' (ring) or 'with-rust-tls' (pure Rust). Url: {}",
-                    self.url_builder
-                )))
-            }
-            #[cfg(feature = "_tls")]
-            Scheme::Https => {
-                if self.do_not_reuse_connection {
-                    self.execute_with_retry::<TlsStream<TcpStream>, HttpsConnector>(
-                        request,
-                        Arc::new(crate::non_wasm::http_clients_cache::creators::HttpsConnectionCreator),
-                        crate::consts::HTTPS_DEFAULT_PORT.into(),
-                        #[cfg(all(unix, feature = "with-ssh"))]
-                        None,
-                    )
-                    .await?
-                } else {
-                    let clients_cache = self.get_connections_cache();
-
-                    self.execute_with_retry::<TlsStream<TcpStream>, HttpsConnector>(
-                        request,
-                        clients_cache,
-                        crate::consts::HTTPS_DEFAULT_PORT.into(),
-                        #[cfg(all(unix, feature = "with-ssh"))]
-                        None,
-                    )
-                    .await?
-                }
-            }
-            #[cfg(not(unix))]
-            Scheme::UnixSocket => {
-                return Err(FlUrlError::UnsupportedScheme(
-                    "This OS does not support unix sockets".to_string(),
-                ))
-            }
-            #[cfg(unix)]
-            Scheme::UnixSocket => {
-                if self.do_not_reuse_connection {
-                    self.execute_with_retry::<UnixSocketStream, UnixSocketConnector>(
-                        request,
-                        Arc::new(crate::non_wasm::http_clients_cache::creators::UnixSocketHttpClientCreator),
-                        None,
-                        #[cfg(all(unix, feature = "with-ssh"))]
-                        None,
-                    )
-                    .await?
-                } else {
-                    let clients_cache = self.get_connections_cache();
-
-                    self.execute_with_retry::<UnixSocketStream, UnixSocketConnector>(
-                        request,
-                        clients_cache,
-                        None,
-                        #[cfg(all(unix, feature = "with-ssh"))]
-                        None,
-                    )
-                    .await?
-                }
-            }
-        };
-
-        Ok(response)
-    }
-
-    #[cfg(all(unix, feature = "with-ssh"))]
-    async fn execute_ssh(
-        mut self,
-        request: RequestToExecute,
-        mut ssh_credentials: my_ssh::SshCredentials,
-    ) -> Result<FlUrlResponse, FlUrlError> {
-        if let Some(private_key_resolver) = self.ssh_security_credentials_resolver.take() {
-            ssh_credentials = private_key_resolver
-                .update_credentials(&ssh_credentials)
-                .await;
-        }
-
-        if self.do_not_reuse_connection {
-            return self
-                .execute_with_retry::<my_ssh::SshAsyncChannel, SshHttpConnector>(
-                    request,
-                    Arc::new(crate::non_wasm::http_clients_cache::creators::SshConnectionCreator),
-                    crate::consts::HTTP_DEFAULT_PORT.into(),
-                    Some(Arc::new(ssh_credentials)),
-                )
-                .await;
-        }
-
-        let clients_cache = self.get_connections_cache();
-        self.execute_with_retry::<my_ssh::SshAsyncChannel, SshHttpConnector>(
-            request,
-            clients_cache,
-            crate::consts::HTTP_DEFAULT_PORT.into(),
-            Some(Arc::new(ssh_credentials)),
-        )
-        .await
-    }
-    pub(crate) fn get_connections_cache(&self) -> Arc<FlUrlHttpConnectionsCache> {
-        match self.connections_cache.as_ref() {
-            Some(cache) => cache.clone(),
-            None => crate::non_wasm::CLIENTS_CACHED.clone(),
-        }
-    }
-
-    fn compress_body(&mut self, body: Vec<u8>) -> Vec<u8> {
-        use flate2::{write::GzEncoder, Compression};
-
-        if body.len() < 64 {
-            return body;
-        }
-
-        if !self.headers.has_header("Content-Encoding") {
-            self.headers.add("Content-Encoding", "gzip");
-        }
-
-        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
-        encoder.write_all(body.as_slice()).unwrap();
-        let result = encoder.finish().unwrap();
-
-        result
-    }
-
-    fn get_path_and_query_with_leading_slash(&self) -> String {
-        let mut path_and_query = self.url_builder.get_path_and_query();
-        // A URL with a query but no path yields "?a=b"; the request target must
-        // start with "/", so we normalize it here.
-        if path_and_query.starts_with('?') {
-            path_and_query.insert(0, '/');
-        }
-        path_and_query
-    }
-
-    fn compile_request(
-        &mut self,
-        method: Method,
-        body: HttpRequestBody,
-        debug: Option<&mut String>,
-    ) -> Result<CompiledHttpRequest, FlUrlError> {
-        let result = match self.mode {
-            FlUrlMode::H2 => CompiledHttpRequest::new_hyper(
-                self.compile_hyper_request(method.clone(), body, debug)?,
-                method,
-            ),
-            FlUrlMode::Http1NoHyper => CompiledHttpRequest::new_my_http_client(
-                self.compile_non_hyper_request(method.clone(), body, debug)?,
-                method,
-            ),
-            FlUrlMode::Http1Hyper => CompiledHttpRequest::new_hyper(
-                self.compile_hyper_request(method.clone(), body, debug)?,
-                method,
-            ),
-        };
-
-        Ok(result)
-    }
-
-    fn compile_hyper_request(
-        &mut self,
-        method: Method,
-        body: HttpRequestBody,
-        debug: Option<&mut String>,
-    ) -> Result<my_http_client::http::request::Request<Full<Bytes>>, FlUrlError> {
-        if let Some(content_type) = body.get_content_type() {
-            if !self.headers.has_header("Content-Type") {
-                self.headers.add("Content-Type", content_type.as_str());
-            }
-        }
-
-        let mut body = body.into_vec();
-
-        if let Some(debug) = debug {
-            self.compile_debug_info_with_body(debug, method.as_str(), &body);
-        }
-
-        if self.compress_body {
-            body = self.compress_body(body);
-        }
-
-        let path_and_query = self.get_path_and_query_with_leading_slash();
-
-        let mut result = match self.mode {
-            FlUrlMode::H2 => {
-                let scheme = if self.url_builder.get_scheme().is_https() {
-                    "https"
-                } else {
-                    "http"
-                };
-
-                // H1 puts the socket path into the Host header and gets away with it;
-                // h2 can not, because ':authority' is parsed as a real authority and a
-                // path ends one at its first '/'. The caller's own Host header wins,
-                // otherwise the placeholder — the socket to open is already known to
-                // the connector, so the authority is only what the server sees.
-                #[cfg(unix)]
-                let authority = if self.url_builder.is_unix_socket() {
-                    self.headers
-                        .get_host_header_value()
-                        .unwrap_or(crate::consts::UNIX_SOCKET_AUTHORITY)
-                } else {
-                    self.url_builder.get_host_port()
-                };
-
-                #[cfg(not(unix))]
-                let authority = self.url_builder.get_host_port();
-
-                let uri = Uri::builder()
-                    .authority(authority)
-                    .path_and_query(path_and_query)
-                    .scheme(scheme)
-                    .build()?;
-                my_http_client::http::request::Builder::new()
-                    .version(Version::HTTP_2)
-                    .method(method.clone())
-                    .uri(uri)
-            }
-            _ => my_http_client::http::request::Builder::new()
-                .method(method.clone())
-                .uri(path_and_query),
-        };
-
-        self.headers.ensure_valid()?;
-
-        for (key, value) in self.headers.iter() {
-            result = result.header(key, value);
-        }
-
-        if !self.headers.has_host_header() {
-            if !self.mode.is_h2() {
-                result = result.header(
-                    hyper::header::HOST.as_str(),
-                    self.url_builder.get_host_port(),
-                );
-            }
-        }
-
-        if self.url_builder.is_unix_socket() {
-            result = result.header(hyper::header::ACCEPT, "*/*");
-        } else {
-            if !self.headers.has_connection_header {
-                if !self.do_not_reuse_connection {
-                    result = result.header(hyper::header::CONNECTION.as_str(), "keep-alive");
-                }
-            }
-        }
-
-        let result = match result.body(Full::new(body.into())) {
-            Ok(result) => result,
-            Err(err) => {
-                return Err(FlUrlError::ReadingHyperBodyError(format!(
-                    "[{}]. '{}' '{}' Invalid getting fl_url body: {}",
-                    method.as_str(),
-                    self.url_builder.get_host_port(),
-                    self.url_builder.get_path_and_query(),
-                    err
-                )));
-            }
-        };
-
-        Ok(result)
-    }
-
-    fn compile_non_hyper_request(
-        &mut self,
-        method: Method,
-        body: HttpRequestBody,
-        debug: Option<&mut String>,
-    ) -> Result<my_http_client::http1::MyHttpRequest, FlUrlError> {
-        if let Some(content_type) = body.get_content_type() {
-            if !self.headers.has_header("Content-Type") {
-                self.headers.add("Content-Type", content_type.as_str());
-            }
-        }
-
-        let mut body = body.into_vec();
-
-        if let Some(debug) = debug {
-            self.compile_debug_info_with_body(debug, method.as_str(), &body);
-        }
-
-        if self.compress_body {
-            body = self.compress_body(body);
-        }
-
-        let path_and_query = self.get_path_and_query_with_leading_slash();
-
-        // MyHttpRequestBuilder panics on a request line or a header it must not put
-        // on the wire. The url is where both of these come from, and the url comes
-        // from settings — so it is checked here and the request fails with an error,
-        // the way it does in the hyper modes.
-        if let Some(byte) = find_forbidden_request_target_byte(&path_and_query) {
-            return Err(invalid_url(
-                &self.url_builder,
-                format!("the path and query contain forbidden byte 0x{:02x}", byte),
-            ));
-        }
-
-        self.headers.ensure_valid()?;
-
-        let mut builder = MyHttpRequestBuilder::new(method, &path_and_query);
-
-        if !self.headers.has_host_header() {
-            let host_port = self.url_builder.get_host_port();
-
-            if let Some(byte) = find_forbidden_header_value_byte(host_port) {
-                return Err(invalid_url(
-                    &self.url_builder,
-                    format!("the host contains forbidden control byte 0x{:02x}", byte),
-                ));
-            }
-
-            builder.append_header("Host", host_port);
-        }
-
-        if self.url_builder.is_unix_socket() {
-            builder.append_header("Accept", "*/*");
-        } else {
-            if !self.headers.has_connection_header {
-                if !self.do_not_reuse_connection {
-                    builder.append_header("Connection", "keep-alive");
-                }
-            }
-        }
-
-        for header in self.headers.iter() {
-            builder.append_header(header.0, header.1);
-        }
-
-        Ok(builder.build_with_body(body))
-    }
-
-    pub async fn get(mut self) -> Result<FlUrlResponse, FlUrlError> {
-        let request = self.compile_request(Method::GET, HttpRequestBody::Empty, None)?;
-        self.execute(RequestToExecute::Compiled(request)).await
+    pub async fn get(self) -> Result<FlUrlResponse, FlUrlError> {
+        self.inner?.get().await
     }
 
     pub async fn get_with_debug(
-        mut self,
+        self,
         request_debug_string: &mut String,
     ) -> Result<FlUrlResponse, FlUrlError> {
-        let request =
-            self.compile_request(Method::GET, HttpRequestBody::Empty, Some(request_debug_string))?;
-        self.execute(RequestToExecute::Compiled(request)).await
+        self.inner?.get_with_debug(request_debug_string).await
     }
 
-    pub async fn head(mut self) -> Result<FlUrlResponse, FlUrlError> {
-        let request = self.compile_request(Method::HEAD, HttpRequestBody::Empty, None)?;
-        self.execute(RequestToExecute::Compiled(request)).await
+    pub async fn head(self) -> Result<FlUrlResponse, FlUrlError> {
+        self.inner?.head().await
     }
 
     pub async fn head_with_debug(
-        mut self,
+        self,
         request_debug_string: &mut String,
     ) -> Result<FlUrlResponse, FlUrlError> {
-        let request = self.compile_request(
-            Method::HEAD,
-            HttpRequestBody::Empty,
-            Some(request_debug_string),
-        )?;
-        self.execute(RequestToExecute::Compiled(request)).await
+        self.inner?.head_with_debug(request_debug_string).await
     }
 
-    pub async fn post(mut self, body: impl Into<HttpRequestBody>) -> Result<FlUrlResponse, FlUrlError> {
-        let request = self.compile_request(Method::POST, body.into(), None)?;
-        self.execute(RequestToExecute::Compiled(request)).await
+    pub async fn post(self, body: impl Into<HttpRequestBody>) -> Result<FlUrlResponse, FlUrlError> {
+        self.inner?.post(body).await
     }
 
     pub async fn post_with_debug(
-        mut self,
+        self,
         body: impl Into<HttpRequestBody>,
         request_debug_string: &mut String,
     ) -> Result<FlUrlResponse, FlUrlError> {
-        let body = body.into();
-
-        let request = self.compile_request(Method::POST, body, Some(request_debug_string))?;
-        self.execute(RequestToExecute::Compiled(request)).await
+        self.inner?.post_with_debug(body, request_debug_string).await
     }
 
     /// POSTs a body that is produced as a stream instead of living in memory as a
@@ -1070,8 +437,7 @@ impl FlUrl {
         TBody: hyper::body::Body<Data = Bytes> + Send + Sync + 'static,
         TBody::Error: std::fmt::Display,
     {
-        self.execute_streamed(Method::POST, body, content_length)
-            .await
+        self.inner?.post_request_streamed(body, content_length).await
     }
 
     /// Same as [`Self::post_request_streamed`], with the request head dumped into
@@ -1087,7 +453,8 @@ impl FlUrl {
         TBody: hyper::body::Body<Data = Bytes> + Send + Sync + 'static,
         TBody::Error: std::fmt::Display,
     {
-        self.execute_streamed_with_debug(Method::POST, body, content_length, request_debug_string)
+        self.inner?
+            .post_request_streamed_with_debug(body, content_length, request_debug_string)
             .await
     }
 
@@ -1118,8 +485,7 @@ impl FlUrl {
         TBody: hyper::body::Body<Data = Bytes> + Send + Sync + 'static,
         TBody::Error: std::fmt::Display,
     {
-        self.execute_streamed(Method::PUT, body, content_length)
-            .await
+        self.inner?.put_request_streamed(body, content_length).await
     }
 
     /// Same as [`Self::put_request_streamed`], with the request head dumped into
@@ -1134,7 +500,8 @@ impl FlUrl {
         TBody: hyper::body::Body<Data = Bytes> + Send + Sync + 'static,
         TBody::Error: std::fmt::Display,
     {
-        self.execute_streamed_with_debug(Method::PUT, body, content_length, request_debug_string)
+        self.inner?
+            .put_request_streamed_with_debug(body, content_length, request_debug_string)
             .await
     }
 
@@ -1148,8 +515,7 @@ impl FlUrl {
         TBody: hyper::body::Body<Data = Bytes> + Send + Sync + 'static,
         TBody::Error: std::fmt::Display,
     {
-        self.execute_streamed(Method::PATCH, body, content_length)
-            .await
+        self.inner?.patch_request_streamed(body, content_length).await
     }
 
     /// Same as [`Self::patch_request_streamed`], with the request head dumped into
@@ -1164,7 +530,8 @@ impl FlUrl {
         TBody: hyper::body::Body<Data = Bytes> + Send + Sync + 'static,
         TBody::Error: std::fmt::Display,
     {
-        self.execute_streamed_with_debug(Method::PATCH, body, content_length, request_debug_string)
+        self.inner?
+            .patch_request_streamed_with_debug(body, content_length, request_debug_string)
             .await
     }
 
@@ -1224,8 +591,7 @@ impl FlUrl {
         TBody: hyper::body::Body<Data = Bytes> + Send + Sync + 'static,
         TBody::Error: std::fmt::Display,
     {
-        self.execute_streamed_impl(method, body, content_length, None)
-            .await
+        self.inner?.execute_streamed(method, body, content_length).await
     }
 
     /// Same as [`Self::execute_streamed`], with the request head — verb, path and
@@ -1245,730 +611,199 @@ impl FlUrl {
         TBody: hyper::body::Body<Data = Bytes> + Send + Sync + 'static,
         TBody::Error: std::fmt::Display,
     {
-        self.execute_streamed_impl(method, body, content_length, Some(request_debug_string))
+        self.inner?
+            .execute_streamed_with_debug(method, body, content_length, request_debug_string)
             .await
-    }
-
-    async fn execute_streamed_impl<TBody>(
-        mut self,
-        method: Method,
-        body: TBody,
-        content_length: Option<usize>,
-        debug: Option<&mut String>,
-    ) -> Result<FlUrlResponse, FlUrlError>
-    where
-        TBody: hyper::body::Body<Data = Bytes> + Send + Sync + 'static,
-        TBody::Error: std::fmt::Display,
-    {
-        if self.compress_body {
-            return Err(FlUrlError::StreamedBodyCanNotBeCompressed);
-        }
-
-        self.mode = FlUrlMode::Http1Hyper;
-
-        if let Some(debug) = debug {
-            self.compile_debug_info_streamed(debug, method.as_str());
-        }
-
-        let request = self.compile_streamed_request(method, body)?;
-
-        self.execute(RequestToExecute::streamed(request, content_length))
-            .await
-    }
-
-    /// Builds the request head for [`Self::execute_streamed`] and erases the body to
-    /// the trait object the connection carries. Mirrors the header work of
-    /// `compile_hyper_request`, minus everything that needs the body in hand:
-    /// no `Content-Type` derived from the payload (a stream carries none — set it with
-    /// [`Self::with_header`]), no debug dump of the body, no compression.
-    fn compile_streamed_request<TBody>(
-        &mut self,
-        method: Method,
-        body: TBody,
-    ) -> Result<my_http_client::HyperRequest, FlUrlError>
-    where
-        TBody: hyper::body::Body<Data = Bytes> + Send + Sync + 'static,
-        TBody::Error: std::fmt::Display,
-    {
-        let path_and_query = self.get_path_and_query_with_leading_slash();
-
-        // Http1Hyper only, so the origin-form target is the right one — no absolute
-        // URI + :authority the way the h2 branch builds it.
-        let mut result = my_http_client::http::request::Builder::new()
-            .method(method.clone())
-            .uri(path_and_query);
-
-        self.headers.ensure_valid()?;
-
-        for (key, value) in self.headers.iter() {
-            result = result.header(key, value);
-        }
-
-        if !self.headers.has_host_header() {
-            result = result.header(
-                hyper::header::HOST.as_str(),
-                self.url_builder.get_host_port(),
-            );
-        }
-
-        if self.url_builder.is_unix_socket() {
-            result = result.header(hyper::header::ACCEPT, "*/*");
-        } else {
-            if !self.headers.has_connection_header {
-                if !self.do_not_reuse_connection {
-                    result = result.header(hyper::header::CONNECTION.as_str(), "keep-alive");
-                }
-            }
-        }
-
-        let body = http_body_util::BodyExt::boxed(http_body_util::BodyExt::map_err(
-            body,
-            |err| err.to_string(),
-        ));
-
-        match result.body(body) {
-            Ok(result) => Ok(result),
-            Err(err) => Err(FlUrlError::ReadingHyperBodyError(format!(
-                "[{}]. '{}' '{}' Invalid getting fl_url streamed body: {}",
-                method.as_str(),
-                self.url_builder.get_host_port(),
-                self.url_builder.get_path_and_query(),
-                err
-            ))),
-        }
     }
 
     #[deprecated(note = "Use `post` instead")]
     pub async fn post_json(
-        mut self,
+        self,
         json: &impl serde::Serialize,
     ) -> Result<FlUrlResponse, FlUrlError> {
-        let body = HttpRequestBody::try_as_json(json)?;
-        let request = self.compile_request(Method::POST, body, None)?;
-
-        self.execute(RequestToExecute::Compiled(request)).await
+        self.inner?.post_json(json).await
     }
 
-    pub async fn patch(mut self, body: impl Into<HttpRequestBody>) -> Result<FlUrlResponse, FlUrlError> {
-        let request = self.compile_request(Method::PATCH, body.into(), None)?;
-        self.execute(RequestToExecute::Compiled(request)).await
+    pub async fn patch(self, body: impl Into<HttpRequestBody>) -> Result<FlUrlResponse, FlUrlError> {
+        self.inner?.patch(body).await
     }
 
     pub async fn patch_with_debug(
-        mut self,
+        self,
         body: impl Into<HttpRequestBody>,
         request_debug_string: &mut String,
     ) -> Result<FlUrlResponse, FlUrlError> {
-        let request = self.compile_request(Method::PATCH, body.into(), Some(request_debug_string))?;
-        self.execute(RequestToExecute::Compiled(request)).await
+        self.inner?.patch_with_debug(body, request_debug_string).await
     }
 
     #[deprecated(note = "Use `patch` instead")]
     pub async fn patch_json(
-        mut self,
+        self,
         json: &impl serde::Serialize,
     ) -> Result<FlUrlResponse, FlUrlError> {
-        let body = HttpRequestBody::try_as_json(json)?;
-        let request = self.compile_request(Method::PATCH, body, None)?;
-
-        self.execute(RequestToExecute::Compiled(request)).await
+        self.inner?.patch_json(json).await
     }
 
-    pub async fn put(mut self, body: impl Into<HttpRequestBody>) -> Result<FlUrlResponse, FlUrlError> {
-        let request = self.compile_request(Method::PUT, body.into(), None)?;
-        self.execute(RequestToExecute::Compiled(request)).await
+    pub async fn put(self, body: impl Into<HttpRequestBody>) -> Result<FlUrlResponse, FlUrlError> {
+        self.inner?.put(body).await
     }
 
     pub async fn put_with_debug(
-        mut self,
+        self,
         body: impl Into<HttpRequestBody>,
         request_debug_string: &mut String,
     ) -> Result<FlUrlResponse, FlUrlError> {
-        let request = self.compile_request(Method::PUT, body.into(), Some(request_debug_string))?;
-        self.execute(RequestToExecute::Compiled(request)).await
+        self.inner?.put_with_debug(body, request_debug_string).await
     }
 
     #[deprecated(note = "Use `put` instead")]
     pub async fn put_json(
-        mut self,
+        self,
         json: &impl serde::Serialize,
     ) -> Result<FlUrlResponse, FlUrlError> {
-        let body = HttpRequestBody::try_as_json(json)?;
-        let request = self.compile_request(Method::PUT, body, None)?;
-        self.execute(RequestToExecute::Compiled(request)).await
+        self.inner?.put_json(json).await
     }
 
-    pub async fn delete(mut self) -> Result<FlUrlResponse, FlUrlError> {
-        let request = self.compile_request(Method::DELETE, HttpRequestBody::Empty, None)?;
-        self.execute(RequestToExecute::Compiled(request)).await
+    pub async fn delete(self) -> Result<FlUrlResponse, FlUrlError> {
+        self.inner?.delete().await
     }
 
     pub async fn delete_with_debug(
-        mut self,
-        request_debug_string: &mut String,
-    ) -> Result<FlUrlResponse, FlUrlError> {
-        let request =
-            self.compile_request(Method::DELETE, HttpRequestBody::Empty, Some(request_debug_string))?;
-        self.execute(RequestToExecute::Compiled(request)).await
-    }
-    fn compile_debug_info(&self, out: &mut String) {
-        out.push_str("PathAndQuery: '");
-        out.push_str(self.url_builder.get_path_and_query().as_str());
-        out.push_str("'; Headers: '");
-        out.push_str(self.headers.headers.as_str());
-    }
-    fn compile_debug_info_with_body(
-        &self,
-        request_debug_string: &mut String,
-        method: &str,
-        body: &[u8],
-    ) {
-        request_debug_string.push_str("[");
-        request_debug_string.push_str(method);
-        request_debug_string.push_str("] ");
-
-        self.compile_debug_info(request_debug_string);
-
-        if body.len() == 0 {
-            return;
-        }
-        match std::str::from_utf8(body) {
-            Ok(body_as_str) => {
-                request_debug_string.push_str("Body: ");
-                request_debug_string.push_str(body_as_str);
-            }
-            Err(_) => {
-                request_debug_string.push_str("Body: ");
-                request_debug_string.push_str(body.len().to_string().as_str());
-                request_debug_string.push_str(" non string bytes");
-            }
-        }
-    }
-
-    /// Debug dump for a streamed request: the head only. There is no body line — a
-    /// streamed payload exists only as it is written to the socket, so printing it
-    /// would mean buffering the very thing streaming avoids.
-    fn compile_debug_info_streamed(&self, request_debug_string: &mut String, method: &str) {
-        request_debug_string.push_str("[");
-        request_debug_string.push_str(method);
-        request_debug_string.push_str("] ");
-
-        self.compile_debug_info(request_debug_string);
-    }
-
-    pub fn to_string(&self) -> String {
-        let mut result = String::new();
-        self.compile_debug_info(&mut result);
-
-        result
-    }
-
-    async fn get_connection_params<'s>(
-        &'s self,
-        default_port: Option<u16>,
-        #[cfg(all(unix, feature = "with-ssh"))] ssh_credentials: Option<Arc<my_ssh::SshCredentials>>,
-    ) -> ConnectionParams<'s> {
-        let remote_endpoint = self.url_builder.get_remote_endpoint(default_port);
-
-        #[cfg(all(unix, feature = "with-ssh"))]
-        let ssh_session = match ssh_credentials.clone() {
-            Some(ssh_credentials) => {
-                let ssh_credentials = Arc::new(ssh_credentials);
-                let ssh_session = my_ssh::SSH_SESSIONS_POOL
-                    .get_or_create(&ssh_credentials)
-                    .await;
-
-                Some(ssh_session)
-            }
-            None => None,
-        };
-
-        ConnectionParams {
-            mode: self.mode,
-            remote_endpoint,
-            resolved_ip: self.resolved_ip,
-            host_header: self.headers.get_host_header_value(),
-            #[cfg(feature = "_tls")]
-            client_certificate: self.client_cert.as_ref(),
-            accept_invalid_certificate: self.accept_invalid_certificate,
-            #[cfg(all(unix, feature = "with-ssh"))]
-            ssh_session,
-            reuse_connection_timeout_seconds: self.reuse_connection_timeout_sec,
-        }
-    }
-
-    async fn execute_with_retry<
-        TStream: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + Sync + 'static,
-        TConnector: MyHttpClientConnector<TStream> + Send + Sync + 'static,
-    >(
         self,
-        mut request: RequestToExecute,
-        http_connection_resolver: Arc<dyn HttpConnectionResolver<TStream, TConnector>>,
-        default_port: Option<u16>,
-        #[cfg(all(unix, feature = "with-ssh"))] ssh_credentials: Option<Arc<my_ssh::SshCredentials>>,
+        request_debug_string: &mut String,
     ) -> Result<FlUrlResponse, FlUrlError> {
-        if self.print_input_request {
-            request.print_http_headers();
-        }
-        let mut attempt_no = 0;
-        // A streamed body is consumed as it is sent, so there is nothing left to
-        // replay — neither `with_retries` nor `with_retry` applies to it.
-        let retry = if request.is_streamed() {
-            RetryPolicy::default()
-        } else {
-            self.retry
-        };
-        let request_timeout = self.request_timeout;
-        let params: ConnectionParams<'_> = self
-            .get_connection_params(
-                default_port,
-                #[cfg(all(unix, feature = "with-ssh"))]
-                ssh_credentials,
-            )
-            .await;
+        self.inner?.delete_with_debug(request_debug_string).await
+    }
 
-        loop {
-            let connection = http_connection_resolver.get_http_connection(&params).await;
-
-            let response = match &mut request {
-                RequestToExecute::Compiled(request) => {
-                    connection.do_request(request, request_timeout).await
-                }
-                RequestToExecute::Streamed {
-                    request,
-                    content_size,
-                    ..
-                } => match request.take() {
-                    Some(request) => {
-                        connection
-                            .do_streamed_request(request, *content_size, request_timeout)
-                            .await
-                    }
-                    // Unreachable while the retry policy is pinned to none above; kept
-                    // as an error rather than an unwrap so a future change to the retry
-                    // policy can not silently resend a half-consumed body.
-                    None => Err(my_http_client::MyHttpClientError::CanNotExecuteRequest(
-                        "A streamed request body has already been consumed and can not be replayed"
-                            .to_string(),
-                    )),
-                },
-            };
-
-            match response {
-                Ok(response) => {
-                    // `with_retry` replays a 5xx the way it replays a transport
-                    // failure. The response is dropped unread together with its
-                    // connection handle, which aborts the body before the pause: an
-                    // HTTP/1 connection is checked out exclusively and is disposed
-                    // with it, an h2 stream is reset while the shared h2 connection
-                    // stays pooled for the next attempt.
-                    if attempt_no < retry.amount()
-                        && request.method_is_idempotent()
-                        && retry.retries_status(response.status().as_u16())
-                    {
-                        drop(response);
-                        drop(connection);
-                        attempt_no += 1;
-                        pause_before_next_attempt(retry.delay()).await;
-                        continue;
-                    }
-
-                    let mut response =
-                        FlUrlResponse::from_http1_response(self.url_builder, response);
-                    response.set_body_read_timeout(self.response_body_timeout);
-                    response.set_decompress_gzip(self.decompress_gzip_response);
-                    // The connection stays checked out until the response body
-                    // is fully consumed; the returner puts it back (or disposes
-                    // it) at that point.
-                    response.set_connection_returner(Box::new(
-                        crate::non_wasm::http_clients_cache::PooledConnectionReturner {
-                            resolver: http_connection_resolver.clone(),
-                            connection,
-                        },
-                    ));
-                    return Ok(response);
-                }
-                Err(err) => {
-                    // A single timeout means a slow response, not a dead
-                    // connection — the shared H2 client must survive it (its
-                    // own consecutive-timeouts policy handles dead peers). Any
-                    // other error evicts the connection from the pool; dropping
-                    // the Arc disposes it.
-                    if matches!(&err, my_http_client::MyHttpClientError::RequestTimeout(_)) {
-                        drop(connection);
-                    } else {
-                        http_connection_resolver.drop_connection(connection).await;
-                    }
-
-                    if !error_is_safe_to_retry(&err, &request) || attempt_no >= retry.amount() {
-                        return Err(map_my_http_client_error(err));
-                    }
-
-                    attempt_no += 1;
-                    pause_before_next_attempt(retry.delay()).await;
-                }
-            }
+    /// The path and query and the headers of the request as they stand — or, once
+    /// the builder has met an error, that error.
+    pub fn to_string(&self) -> String {
+        match self.inner.as_ref() {
+            Ok(inner) => inner.to_string(),
+            Err(err) => format!("Error: {}", err),
         }
     }
-}
-
-/// The pause `with_retry` puts between two attempts. `with_retries` has none and
-/// replays at once, without touching the timer — exactly as it always did.
-async fn pause_before_next_attempt(delay: Duration) {
-    if !delay.is_zero() {
-        tokio::time::sleep(delay).await;
-    }
-}
-
-/// Replay safety: fl-url's outer retry loop replays only idempotent requests.
-/// Error kinds are NOT a reliable pre-wire signal across the three client
-/// modes (e.g. in Http1NoHyper a `CanNotConnectToRemoteHost` can surface after
-/// a POST already hit the wire, when the internal reconnect after a mid-flight
-/// disconnect fails), so a non-idempotent request is never replayed here —
-/// my-http-client's own retry loops already cover the genuinely-safe cases.
-fn error_is_safe_to_retry(
-    err: &my_http_client::MyHttpClientError,
-    request: &RequestToExecute,
-) -> bool {
-    match err {
-        // The connection is consumed by the upgrade; a retry would just
-        // re-trigger it.
-        my_http_client::MyHttpClientError::UpgradedToWebSocket => false,
-        _ => request.method_is_idempotent(),
-    }
-}
-
-fn map_my_http_client_error(err: my_http_client::MyHttpClientError) -> FlUrlError {
-    match err {
-        my_http_client::MyHttpClientError::RequestTimeout(_) => FlUrlError::Timeout,
-        other => FlUrlError::MyHttpClientError(other),
-    }
-}
-
-/// CR, LF, NUL and a space: exactly what `MyHttpRequestBuilder::new` refuses in a
-/// request line, with a panic. Any of them would end the line early.
-fn find_forbidden_request_target_byte(path_and_query: &str) -> Option<u8> {
-    path_and_query
-        .bytes()
-        .find(|byte| matches!(byte, b'\r' | b'\n' | 0 | b' '))
-}
-
-fn invalid_url(url_builder: &UrlBuilder, reason: String) -> FlUrlError {
-    FlUrlError::InvalidUrl(format!(
-        "Invalid url '{}': {}",
-        url_builder.to_string().escape_debug(),
-        reason
-    ))
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
+    use std::time::Duration;
 
-    use crate::FlUrl;
+    use crate::body::HttpRequestBody;
+    use crate::{EmptyRequestModel, FlUrl, FlUrlError, HttpVerb};
 
-    #[cfg(feature = "_tls")]
-    #[tokio::test]
-    async fn test_h1() {
-        let mut fl_url_resp = FlUrl::new("https://jetdev.eu/img/logo.png")
-            .do_not_reuse_connection()
-            .get()
-            .await
-            .unwrap();
+    const NO_HOST: &str = "Invalid url 'http://': it names no host";
 
-        println!("{}", fl_url_resp.get_status_code());
-
-        let resp = fl_url_resp.get_body_as_slice().await.unwrap();
-        println!("{}", resp.len());
-    }
-
-    #[cfg(feature = "_tls")]
-    #[tokio::test]
-    async fn test_h2() {
-        let mut fl_url_resp = FlUrl::new("https://jetdev.eu/img/logo.png")
-            .update_mode(crate::non_wasm::fl_url::FlUrlMode::H2)
-            .get()
-            .await
-            .unwrap();
-
-        let resp = fl_url_resp.get_body_as_slice().await.unwrap();
-
-        println!("{}", resp.len());
-    }
-
-    #[cfg(feature = "_tls")]
-    #[tokio::test]
-    async fn test_head() {
-        let mut fl_url_resp = FlUrl::new("https://jetdev.eu/img/logo.png")
-            .head()
-            .await
-            .unwrap();
-
-        let resp = fl_url_resp.get_body_as_slice().await.unwrap();
-
-        println!("{}", resp.len());
+    fn assert_no_host(error: Option<&FlUrlError>) {
+        match error {
+            Some(FlUrlError::InvalidUrl(message)) => assert_eq!(message, NO_HOST),
+            other => panic!("unexpected state {other:?}"),
+        }
     }
 
     #[test]
-    fn execute_request_fills_url_headers_and_body_from_model() {
-        use my_http_utils::macros::MyHttpInput;
+    fn a_url_that_can_be_used_leaves_the_builder_alive() {
+        let fl_url = FlUrl::new("http://localhost:8080/api").append_path_segment("users");
 
-        #[derive(MyHttpInput)]
-        struct CreateUser {
-            #[http_path(name = "orgId", description = "")]
-            org_id: String,
-            #[http_query(name = "notify", description = "")]
-            notify: bool,
-            #[http_header(name = "X-Api-Key", description = "")]
-            api_key: String,
-            #[http_body(name = "name", description = "")]
-            name: String,
-        }
+        assert!(fl_url.get_error().is_none());
 
-        let model = CreateUser {
-            org_id: "org-42".to_string(),
-            notify: true,
-            api_key: "secret".to_string(),
-            name: "John".to_string(),
-        };
+        let url_builder = fl_url.get_url_builder().unwrap();
+        assert_eq!(url_builder.get_host_port(), "localhost:8080");
+        assert_eq!(url_builder.get_path_and_query(), "/api/users");
+    }
 
-        // Base host + static route prefix set by the caller, model fills the rest.
-        let mut fl_url = FlUrl::new("https://api.example.com")
+    #[test]
+    fn a_url_that_can_not_be_used_becomes_the_error() {
+        let fl_url = FlUrl::new("http://");
+
+        assert_no_host(fl_url.get_error());
+        assert!(fl_url.get_url_builder().is_none());
+        assert_eq!(fl_url.get_resolved_ip(), None);
+        assert_eq!(fl_url.to_string(), format!("Error: InvalidUrl({NO_HOST:?})"));
+    }
+
+    #[test]
+    fn every_step_after_the_error_is_skipped_and_the_first_error_stays() {
+        let fl_url = FlUrl::new("http://")
             .append_path_segment("api")
-            .append_path_segment("users");
+            .append_query_param("a", Some("b"))
+            .append_raw_ending_to_url("/raw")
+            // An error of its own, had the builder still been alive.
+            .with_header("X-Name", "a\nb")
+            .compress()
+            .accept_gzip()
+            .set_timeout(Duration::from_secs(1))
+            .with_retry(Duration::from_secs(1), 3)
+            .do_not_reuse_connection();
 
-        let body = fl_url.fill_from_model(model).unwrap();
-
-        // Static prefix + model path segment + model query param.
-        assert_eq!(
-            fl_url.url_builder.get_path_and_query(),
-            "/api/users/org-42?notify=true"
-        );
-
-        // Model header field landed in FlUrlHeaders.
-        assert!(fl_url
-            .headers
-            .iter()
-            .any(|(name, value)| name == "X-Api-Key" && value == "secret"));
-
-        // Body field serialized to JSON.
-        match body {
-            crate::body::HttpRequestBody::Json(bytes) => {
-                let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-                assert_eq!(json["name"], "John");
-            }
-            _ => panic!("expected a JSON body"),
-        }
+        assert_no_host(fl_url.get_error());
     }
 
     #[test]
-    fn execute_request_builds_multipart_body_with_random_boundary() {
-        use my_http_utils::macros::MyHttpInput;
+    fn a_header_that_can_not_be_sent_becomes_the_error() {
+        let fl_url = FlUrl::new("http://localhost")
+            .with_header("X-First", "fine")
+            .with_header("X-Name", "a\nb")
+            .with_header("X-Other", "c\rd");
 
-        // A form-data model is the only path where `FlUrlRnd` is actually used:
-        // it supplies the random `multipart/form-data` boundary suffix.
-        #[derive(MyHttpInput)]
-        struct UploadForm {
-            #[http_form_data(name = "title", description = "")]
-            title: String,
-            #[http_form_data(name = "count", description = "")]
-            count: i32,
-        }
-
-        let model = UploadForm {
-            title: "MyTitle".to_string(),
-            count: 5,
-        };
-
-        let mut fl_url = FlUrl::new("https://api.example.com").append_path_segment("upload");
-
-        let body = fl_url.fill_from_model(model).unwrap();
-
-        // The model yields a FormData body, and its content type carries the
-        // random boundary generated via `FlUrlRnd`.
-        let content_type = body.get_content_type().unwrap().as_str().to_string();
-        assert!(content_type.starts_with("multipart/form-data; boundary="));
-
-        let boundary = content_type
-            .split("boundary=")
-            .nth(1)
-            .expect("content type must carry a boundary");
-        // A non-empty random suffix was appended to the fixed boundary prefix.
-        assert!(boundary.len() > "------DataFormBoundary".len());
-
-        // The very boundary advertised in the content type delimits the body
-        // bytes — i.e. the random string flowed all the way through.
-        let text = String::from_utf8(body.into_vec()).unwrap();
-        assert!(text.contains(boundary));
-        assert!(text.contains("name=\"title\""));
-        assert!(text.contains("MyTitle"));
-        assert!(text.contains("name=\"count\""));
-        assert!(text.contains('5'));
-    }
-
-    // Compile-only: the "no model" example must type-check. `EmptyRequestModel`
-    // is the parameter-less stand-in — no model type has to be derived or named.
-    #[allow(dead_code)]
-    fn readme_no_model_example_compiles() {
-        use crate::{EmptyRequestModel, FlUrlError, FlUrlResponse, HttpVerb};
-
-        async fn _call() -> Result<FlUrlResponse, FlUrlError> {
-            FlUrl::new("https://api.example.com")
-                .append_path_segment("health")
-                .execute_request(HttpVerb::Get, EmptyRequestModel)
-                .await
+        match fl_url.get_error() {
+            Some(FlUrlError::RequestBuild(message)) => assert_eq!(
+                message,
+                "Value of header 'X-Name' contains forbidden control byte 0x0a"
+            ),
+            other => panic!("unexpected state {other:?}"),
         }
     }
 
-    #[test]
-    fn execute_request_keeps_headers_added_before_it() {
-        use my_http_utils::macros::MyHttpInput;
-
-        #[derive(MyHttpInput)]
-        struct Model {
-            #[http_header(name = "X-Api-Key", description = "")]
-            api_key: String,
-            #[http_body(name = "name", description = "")]
-            name: String,
-        }
-
-        let model = Model {
-            api_key: "secret".to_string(),
-            name: "John".to_string(),
-        };
-
-        // Two headers set on the builder BEFORE the model is poured in.
-        let mut fl_url = FlUrl::new("https://api.example.com")
-            .with_header("Authorization", "Bearer token")
-            .with_header("X-Trace", "abc");
-
-        fl_url.fill_from_model(model).unwrap();
-
-        let has = |n: &str, v: &str| {
-            fl_url
-                .headers
-                .iter()
-                .any(|(name, value)| name == n && value == v)
-        };
-
-        // The headers added before execute_request/fill_from_model survive...
-        assert!(has("Authorization", "Bearer token"));
-        assert!(has("X-Trace", "abc"));
-        // ...right alongside the header field the model pushes in.
-        assert!(has("X-Api-Key", "secret"));
-    }
-
-    /// Every verb goes through `compile_request`, which is what the `*_with_debug`
-    /// methods hand the debug string to — so the dump carries the verb, the target
-    /// and, for a body-carrying verb, the payload.
-    #[test]
-    fn every_verb_dumps_the_request_into_the_debug_string() {
-        use crate::body::HttpRequestBody;
-        use hyper::Method;
-
-        let cases = [
-            (Method::GET, None),
-            (Method::HEAD, None),
-            (Method::DELETE, None),
-            (Method::POST, Some("{\"a\":1}")),
-            (Method::PUT, Some("{\"b\":2}")),
-            (Method::PATCH, Some("{\"c\":3}")),
-        ];
-
-        for (method, body) in cases {
-            let mut fl_url = FlUrl::new("https://api.example.com")
-                .append_path_segment("users")
-                .append_query_param("notify", Some("true"))
-                .with_header("X-Api-Key", "secret");
-
-            let request_body = match body {
-                Some(body) => HttpRequestBody::from_raw_data(
-                    body.as_bytes().to_vec(),
-                    Some("application/json".into()),
-                ),
-                None => HttpRequestBody::Empty,
-            };
-
-            let mut debug = String::new();
-            fl_url
-                .compile_request(method.clone(), request_body, Some(&mut debug))
-                .unwrap();
-
-            assert!(
-                debug.starts_with(&format!("[{}] ", method.as_str())),
-                "[{}] dump must open with the verb: {}",
-                method.as_str(),
-                debug
-            );
-            assert!(
-                debug.contains("/users?notify=true"),
-                "[{}] dump must carry the target: {}",
-                method.as_str(),
-                debug
-            );
-            assert!(
-                debug.contains("X-Api-Key"),
-                "[{}] dump must carry the headers: {}",
-                method.as_str(),
-                debug
-            );
-
-            match body {
-                Some(body) => assert!(
-                    debug.contains(&format!("Body: {}", body)),
-                    "[{}] dump must carry the body: {}",
-                    method.as_str(),
-                    debug
-                ),
-                // A bodyless verb has nothing to print — and prints nothing.
-                None => assert!(
-                    !debug.contains("Body: "),
-                    "[{}] must not invent a body: {}",
-                    method.as_str(),
-                    debug
-                ),
-            }
-        }
-    }
-
-    /// A streamed body cannot be dumped — it exists only as it is written to the
-    /// socket — so the dump is the head and nothing else.
-    #[test]
-    fn a_streamed_request_dumps_the_head_without_a_body() {
-        let fl_url = FlUrl::new("https://api.example.com")
-            .append_path_segment("upload")
-            .with_header("X-Api-Key", "secret");
+    #[tokio::test]
+    async fn every_way_of_sending_returns_the_error() {
+        let fl_url = || FlUrl::new("http://");
+        let body = || HttpRequestBody::from_raw_data(b"body".to_vec(), None);
 
         let mut debug = String::new();
-        fl_url.compile_debug_info_streamed(&mut debug, "POST");
 
-        assert!(debug.starts_with("[POST] "), "{}", debug);
-        assert!(debug.contains("/upload"), "{}", debug);
-        assert!(debug.contains("X-Api-Key"), "{}", debug);
-        assert!(!debug.contains("Body"), "{}", debug);
-    }
+        let results = [
+            fl_url().get().await,
+            fl_url().get_with_debug(&mut debug).await,
+            fl_url().head().await,
+            fl_url().head_with_debug(&mut debug).await,
+            fl_url().delete().await,
+            fl_url().delete_with_debug(&mut debug).await,
+            fl_url().post(body()).await,
+            fl_url().post_with_debug(body(), &mut debug).await,
+            fl_url().put(body()).await,
+            fl_url().put_with_debug(body(), &mut debug).await,
+            fl_url().patch(body()).await,
+            fl_url().patch_with_debug(body(), &mut debug).await,
+            fl_url()
+                .execute_request(HttpVerb::Get, EmptyRequestModel)
+                .await,
+            fl_url()
+                .execute_request_with_debug(HttpVerb::Post, EmptyRequestModel, &mut debug)
+                .await,
+            fl_url()
+                .post_request_streamed(http_body_util::Full::new(bytes::Bytes::new()), None)
+                .await,
+            fl_url()
+                .execute_streamed_with_debug(
+                    hyper::Method::PUT,
+                    http_body_util::Full::new(bytes::Bytes::new()),
+                    Some(0),
+                    &mut debug,
+                )
+                .await,
+        ];
 
-    /// `server-name@ip`: the ip only picks the socket; to everything the server
-    /// sees — Host, :authority, SNI — the url's host is the server name.
-    #[tokio::test]
-    async fn server_name_at_ip_url_keeps_the_server_name_as_host() {
-        let fl_url = FlUrl::new("https://domain.com@15.0.0.5/xxx/fff");
+        for (index, result) in results.into_iter().enumerate() {
+            match result {
+                Err(FlUrlError::InvalidUrl(message)) => assert_eq!(message, NO_HOST, "#{index}"),
+                Err(err) => panic!("#{index}: unexpected error {err:?}"),
+                Ok(_) => panic!("#{index}: nothing can be sent to a url with no host"),
+            }
+        }
 
-        assert_eq!(fl_url.get_resolved_ip(), Some("15.0.0.5".parse().unwrap()));
-        assert_eq!(fl_url.url_builder.get_host(), "domain.com");
-        assert_eq!(fl_url.url_builder.get_host_port(), "domain.com");
-        assert_eq!(fl_url.url_builder.get_path_and_query(), "/xxx/fff");
-
-        let params = fl_url
-            .get_connection_params(
-                Some(443),
-                #[cfg(all(unix, feature = "with-ssh"))]
-                None,
-            )
-            .await;
-        assert_eq!(params.resolved_ip, Some("15.0.0.5".parse().unwrap()));
-        assert_eq!(params.remote_endpoint.get_port(), Some(443));
-        #[cfg(feature = "_tls")]
-        assert_eq!(params.get_server_name(), "domain.com");
+        // Nothing was compiled, so nothing was dumped either.
+        assert_eq!(debug, "");
     }
 
     #[test]
@@ -1977,41 +812,9 @@ mod test {
         assert_eq!(fl_url.get_resolved_ip(), None);
     }
 
-    #[cfg(all(unix, feature = "with-ssh"))]
     #[test]
-    fn server_name_at_ip_url_behind_ssh() {
-        let fl_url = FlUrl::new("ssh://user@ssh.example.com:22->http://domain.com@10.0.0.7:8080/xxx");
-
-        assert!(fl_url.via_ssh());
-        assert_eq!(fl_url.get_resolved_ip(), Some("10.0.0.7".parse().unwrap()));
-        assert_eq!(fl_url.url_builder.get_host_port(), "domain.com:8080");
-        assert_eq!(fl_url.url_builder.get_path_and_query(), "/xxx");
-    }
-
-    /// `find_forbidden_request_target_byte` repeats the rule of
-    /// `MyHttpRequestBuilder::new`, so the two can drift. It has to refuse exactly
-    /// what the builder panics on: less would bring the panic back, more would fail
-    /// requests that used to go out.
-    #[test]
-    fn the_request_target_check_matches_my_http_client() {
-        for code in 0..=0x2ffu32 {
-            let Some(c) = char::from_u32(code) else {
-                continue;
-            };
-
-            let path = format!("/a{c}b?c=d");
-
-            let builder_path = path.clone();
-            let builder_panics = std::panic::catch_unwind(move || {
-                super::MyHttpRequestBuilder::new(hyper::Method::GET, builder_path.as_str());
-            })
-            .is_err();
-
-            assert_eq!(
-                super::find_forbidden_request_target_byte(path.as_str()).is_some(),
-                builder_panics,
-                "path with {c:?}"
-            );
-        }
+    fn a_server_name_at_ip_url_has_one() {
+        let fl_url = FlUrl::new("https://domain.com@15.0.0.5/xxx/fff");
+        assert_eq!(fl_url.get_resolved_ip(), Some("15.0.0.5".parse().unwrap()));
     }
 }

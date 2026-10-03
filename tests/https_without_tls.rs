@@ -41,7 +41,8 @@ async fn an_https_request_with_no_connection_reuse_is_refused() {
 }
 
 #[tokio::test]
-async fn try_new_still_accepts_an_https_url() {
-    // The url itself is valid: it is this build that can not serve it.
-    assert!(FlUrl::try_new(URL).is_ok());
+async fn the_builder_still_accepts_an_https_url() {
+    // The url itself is valid: it is this build that can not serve it, and it says so
+    // when the request is sent.
+    assert!(FlUrl::new(URL).get_error().is_none());
 }

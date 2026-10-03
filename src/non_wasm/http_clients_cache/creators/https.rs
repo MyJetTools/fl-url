@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
-use my_http_client::{http1::MyHttpClient, http1_hyper::MyHttpHyperClient, http2::MyHttp2Client};
+use my_http_client::{
+    http1::MyHttpClient, http1_hyper::MyHttpHyperClient, http2::MyHttp2Client, MyHttpClientError,
+};
 use my_tls::tokio_rustls::client::TlsStream;
 
 use tokio::net::TcpStream;
@@ -51,9 +53,10 @@ impl HttpConnectionResolver<TlsStream<TcpStream>, HttpsConnector> for HttpsConne
     async fn get_http_connection(
         &self,
         params: &ConnectionParams<'_>,
-    ) -> Arc<MyHttpClientWrapper<TlsStream<TcpStream>, HttpsConnector>> {
+    ) -> Result<Arc<MyHttpClientWrapper<TlsStream<TcpStream>, HttpsConnector>>, MyHttpClientError>
+    {
         let key = super::super::utils::get_https_connection_key(params);
-        Self::create_connection(params, key)
+        Ok(Self::create_connection(params, key))
     }
 
     async fn put_connection_back(
@@ -68,8 +71,9 @@ impl HttpConnectionResolver<TlsStream<TcpStream>, HttpsConnector> for FlUrlHttpC
     async fn get_http_connection(
         &self,
         params: &ConnectionParams<'_>,
-    ) -> Arc<MyHttpClientWrapper<TlsStream<TcpStream>, HttpsConnector>> {
-        self.get_https_connection(params).await
+    ) -> Result<Arc<MyHttpClientWrapper<TlsStream<TcpStream>, HttpsConnector>>, MyHttpClientError>
+    {
+        Ok(self.get_https_connection(params).await)
     }
 
     async fn put_connection_back(

@@ -106,25 +106,21 @@ impl CompiledHttpRequest {
         }
     }
 
-    pub fn as_hyper(&self) -> &my_http_client::http::request::Request<Full<Bytes>> {
+    /// `None` for a request compiled for the own HTTP/1.1 implementation. The
+    /// connection key carries the mode, so a request only meets a connection of its
+    /// own mode — `None` is that rule broken, and the request fails with it.
+    pub fn as_hyper(&self) -> Option<&my_http_client::http::request::Request<Full<Bytes>>> {
         match &self.inner {
-            CompiledHttpRequestInner::Hyper(request) => request,
-            CompiledHttpRequestInner::MyHttpClient(_) => {
-                panic!("Can no unwrap request as hyper");
-            }
+            CompiledHttpRequestInner::Hyper(request) => Some(request),
+            CompiledHttpRequestInner::MyHttpClient(_) => None,
         }
     }
 
-    pub fn unwrap_as_hyper(&self) -> my_http_client::http::request::Request<Full<Bytes>> {
-        self.as_hyper().clone()
-    }
-
-    pub fn as_my_http_client_request(&self) -> &my_http_client::http1::MyHttpRequest {
+    /// `None` for a request compiled for hyper — see [`Self::as_hyper`].
+    pub fn as_my_http_client_request(&self) -> Option<&my_http_client::http1::MyHttpRequest> {
         match &self.inner {
-            CompiledHttpRequestInner::Hyper(_) => {
-                panic!("Can no unwrap request as my_http_client");
-            }
-            CompiledHttpRequestInner::MyHttpClient(my_http_request) => my_http_request,
+            CompiledHttpRequestInner::Hyper(_) => None,
+            CompiledHttpRequestInner::MyHttpClient(my_http_request) => Some(my_http_request),
         }
     }
 }

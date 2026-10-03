@@ -49,16 +49,17 @@ impl MyHttpClientConnector<TlsStream<TcpStream>> for HttpsConnector {
             self.accept_invalid_certificate,
         );
 
-        if let Err(err) = client_config {
-            return Err(
-                my_http_client::MyHttpClientError::CanNotConnectToRemoteHost(format!(
-                    "{}. Err:{}",
-                    target, err
-                )),
-            );
-        }
-
-        let mut client_config = client_config.unwrap();
+        let mut client_config = match client_config {
+            Ok(client_config) => client_config,
+            Err(err) => {
+                return Err(
+                    my_http_client::MyHttpClientError::CanNotConnectToRemoteHost(format!(
+                        "{}. Err:{}",
+                        target, err
+                    )),
+                );
+            }
+        };
 
         if self.h2 {
             client_config.alpn_protocols = vec![b"h2".to_vec()];

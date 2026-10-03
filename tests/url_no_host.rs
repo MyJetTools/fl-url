@@ -1,18 +1,19 @@
-//! `FlUrl::try_new` on a url that names no host.
+//! A `FlUrl` made of a url that names no host.
 //!
 //! Such a url used to be accepted and then panic when a request was built from it
 //! (the url builder slices the host out by offsets that an empty host turns
 //! backwards). The url comes from a service's settings, so an empty value has to
-//! come back as an `Err` the service can report.
+//! come back as an `Err` the service can report — from the request, since `FlUrl` is
+//! a builder and none of its steps can fail.
 #![cfg(not(target_arch = "wasm32"))]
 
 use flurl::{FlUrl, FlUrlError};
 
 fn assert_invalid_url(url: &str) {
-    match FlUrl::try_new(url) {
-        Err(FlUrlError::InvalidUrl(_)) => {}
-        Err(err) => panic!("{url:?}: unexpected error {err:?}"),
-        Ok(_) => panic!("{url:?} must be rejected"),
+    match FlUrl::new(url).get_error() {
+        Some(FlUrlError::InvalidUrl(_)) => {}
+        Some(err) => panic!("{url:?}: unexpected error {err:?}"),
+        None => panic!("{url:?} must be rejected"),
     }
 }
 
@@ -52,11 +53,36 @@ fn a_unix_socket_url_with_no_path_is_rejected() {
 
 #[test]
 fn the_error_quotes_the_url() {
-    let Err(FlUrlError::InvalidUrl(message)) = FlUrl::try_new("https://") else {
+    let fl_url = FlUrl::new("https://");
+
+    let Some(FlUrlError::InvalidUrl(message)) = fl_url.get_error() else {
         panic!("https:// must be rejected");
     };
 
     assert_eq!(message, "Invalid url 'https://': it names no host");
+}
+
+// What used to panic: a path appended to a url with no host. Now every step after
+// the bad url is skipped, and the request returns the error of the url.
+#[tokio::test]
+async fn the_request_returns_the_error_whatever_was_appended() {
+    for url in ["", " ", "http://", "https://", "http://:8080", "http:///path", "/"] {
+        let result = FlUrl::new(url)
+            .append_path_segment("api")
+            .append_query_param("a", Some("b"))
+            .append_raw_ending_to_url("/raw?c=d")
+            .with_header("X-Api-Key", "secret")
+            .get()
+            .await;
+
+        match result {
+            Err(FlUrlError::InvalidUrl(message)) => {
+                assert!(message.ends_with("it names no host"), "{url:?}: {message}")
+            }
+            Err(err) => panic!("{url:?}: unexpected error {err:?}"),
+            Ok(_) => panic!("{url:?}: nothing can be sent to a url with no host"),
+        }
+    }
 }
 
 // The tunnel itself is fine here; it is the url behind it that names no host.
@@ -95,7 +121,7 @@ fn a_url_with_a_host_is_still_accepted() {
         "domain.com@15.0.0.5:8080",
         "https://domain.com@[2001:db8::1]:8443",
     ] {
-        assert!(FlUrl::try_new(url).is_ok(), "{url}");
+        assert!(FlUrl::new(url).get_error().is_none(), "{url}");
     }
 }
 
@@ -112,6 +138,6 @@ fn a_unix_socket_url_is_still_accepted() {
         "unix://var/run/docker.sock",
         "unix+http://var/run/docker.sock",
     ] {
-        assert!(FlUrl::try_new(url).is_ok(), "{url}");
+        assert!(FlUrl::new(url).get_error().is_none(), "{url}");
     }
 }

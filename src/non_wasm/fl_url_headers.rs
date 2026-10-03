@@ -1,4 +1,4 @@
-use my_http_client::{HeaderValuePosition, MyHttpClientHeadersBuilder};
+use my_http_client::{HeaderValuePosition, MyHttpClientHeadersBuilder, RequestBuildError};
 
 use crate::FlUrlError;
 
@@ -31,22 +31,23 @@ impl FlUrlHeaders {
        }
     */
     pub fn add(&mut self, name: &str, value: &str) {
-        // my-http-client's header builder panics on a header it must not put on the
-        // wire. A header value comes from settings as often as from code — an api key
-        // read together with its trailing new line — so here it is the request that
-        // fails, with an error.
-        if let Err(reason) = validate_header(name, value) {
-            if self.invalid_header.is_none() {
-                self.invalid_header = Some(reason);
+        // What must not be put on the wire is my-http-client's to decide: its header
+        // builder refuses such a header and adds nothing. A header value comes from
+        // settings as often as from code — an api key read together with its trailing
+        // new line — so the refusal is kept, and it is the request that fails with it.
+        let pos = match self.headers.add_header(name, value) {
+            Ok(pos) => pos,
+            Err(err) => {
+                if self.invalid_header.is_none() {
+                    self.invalid_header = Some(describe_refused_header(name, &err));
+                }
+                return;
             }
-            return;
-        }
+        };
 
         if rust_extensions::str_utils::compare_strings_case_insensitive(name, "connection") {
             self.has_connection_header = true;
         }
-
-        let pos = self.headers.add_header(name, value);
 
         if name.eq_ignore_ascii_case("host") {
             self.host_header_value = Some(pos);
@@ -75,8 +76,7 @@ impl FlUrlHeaders {
 
     pub fn get_host_header_value(&self) -> Option<&str> {
         let host_value_pos = self.host_header_value.as_ref()?;
-        let result = self.headers.get_value(host_value_pos);
-        Some(result)
+        self.headers.get_value(host_value_pos)
     }
 
     pub fn len(&self) -> usize {
@@ -100,55 +100,27 @@ impl my_http_utils::schema::client::HeaderBuilder for FlUrlHeaders {
     }
 }
 
-/// Refuses exactly what my-http-client's `write_header` refuses with a panic: an
-/// empty name, a name that is not an HTTP token, a value with CR, LF or NUL in it.
-fn validate_header(name: &str, value: &str) -> Result<(), String> {
-    if name.is_empty() {
-        return Err("Header name must not be empty".to_string());
-    }
-
-    if let Some(byte) = name.bytes().find(|byte| !is_header_name_byte(*byte)) {
-        return Err(format!(
+/// What the request fails with for a header my-http-client refused. The message names
+/// the header and the byte, never the value: that is where the secrets are.
+fn describe_refused_header(name: &str, err: &RequestBuildError) -> String {
+    match err {
+        RequestBuildError::HeaderNameIsEmpty => "Header name must not be empty".to_string(),
+        RequestBuildError::ForbiddenByteInHeaderName(byte) => format!(
             "Header name '{}' contains forbidden byte 0x{:02x}",
             name.escape_debug(),
             byte
-        ));
-    }
-
-    // The value itself stays out of the message: that is where the secrets are.
-    if let Some(byte) = find_forbidden_header_value_byte(value) {
-        return Err(format!(
+        ),
+        RequestBuildError::ForbiddenByteInHeaderValue(byte) => format!(
             "Value of header '{}' contains forbidden control byte 0x{:02x}",
             name, byte
-        ));
+        ),
+        other => format!("Header '{}' can not be sent: {}", name.escape_debug(), other),
     }
-
-    Ok(())
-}
-
-/// CR, LF and NUL — a header value carrying one would split the header block.
-pub(crate) fn find_forbidden_header_value_byte(value: &str) -> Option<u8> {
-    value
-        .bytes()
-        .find(|byte| matches!(byte, b'\r' | b'\n' | 0))
-}
-
-fn is_header_name_byte(byte: u8) -> bool {
-    matches!(
-        byte,
-        b'!' | b'#' | b'$' | b'%' | b'&' | b'\'' | b'*' | b'+' | b'-' | b'.'
-        | b'^' | b'_' | b'`' | b'|' | b'~'
-        | b'0'..=b'9' | b'a'..=b'z' | b'A'..=b'Z'
-    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn panics(action: impl FnOnce() + std::panic::UnwindSafe) -> bool {
-        std::panic::catch_unwind(action).is_err()
-    }
 
     #[test]
     fn a_valid_header_is_kept() {
@@ -212,65 +184,5 @@ mod tests {
         let reason = format!("{:?}", headers.ensure_valid().unwrap_err());
         assert!(reason.contains("'First'"), "{reason}");
         assert_eq!(headers.len(), 1);
-    }
-
-    /// `validate_header` repeats my-http-client's rules, so the two can drift. A
-    /// header it lets through must never reach the panic it stands in front of.
-    #[test]
-    fn nothing_that_passes_the_check_panics_in_my_http_client() {
-        for code in 0..=0x2ffu32 {
-            let Some(c) = char::from_u32(code) else {
-                continue;
-            };
-
-            let name = format!("X{c}Name");
-            let value = format!("a{c}b");
-
-            let mut headers = FlUrlHeaders::new();
-            assert!(
-                !panics(move || headers.add(name.as_str(), "value")),
-                "name with {c:?}"
-            );
-
-            let mut headers = FlUrlHeaders::new();
-            assert!(
-                !panics(move || headers.add("X-Name", value.as_str())),
-                "value with {c:?}"
-            );
-        }
-    }
-
-    /// The other direction: the check must not refuse more than my-http-client does,
-    /// or a header that used to be sent would start failing requests.
-    #[test]
-    fn nothing_my_http_client_accepts_is_refused() {
-        for code in 0..=0x2ffu32 {
-            let Some(c) = char::from_u32(code) else {
-                continue;
-            };
-
-            let name = format!("X{c}Name");
-            let value = format!("a{c}b");
-
-            let accepted_name = name.clone();
-            let name_is_accepted = !panics(move || {
-                MyHttpClientHeadersBuilder::new().add_header(accepted_name.as_str(), "value");
-            });
-            assert_eq!(
-                validate_header(name.as_str(), "value").is_ok(),
-                name_is_accepted,
-                "name with {c:?}"
-            );
-
-            let accepted_value = value.clone();
-            let value_is_accepted = !panics(move || {
-                MyHttpClientHeadersBuilder::new().add_header("X-Name", accepted_value.as_str());
-            });
-            assert_eq!(
-                validate_header("X-Name", value.as_str()).is_ok(),
-                value_is_accepted,
-                "value with {c:?}"
-            );
-        }
     }
 }
