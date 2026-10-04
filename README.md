@@ -220,8 +220,9 @@ match FlUrl::new(url_from_settings)
 `FlUrl::new` does not panic on a url it can not use.
 
 To check a url without sending anything — at start-up, say — ask the builder for the
-error it is carrying. `get_url_builder()` gives the url as it stands, and is `None`
-once there is an error:
+error it is carrying. `get_url_builder()` gives the url as it stands, and once there
+is an error it gives that error instead, so `get_url_builder().unwrap()` panics with
+what was wrong with the url:
 
 ```rust
 use flurl::FlUrl;

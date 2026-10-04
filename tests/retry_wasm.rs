@@ -326,7 +326,10 @@ async fn a_url_that_can_not_be_used_is_the_error_of_the_request() {
         "{:?}",
         fl_url.get_error()
     );
-    assert!(fl_url.get_url_builder().is_none());
+    assert!(matches!(
+        fl_url.get_url_builder(),
+        Err(FlUrlError::InvalidUrl(_))
+    ));
 
     let result = fl_url.post(HttpRequestBody::as_json(&["payload"])).await;
 

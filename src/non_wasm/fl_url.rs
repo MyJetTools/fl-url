@@ -108,9 +108,10 @@ impl FlUrl {
     }
 
     /// The url as it stands: what [`Self::new`] was given plus everything appended to
-    /// it since. `None` once the builder has met an error.
-    pub fn get_url_builder(&self) -> Option<&UrlBuilder> {
-        self.inner.as_ref().ok().map(|inner| &inner.url_builder)
+    /// it since — or, once the builder has met an error, that error, so an `unwrap`
+    /// says what was wrong with the url.
+    pub fn get_url_builder(&self) -> Result<&UrlBuilder, &FlUrlError> {
+        self.inner.as_ref().map(|inner| &inner.url_builder)
     }
 
     /// `false` once the builder has met an error.
@@ -728,7 +729,7 @@ mod tests {
         let fl_url = FlUrl::new("http://");
 
         assert_no_host(fl_url.get_error());
-        assert!(fl_url.get_url_builder().is_none());
+        assert_no_host(fl_url.get_url_builder().err());
         assert_eq!(fl_url.get_resolved_ip(), None);
         assert_eq!(fl_url.to_string(), format!("Error: InvalidUrl({NO_HOST:?})"));
     }

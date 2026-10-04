@@ -82,9 +82,10 @@ impl FlUrl {
 
     /// The url as it stands: what [`Self::new`] was given — resolved against the page
     /// origin when it was a relative one — plus everything appended to it since.
-    /// `None` once the builder has met an error.
-    pub fn get_url_builder(&self) -> Option<&UrlBuilder> {
-        self.inner.as_ref().ok().map(|inner| &inner.url_builder)
+    /// Once the builder has met an error it is that error instead, so an `unwrap`
+    /// says what was wrong with the url.
+    pub fn get_url_builder(&self) -> Result<&UrlBuilder, &FlUrlError> {
+        self.inner.as_ref().map(|inner| &inner.url_builder)
     }
 
     pub fn compress(self) -> Self {
