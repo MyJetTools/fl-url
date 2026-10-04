@@ -160,7 +160,7 @@ impl FlUrl {
     }
 
     /// The largest response body a buffered read accepts, in bytes; a bigger one
-    /// fails the read with [`FlUrlError::ResponseBodyTooLarge`]. 10 MB by default
+    /// fails the read with [`FlUrlError::ResponseBodyTooLarge`]. 100 MB by default
     /// ([`crate::DEFAULT_MAX_RESPONSE_BODY_SIZE`]); `usize::MAX` lifts the limit. The
     /// browser downloads the body whole before it can be measured, so the limit keeps
     /// it out of wasm memory, not out of the browser's — unless the response

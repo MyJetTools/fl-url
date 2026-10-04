@@ -1,5 +1,5 @@
 //! A buffered read refuses a response body bigger than `set_max_response_body_size`
-//! (10 MB by default) instead of holding whatever the server sends: one that announces
+//! (100 MB by default) instead of holding whatever the server sends: one that announces
 //! its size is refused unread, one that does not is cut off once it grows past the
 //! limit, and a gzip body is measured once decoded as well. A streamed body is not
 //! limited.
@@ -132,8 +132,8 @@ async fn a_gzip_body_is_measured_once_decoded() {
 }
 
 #[tokio::test]
-async fn the_default_limit_is_ten_megabytes() {
-    assert_eq!(DEFAULT_MAX_RESPONSE_BODY_SIZE, 10 * 1024 * 1024);
+async fn the_default_limit_is_a_hundred_megabytes() {
+    assert_eq!(DEFAULT_MAX_RESPONSE_BODY_SIZE, 100 * 1024 * 1024);
 
     let body = vec![b'x'; DEFAULT_MAX_RESPONSE_BODY_SIZE + 1];
     for mode in MODES {

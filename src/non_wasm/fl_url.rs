@@ -267,7 +267,7 @@ impl FlUrl {
 
     /// The largest response body a buffered read (`get_body_as_slice`, `get_json`,
     /// `get_body_as_str`, `receive_body`) accepts, in bytes; a bigger one fails the
-    /// read with [`FlUrlError::ResponseBodyTooLarge`]. 10 MB by default
+    /// read with [`FlUrlError::ResponseBodyTooLarge`]. 100 MB by default
     /// ([`crate::DEFAULT_MAX_RESPONSE_BODY_SIZE`]); `usize::MAX` lifts the limit. A
     /// streamed body (`get_body_as_stream`) is not limited — it is never held whole.
     ///

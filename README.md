@@ -1246,13 +1246,13 @@ let body = response.get_body_as_slice().await?;
 ### Response Body Size
 
 A buffered read — `get_body_as_slice`, `get_json`, `get_body_as_str`, `receive_body` —
-holds the whole body in memory, so it accepts at most 10 MB
+holds the whole body in memory, so it accepts at most 100 MB
 (`flurl::DEFAULT_MAX_RESPONSE_BODY_SIZE`). A bigger body fails the read with
 `FlUrlError::ResponseBodyTooLarge { limit }`.
 
 ```rust
 let mut response = FlUrl::new("https://api.example.com/export")
-    .set_max_response_body_size(100 * 1024 * 1024) // usize::MAX lifts the limit
+    .set_max_response_body_size(1024 * 1024 * 1024) // usize::MAX lifts the limit
     .get()
     .await?;
 
