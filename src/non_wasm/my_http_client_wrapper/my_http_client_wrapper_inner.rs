@@ -191,7 +191,7 @@ mod tests {
     }
 
     fn own_http1_request() -> CompiledHttpRequest {
-        let request = MyHttpRequestBuilder::new(Method::GET, "/").unwrap().build();
+        let request = MyHttpRequestBuilder::new(Method::GET, "/").build().unwrap();
         CompiledHttpRequest::new_my_http_client(request, Method::GET)
     }
 

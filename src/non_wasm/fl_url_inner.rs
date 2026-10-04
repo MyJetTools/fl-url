@@ -892,45 +892,47 @@ impl FlUrlInner {
         // MyHttpRequestBuilder refuses a request line and a header it must not put on
         // the wire. The request line and the Host header are made of the url, and the
         // url comes from settings — so what is refused in them is an error of the url,
-        // the way it is in the hyper modes.
-        let mut builder =
-            MyHttpRequestBuilder::new(method, &path_and_query).map_err(|err| match err {
-                RequestBuildError::ForbiddenByteInPath(byte) => invalid_url(
-                    &self.url_builder,
-                    format!("the path and query contain forbidden byte 0x{:02x}", byte),
-                ),
-                other => other.into(),
-            })?;
+        // the way it is in the hyper modes. The builder keeps the first error it meets
+        // and skips every step after it, so each of the two is checked right after the
+        // step that takes it.
+        let mut builder = MyHttpRequestBuilder::new(method, &path_and_query);
+
+        if let Some(RequestBuildError::ForbiddenByteInPath(byte)) = builder.get_error() {
+            return Err(invalid_url(
+                &self.url_builder,
+                format!("the path and query contain forbidden byte 0x{:02x}", byte),
+            ));
+        }
 
         self.headers.ensure_valid()?;
 
         if !self.headers.has_host_header() {
-            builder
-                .append_header("Host", self.url_builder.get_host_port())
-                .map_err(|err| match err {
-                    RequestBuildError::ForbiddenByteInHeaderValue(byte) => invalid_url(
-                        &self.url_builder,
-                        format!("the host contains forbidden control byte 0x{:02x}", byte),
-                    ),
-                    other => other.into(),
-                })?;
+            builder = builder.append_header("Host", self.url_builder.get_host_port());
+
+            if let Some(RequestBuildError::ForbiddenByteInHeaderValue(byte)) = builder.get_error()
+            {
+                return Err(invalid_url(
+                    &self.url_builder,
+                    format!("the host contains forbidden control byte 0x{:02x}", byte),
+                ));
+            }
         }
 
         if self.url_builder.is_unix_socket() {
-            builder.append_header("Accept", "*/*")?;
+            builder = builder.append_header("Accept", "*/*");
         } else {
             if !self.headers.has_connection_header {
                 if !self.do_not_reuse_connection {
-                    builder.append_header("Connection", "keep-alive")?;
+                    builder = builder.append_header("Connection", "keep-alive");
                 }
             }
         }
 
         for header in self.headers.iter() {
-            builder.append_header(header.0, header.1)?;
+            builder = builder.append_header(header.0, header.1);
         }
 
-        Ok(builder.build_with_body(body))
+        Ok(builder.build_with_body(body)?)
     }
 
     pub async fn get(mut self) -> Result<FlUrlResponse, FlUrlError> {
