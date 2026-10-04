@@ -38,11 +38,14 @@ leave the dependency tree. In a build with neither, a request to an `https://` u
 returns `FlUrlError::UnsupportedScheme` — `FlUrl does not support https: it is
 compiled without a TLS provider feature` — before a socket is opened.
 
-Pick one:
+TLS is decided once for the whole application — a provider feature turned on
+anywhere in the build turns TLS on for every user of `flurl` in it. There are
+three answers: no provider feature at all, `with-ring-tls`, or `with-rust-tls`.
+None of them is a default — ask the user which of the three it is to be:
 
 ```toml
 [dependencies]
-# ring — the default recommendation: mature, very widely deployed.
+# ring — mature, very widely deployed; costs a bundled C/assembly build.
 flurl = { tag = "0.7.0", git = "https://github.com/MyJetTools/fl-url.git", features = [
     "with-ring-tls",
 ] }
@@ -74,7 +77,7 @@ flurl = { tag = "0.7.0", git = "https://github.com/MyJetTools/fl-url.git", featu
 | Feature | Default | What it does |
 | --- | --- | --- |
 | `with-ring-tls` | off | TLS on the **ring** provider. Enables `https://` plus [`with_client_certificate`](#client-certificate). Mature and widely deployed; costs a bundled C/assembly build. No `aws-lc-sys` either way. |
-| `with-rust-tls` | off | The same, on a **pure-Rust** provider (`rustls-graviola`) — no C toolchain at all. Builds only on x86_64 and aarch64, and the implementation is far younger than ring. Prefer `with-ring-tls` unless dropping the C toolchain is the point. |
+| `with-rust-tls` | off | The same, on a **pure-Rust** provider (`rustls-graviola`) — no C toolchain at all. Builds only on x86_64 and aarch64, and the implementation is far younger than ring. |
 | `dangerous-tls` | off | A modifier, not a TLS switch: it makes [`accept_invalid_certificate()`](#accept-invalid-certificates) actually skip server-cert verification. Combine it with a provider feature — on its own the TLS code compiles but no provider is installed, so https fails at connect time. |
 | `with-ssh` | off | [SSH tunneling](#ssh-tunneling-with-ssh-feature) (`ssh://…->http://…`, `ssh://…->https://…` and `ssh://…->/path/to.sock` urls). Unix only. Built on `my-ssh`, which is `russh` underneath — no `libssh2` or OpenSSL, but this is the one feature that links `aws-lc-sys` (a bundled C build). |
 

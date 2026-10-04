@@ -18,17 +18,18 @@ with-ssh = ["dep:my-ssh"]
 # installed" error rather than panicking.
 _tls = ["dep:my-tls"]
 
-# Pick exactly one of the two provider features. Both enable `https://` and
-# `with_client_certificate()`; they differ only in the rustls CryptoProvider.
+# TLS is decided once for the whole application: neither provider feature, or
+# exactly one of the two. Neither is a default - the user picks. Both enable
+# `https://` and `with_client_certificate()`; they differ only in the rustls
+# CryptoProvider.
 #
-# ring — the default recommendation. Mature and very widely deployed; costs a
-# bundled C/assembly build (no aws-lc-sys either way).
+# ring — mature and very widely deployed; costs a bundled C/assembly build (no
+# aws-lc-sys either way).
 with-ring-tls = ["_tls", "my-tls/with-ring-crypto-providers"]
 
 # Pure Rust — no C toolchain anywhere, via rustls-graviola. Trade-offs: it builds
 # ONLY on x86_64 and aarch64 (a hard `compile_error!` elsewhere) and the crypto
-# implementation is far younger and less deployed than ring. Prefer
-# `with-ring-tls` unless getting rid of the C toolchain is the point.
+# implementation is far younger and less deployed than ring.
 #
 # Enabling both — which `--all-features` does — is not an error: my-tls resolves
 # the conflict in favour of ring.
