@@ -92,7 +92,7 @@ async fn the_documented_unix_socket_forms_reach_the_socket() {
             // two slashes after the scheme: the path is absolute, its own slash is
             // the second one
             format!("http+unix:/{path}"),
-            // three slashes: the form the README shows
+            // three slashes: the form docs/unix-socket.md shows
             format!("http+unix://{path}"),
         ],
     )

@@ -271,7 +271,7 @@ async fn h2_goes_through_the_tunnel() {
     a_request_goes_through_the_tunnel(FlUrlMode::H2, Proto::H2c).await;
 }
 
-/// The form the README shows: the ssh host is a name. `localhost` is one, and
+/// The form docs/ssh.md shows: the ssh host is a name. `localhost` is one, and
 /// resolving it needs no network.
 #[tokio::test]
 async fn a_host_name_works_as_the_ssh_host() {

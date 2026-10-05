@@ -3,7 +3,7 @@
 //! Both cases below used to panic inside my-ssh on the first request, and both start
 //! from a url that `FlUrl` rightly accepts:
 //!
-//! * the ssh host is a host name, not an ip — the form the README shows,
+//! * the ssh host is a host name, not an ip — the form docs/ssh.md shows,
 //!   `ssh://user@ssh.example.com:22->http://localhost:8080`. my-ssh parsed the host
 //!   as an ip address and unwrapped the result;
 //! * the ssh user name is longer than 255 bytes. my-ssh built `user@host:port` in a
