@@ -12,9 +12,9 @@ pub enum FlUrlError {
     IoError(std::io::Error),
     CanNotConvertToUtf8(std::str::Utf8Error),
     ReadingHyperBodyError(String),
-    /// A buffered read met a response body bigger than `set_max_response_body_size`
-    /// allows ([`crate::DEFAULT_MAX_RESPONSE_BODY_SIZE`] by default). `limit` is that
-    /// size in bytes; a gzip body is measured both as it came and once decoded.
+    /// The response body is bigger than the `limit`, in bytes, it was read into memory
+    /// with: `into_vec`, `into_string` and `into_json` of the reader of the body each
+    /// take one. A gzip body which is given decoded is measured decoded.
     ResponseBodyTooLarge { limit: usize },
     /// The url can not be used: it names no host, its scheme is unknown, its
     /// `name@ip` or ssh tunnel part is malformed, or it carries a byte that must not
@@ -113,7 +113,12 @@ impl From<my_tls::tokio_rustls::rustls::Error> for FlUrlError {
 #[cfg(not(target_arch = "wasm32"))]
 impl From<my_http_client::MyHttpClientError> for FlUrlError {
     fn from(value: my_http_client::MyHttpClientError) -> Self {
-        Self::MyHttpClientError(value)
+        match value {
+            my_http_client::MyHttpClientError::ResponseBodyTooLarge { limit } => {
+                Self::ResponseBodyTooLarge { limit }
+            }
+            other => Self::MyHttpClientError(other),
+        }
     }
 }
 

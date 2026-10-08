@@ -227,7 +227,7 @@ async fn a_restarting_server_is_ridden_out(mode: FlUrlMode, proto: Proto) -> usi
     let elapsed = started.elapsed();
 
     assert_eq!(response.get_status_code(), 200);
-    assert_eq!(response.get_body_as_str().await.unwrap(), "200");
+    assert_eq!(response.get_body().unwrap().into_string(usize::MAX).await.unwrap(), "200");
 
     let requests = seen.requests();
     assert_eq!(requests.len(), 3, "two 503s, then the 200");
@@ -302,7 +302,7 @@ async fn when_the_attempts_run_out_the_last_5xx_is_returned() {
         .unwrap();
 
     assert_eq!(response.get_status_code(), 504);
-    assert_eq!(response.get_body_as_str().await.unwrap(), "504");
+    assert_eq!(response.get_body().unwrap().into_string(usize::MAX).await.unwrap(), "504");
     assert_eq!(seen.requests().len(), 3, "the first attempt and the two more it was allowed");
 }
 
@@ -399,7 +399,7 @@ async fn a_refused_connection_is_replayed_until_the_service_is_back() {
         .unwrap();
 
     assert_eq!(response.get_status_code(), 200);
-    assert_eq!(response.get_body_as_str().await.unwrap(), "200");
+    assert_eq!(response.get_body().unwrap().into_string(usize::MAX).await.unwrap(), "200");
     assert!(started.elapsed() >= back_after);
     assert_eq!(seen.requests().len(), 1, "only the attempt after the comeback got through");
 }

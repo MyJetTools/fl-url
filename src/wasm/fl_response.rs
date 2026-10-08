@@ -1,32 +1,24 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
 
-use serde::de::DeserializeOwned;
 use my_http_utils::UrlBuilder;
 
-use crate::wasm::fetch::{collect_headers, read_response_body};
-use crate::{FlUrlError, FlUrlReadingHeaderError};
+use crate::wasm::fetch::collect_headers;
+use crate::{FlUrlBodyReader, FlUrlError, FlUrlReadingHeaderError};
+
+const BODY_IS_TAKEN: &str = "response body is already taken";
 
 /// wasm counterpart of the native `FlUrlResponse`.
 ///
-/// Status and headers are read eagerly from the `fetch` `Response`; the body is
-/// read (and cached) lazily on the first `get_body_*` / `get_json` /
-/// `receive_body` call, matching the native lazy-load semantics.
+/// The status and the headers are read from the `fetch` `Response` as it comes; the
+/// body is not read yet — [`Self::get_body`] gives the reader it is read with.
 pub struct FlUrlResponse {
     pub url: UrlBuilder,
     status_code: u16,
     headers: Vec<(String, String)>,
-    // Consumed the first time the body is read; `array_buffer()` can only run once.
-    response: Option<web_sys::Response>,
-    // The request's AbortController, reused to bound the body read when a
-    // response-body timeout is configured.
-    controller: Option<web_sys::AbortController>,
-    body_timeout_millis: Option<i32>,
-    max_body_size: usize,
-    // `false` for a response whose `Content-Length` describes a body it does not carry:
-    // the answer to a HEAD request, a 204 or a 304.
-    carries_body: bool,
-    body: Option<Vec<u8>>,
+    // The body, until `get_body` takes it. A response dropped with its body in it
+    // ends the download of that body.
+    body: Option<FlUrlBodyReader>,
 }
 
 impl Debug for FlUrlResponse {
@@ -39,54 +31,39 @@ impl Debug for FlUrlResponse {
 }
 
 impl FlUrlResponse {
+    /// `controller` is the request's `AbortController`: the reader of the body bounds
+    /// the read with it when `body_timeout_millis` (`set_response_body_timeout`) is
+    /// set, and ends the download with it when the body is not read to its end.
     pub(crate) fn new(
         url: UrlBuilder,
         response: web_sys::Response,
         controller: Option<web_sys::AbortController>,
         body_timeout_millis: Option<i32>,
-        max_body_size: usize,
-        method: &str,
     ) -> Self {
         let status_code = response.status();
-        let carries_body = !method.eq_ignore_ascii_case("HEAD")
-            && !(100..200).contains(&status_code)
-            && status_code != 204
-            && status_code != 304;
         let headers = collect_headers(&response.headers());
         Self {
             url,
             status_code,
             headers,
-            response: Some(response),
-            controller,
-            body_timeout_millis,
-            max_body_size,
-            carries_body,
-            body: None,
+            body: Some(FlUrlBodyReader::of_response(
+                response,
+                controller,
+                body_timeout_millis,
+            )),
         }
     }
 
-    /// Reads the body on the first call and keeps it for the next ones.
-    async fn load_body(&mut self) -> Result<&mut Vec<u8>, FlUrlError> {
-        let body = match self.body.take() {
-            Some(body) => body,
-            None => {
-                let response = self.response.take().ok_or_else(|| {
-                    FlUrlError::FetchError("response body has already been consumed".to_string())
-                })?;
-
-                read_response_body(
-                    &response,
-                    self.controller.as_ref(),
-                    self.body_timeout_millis,
-                    self.max_body_size,
-                    self.carries_body,
-                )
-                .await?
-            }
-        };
-
-        Ok(self.body.insert(body))
+    /// The body of the response: nothing of it is read by then, and the reader is how
+    /// it is read — piece by piece with `next_item()`, or as a whole within a limit
+    /// with `into_vec(max_size)`, `into_string(max_size)` and `into_json(max_size)`.
+    ///
+    /// The body is taken out of the response, which keeps its status and its headers.
+    /// It is there to be taken once: the next call fails.
+    pub fn get_body(&mut self) -> Result<FlUrlBodyReader, FlUrlError> {
+        self.body
+            .take()
+            .ok_or_else(|| FlUrlError::FetchError(BODY_IS_TAKEN.to_string()))
     }
 
     pub fn get_status_code(&self) -> u16 {
@@ -123,30 +100,6 @@ impl FlUrlResponse {
         for (name, value) in &self.headers {
             dest.insert(name.clone(), Some(value.clone()));
         }
-    }
-
-    pub async fn get_body_as_slice(&mut self) -> Result<&[u8], FlUrlError> {
-        Ok(self.load_body().await?.as_slice())
-    }
-
-    pub async fn get_json<TResponse: DeserializeOwned>(&mut self) -> Result<TResponse, FlUrlError> {
-        let body = self.load_body().await?;
-        let result = serde_json::from_slice(body.as_slice())?;
-        Ok(result)
-    }
-
-    pub async fn receive_body(mut self) -> Result<Vec<u8>, FlUrlError> {
-        Ok(std::mem::take(self.load_body().await?))
-    }
-
-    pub async fn get_body_as_str(&mut self) -> Result<&str, FlUrlError> {
-        let body = self.load_body().await?;
-        Ok(std::str::from_utf8(body.as_slice())?)
-    }
-
-    #[deprecated(note = "Use get_body_as_str")]
-    pub async fn body_as_str(&mut self) -> Result<&str, FlUrlError> {
-        self.get_body_as_str().await
     }
 
     /// Always `false` under wasm — kept for API parity. The browser owns the

@@ -1,275 +1,189 @@
-use std::{collections::HashMap, fmt::Debug, time::Duration};
-
-use hyper::{header::CONNECTION, Method, StatusCode};
-use serde::de::DeserializeOwned;
-use my_http_utils::UrlBuilder;
-
-use crate::{
-    non_wasm::fl_response_as_stream::FlResponseAsStream, ConnectionReturner, FlUrlError,
-    FlUrlReadingHeaderError, ResponseBody,
+use std::{
+    collections::HashMap,
+    fmt::Debug,
+    pin::Pin,
+    task::{Context, Poll},
+    time::Duration,
 };
 
+use bytes::Bytes;
+use http::response::Parts;
+use http_body_util::BodyExt;
+use hyper::header::{CONNECTION, CONTENT_ENCODING};
+use my_http_client::{http1::MyHttpResponse, HyperResponse};
+use my_http_utils::UrlBuilder;
+
+use crate::{ConnectionReturner, FlUrlBodyReader, FlUrlError, FlUrlReadingHeaderError};
+
+const BODY_IS_TAKEN: &str = "Response body is already taken";
+
+/// A response as it is once its head is read: the status and the headers are here,
+/// and the body is not read yet — [`Self::get_body`] gives the reader it is read with.
 pub struct FlUrlResponse {
     pub url: UrlBuilder,
-    status_code: StatusCode,
-    response: ResponseBody,
-    body_read_timeout: Option<Duration>,
-    max_body_size: usize,
-    // What `Content-Length` says the body is, for a response which carries a body at
-    // all. Lets a buffered read refuse a body too large before reading any of it.
-    announced_body_size: Option<u64>,
-    decompress_gzip: bool,
-    // Owns the checked-out connection until the body is fully consumed. Dropped
-    // without returning (dispose) on error, `Connection: close`, or when the
-    // response is discarded with the body unread.
-    connection_returner: Option<Box<dyn ConnectionReturner>>,
+    // The head of the response: its status, its version and its headers.
+    head: Parts,
+    // The body, until `get_body` takes it. It owns the checked-out connection: a
+    // response dropped with its body in it drops the connection, which disposes it.
+    body: Option<FlUrlBodyReader>,
 }
 
 impl Debug for FlUrlResponse {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FlUrlResponse")
             .field("url", &self.url.to_string())
-            .field("status_code", &self.status_code)
+            .field("status_code", &self.head.status)
             .finish()
     }
 }
 
 impl FlUrlResponse {
+    /// A response made from the outside of a request of FlUrl: it has no connection
+    /// of the pool to settle, no timeout of the body and nothing to decode.
     pub fn from_http1_response<
         TStream: tokio::io::AsyncRead + tokio::io::AsyncWrite + Send + Sync + 'static,
     >(
         url: UrlBuilder,
-        response: my_http_client::http1::MyHttpResponse<TStream>,
+        response: MyHttpResponse<TStream>,
     ) -> Self {
+        Self::create(url, response, None, None, false)
+    }
+
+    /// The response to a request of FlUrl. `connection` is the connection it has come
+    /// over: it stays checked out until the body is read, and the reader of the body
+    /// puts it back — or disposes it — at that point.
+    pub(crate) fn of_request<
+        TStream: tokio::io::AsyncRead + tokio::io::AsyncWrite + Send + Sync + 'static,
+    >(
+        url: UrlBuilder,
+        response: MyHttpResponse<TStream>,
+        connection: Box<dyn ConnectionReturner>,
+        body_read_timeout: Option<Duration>,
+        accept_gzip: bool,
+    ) -> Self {
+        Self::create(url, response, Some(connection), body_read_timeout, accept_gzip)
+    }
+
+    fn create<TStream: tokio::io::AsyncRead + tokio::io::AsyncWrite + Send + Sync + 'static>(
+        url: UrlBuilder,
+        response: MyHttpResponse<TStream>,
+        connection: Option<Box<dyn ConnectionReturner>>,
+        body_read_timeout: Option<Duration>,
+        accept_gzip: bool,
+    ) -> Self {
+        let (head, body) = match response {
+            MyHttpResponse::Response(response) => response.into_parts(),
+            // The answer to a websocket handshake carries no body.
+            MyHttpResponse::WebSocketUpgrade { response, .. } => {
+                (response.into_parts().0, my_http_client::BodyReader::empty())
+            }
+        };
+
+        let body = FlUrlBodyReader::new(
+            body,
+            connection,
+            connection_can_be_reused(&head),
+            body_read_timeout,
+            accept_gzip && is_gzip(&head),
+        );
+
         Self {
-            status_code: response.status(),
-            response: ResponseBody::Hyper(response.into_response()),
             url,
-            body_read_timeout: None,
-            // A response made here from the outside has no FlUrl settings to take a
-            // limit from, so it reads a body of any size, as it always did; FlUrl's own
-            // requests set the limit they were given.
-            max_body_size: usize::MAX,
-            announced_body_size: None,
-            decompress_gzip: false,
-            connection_returner: None,
+            head,
+            body: Some(body),
         }
     }
 
-    pub(crate) fn set_body_read_timeout(&mut self, timeout: Option<Duration>) {
-        self.body_read_timeout = timeout;
-    }
-
-    pub(crate) fn set_max_body_size(&mut self, max_body_size: usize) {
-        self.max_body_size = max_body_size;
-    }
-
-    /// Takes the size `Content-Length` announces as the size of the body - unless the
-    /// response carries no body for all it says: the answer to a HEAD request, a 1xx,
-    /// a 204 or a 304 describes a body which is not there.
-    pub(crate) fn set_request_method(&mut self, method: &Method) {
-        let status = self.status_code.as_u16();
-        let carries_body = *method != Method::HEAD
-            && !(100..200).contains(&status)
-            && status != 204
-            && status != 304;
-
-        self.announced_body_size = if carries_body {
-            self.response.content_length()
-        } else {
-            None
-        };
-    }
-
-    pub(crate) fn set_decompress_gzip(&mut self, decompress_gzip: bool) {
-        self.decompress_gzip = decompress_gzip;
-    }
-
-    pub(crate) fn set_connection_returner(&mut self, returner: Box<dyn ConnectionReturner>) {
-        self.connection_returner = Some(returner);
-    }
-
-    /// Loads the body into memory and settles the checked-out connection: a
-    /// healthy connection goes back to the pool, a broken one (read error,
-    /// `Connection: close`, drop-worthy status) gets disposed.
-    async fn load_body(&mut self) -> Result<(), FlUrlError> {
-        let load_result = self
-            .response
-            .convert_to_slice_if_needed(
-                self.body_read_timeout,
-                self.max_body_size,
-                self.announced_body_size,
-            )
-            .await;
-
-        match load_result {
-            Ok(()) => {
-                // Ok(()) alone does not prove the body was read off the wire:
-                // after a CANCELLED earlier read the enum is already the
-                // materialized variant with body: None, and re-entry returns Ok
-                // without touching the socket. Only a body that actually loaded
-                // makes the connection safe to reuse.
-                if self.response.has_loaded_body() {
-                    self.release_connection().await;
-                } else {
-                    self.connection_returner.take();
-                }
-                // Gzip decoding is a body-level transform run AFTER the
-                // connection is settled: a decode failure is a data error, not a
-                // connection problem — the socket was already fully drained.
-                if self.decompress_gzip {
-                    self.response.decode_gzip_if_needed(self.max_body_size)?;
-                }
-                Ok(())
-            }
-            Err(err) => {
-                // Dropping the returner disposes the connection: its socket
-                // still carries the unread remainder of this body.
-                self.connection_returner.take();
-                Err(err)
-            }
-        }
-    }
-
-    async fn release_connection(&mut self) {
-        let Some(returner) = self.connection_returner.take() else {
-            return;
-        };
-
-        let close_requested = self.drop_connection();
-        let drop_by_status =
-            crate::fl_drop_connection_scenario::should_drop_connection_by_status(
-                self.get_status_code(),
-            );
-
-        if !close_requested && !drop_by_status {
-            returner.return_connection().await;
-        }
-        // else: dropping the returner disposes the connection
+    /// The body of the response: nothing of it is read by then, and the reader is how
+    /// it is read — piece by piece with `next_item()`, or as a whole within a limit
+    /// with `into_vec(max_size)`, `into_string(max_size)` and `into_json(max_size)`.
+    ///
+    /// The body is taken out of the response, which keeps its status and its headers.
+    /// It is there to be taken once: the next call fails.
+    pub fn get_body(&mut self) -> Result<FlUrlBodyReader, FlUrlError> {
+        self.body
+            .take()
+            .ok_or_else(|| FlUrlError::ReadingHyperBodyError(BODY_IS_TAKEN.to_string()))
     }
 
     pub fn drop_connection(&self) -> bool {
-        let header = self.response.get_header(CONNECTION.as_str());
-        if let Ok(header) = header {
-            if let Some(header) = header {
-                return header.eq_ignore_ascii_case("close");
-            }
-        }
-        false
+        connection_close_is_asked(&self.head)
     }
 
-    /// The response as hyper's, its body still streaming from the connection. After a
-    /// buffered read the response is made of what that read loaded.
-    pub fn into_hyper_response(mut self) -> my_http_client::HyperResponse {
-        use http_body_util::BodyExt;
+    /// The response as hyper's, its body still streaming from the connection, as it
+    /// came — nothing of it is decoded. Once the body is taken with [`Self::get_body`]
+    /// there is none to give, and the body of the response fails with that.
+    ///
+    /// It is for passing the body on — to hyper's server, which writes a frame and lets
+    /// it go. hyper's `collect()` keeps every frame until the end: in
+    /// `FlUrlMode::Http1NoHyper` a body bigger than the two buffers the connection is
+    /// read into waits for ever that way. A body is read into memory with
+    /// [`Self::get_body`] and `into_vec`.
+    pub fn into_hyper_response(self) -> HyperResponse {
+        let body = match self.body {
+            Some(body) => body.into_hyper_body(),
+            None => BodyIsTaken(Some(BODY_IS_TAKEN.to_string())).boxed(),
+        };
 
-        let returner = self.connection_returner.take();
-        let close_requested = self.drop_connection();
-        let drop_by_status = crate::fl_drop_connection_scenario::should_drop_connection_by_status(
-            self.get_status_code(),
-        );
-
-        let response = self.response.into_hyper_response();
-
-        // The body escapes fl-url's control while still streaming from the
-        // checked-out connection: keep the connection alive via a body guard
-        // that settles it on end-of-stream instead of disposing it mid-body.
-        match returner {
-            None => response,
-            Some(returner) => response.map(|body| {
-                crate::non_wasm::escaped_body_guard::EscapedBodyGuard::new(
-                    body,
-                    returner,
-                    !close_requested && !drop_by_status,
-                )
-                .boxed()
-            }),
-        }
+        http::Response::from_parts(self.head, body)
     }
 
     pub fn get_header(&self, name: &str) -> Result<Option<&str>, FlUrlReadingHeaderError> {
-        self.response.get_header(name)
+        match self.head.headers.get(name) {
+            Some(value) => Ok(Some(value.to_str()?)),
+            None => Ok(None),
+        }
     }
 
     pub fn get_header_case_insensitive(
         &self,
         name: &str,
     ) -> Result<Option<&str>, FlUrlReadingHeaderError> {
-        self.response.get_header_case_insensitive(name)
+        for (header, value) in self.head.headers.iter() {
+            if rust_extensions::str_utils::compare_strings_case_insensitive(header.as_str(), name) {
+                return Ok(Some(value.to_str()?));
+            }
+        }
+
+        Ok(None)
     }
 
     pub fn get_headers(&self) -> HashMap<&str, Option<&str>> {
         let mut result = HashMap::new();
 
-        self.response.copy_headers_to_hash_map(&mut result);
+        for (key, value) in &self.head.headers {
+            if let Ok(value) = value.to_str() {
+                result.insert(key.as_str(), Some(value));
+            }
+        }
 
         result
     }
 
     pub fn fill_headers_to_hashmap_of_string(&self, dest: &mut HashMap<String, Option<String>>) {
-        self.response.copy_headers_to_hash_map_of_string(dest);
-    }
-
-    pub async fn get_body_as_slice(&mut self) -> Result<&[u8], FlUrlError> {
-        self.load_body().await?;
-        self.response.get_loaded_body_as_slice()
-    }
-
-    pub async fn get_json<TResponse: DeserializeOwned>(&mut self) -> Result<TResponse, FlUrlError> {
-        self.load_body().await?;
-        let body = self.response.get_loaded_body_as_slice()?;
-        let result = serde_json::from_slice(body)?;
-        Ok(result)
-    }
-
-    pub async fn receive_body(mut self) -> Result<Vec<u8>, FlUrlError> {
-        self.load_body().await?;
-        self.response.take_loaded_body()
-    }
-
-    pub async fn get_body_as_str(&mut self) -> Result<&str, FlUrlError> {
-        self.load_body().await?;
-        let bytes = self.response.get_loaded_body_as_slice()?;
-        Ok(std::str::from_utf8(bytes)?)
-    }
-
-    /// The body as a stream of chunks, read off the connection as they come. After a
-    /// buffered read (`get_body_as_slice`, `get_json`, …) the stream gives what that
-    /// read loaded — or, when it failed, fails its first chunk with the reason.
-    pub fn get_body_as_stream(self) -> FlResponseAsStream {
-        FlResponseAsStream::create(
-            self.url,
-            self.response.into_hyper_response(),
-            self.body_read_timeout,
-            self.connection_returner,
-        )
-    }
-
-    #[deprecated(note = "Use get_body_as_str")]
-    pub async fn body_as_str(&mut self) -> Result<&str, FlUrlError> {
-        self.load_body().await?;
-        let bytes = self.response.get_loaded_body_as_slice()?;
-        Ok(std::str::from_utf8(bytes)?)
+        for (key, value) in &self.head.headers {
+            dest.insert(
+                key.as_str().to_string(),
+                value.to_str().ok().map(|value| value.to_string()),
+            );
+        }
     }
 
     pub fn get_status_code(&self) -> u16 {
-        self.status_code.as_u16()
+        self.head.status.as_u16()
     }
 
     pub fn to_string(&self) -> String {
         let mut result = String::new();
 
         result.push_str("StatusCode: ");
-        result.push_str(self.status_code.as_u16().to_string().as_str());
+        result.push_str(self.get_status_code().to_string().as_str());
 
         result.push_str("; ");
 
         result.push_str("Headers: ");
 
-        let mut headers = HashMap::new();
-        self.response.copy_headers_to_hash_map(&mut headers);
-
-        for (key, value) in headers {
+        for (key, value) in self.get_headers() {
             result.push_str(key);
             result.push_str("='");
             if let Some(value) = value {
@@ -279,5 +193,45 @@ impl FlUrlResponse {
         }
 
         result
+    }
+}
+
+fn connection_close_is_asked(head: &Parts) -> bool {
+    head.headers
+        .get(CONNECTION)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.eq_ignore_ascii_case("close"))
+}
+
+/// Whether the connection may serve the next request once the body of this response
+/// is read to its end: not when the response asks to close it, nor when its status is
+/// one a connection is dropped on.
+fn connection_can_be_reused(head: &Parts) -> bool {
+    !connection_close_is_asked(head)
+        && !crate::fl_drop_connection_scenario::should_drop_connection_by_status(
+            head.status.as_u16(),
+        )
+}
+
+fn is_gzip(head: &Parts) -> bool {
+    head.headers
+        .get(CONTENT_ENCODING)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.eq_ignore_ascii_case("gzip"))
+}
+
+/// The body of a response handed on as hyper's after its body was taken: it has
+/// nothing to give but the reason, and its first frame fails with it.
+struct BodyIsTaken(Option<String>);
+
+impl hyper::body::Body for BodyIsTaken {
+    type Data = Bytes;
+    type Error = String;
+
+    fn poll_frame(
+        mut self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+    ) -> Poll<Option<Result<hyper::body::Frame<Bytes>, String>>> {
+        Poll::Ready(self.0.take().map(Err))
     }
 }

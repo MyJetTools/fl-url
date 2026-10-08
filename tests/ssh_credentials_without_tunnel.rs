@@ -54,7 +54,7 @@ async fn the_request_goes_out_directly(with_credentials: impl FnOnce(FlUrl) -> F
     let mut response = fl_url.get().await.unwrap();
 
     assert_eq!(response.get_status_code(), 200);
-    assert_eq!(response.get_body_as_slice().await.unwrap(), b"ok");
+    assert_eq!(response.get_body().unwrap().into_vec(usize::MAX).await.unwrap(), b"ok");
 
     let head = server.await.unwrap();
     assert!(head.starts_with("GET /api HTTP/1.1\r\n"), "request line: {head}");

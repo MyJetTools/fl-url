@@ -114,7 +114,7 @@ async fn a_restarting_server_is_ridden_out() {
     let elapsed = js_sys::Date::now() - started;
 
     assert_eq!(response.get_status_code(), 200);
-    assert_eq!(response.get_body_as_str().await.unwrap(), "200");
+    assert_eq!(response.get_body().unwrap().into_string(usize::MAX).await.unwrap(), "200");
     assert_eq!(fetch_calls(), 3, "two 503s, then the 200");
 
     assert!(
@@ -142,7 +142,7 @@ async fn when_the_attempts_run_out_the_last_5xx_is_returned() {
         .unwrap();
 
     assert_eq!(response.get_status_code(), 504);
-    assert_eq!(response.get_body_as_str().await.unwrap(), "504");
+    assert_eq!(response.get_body().unwrap().into_string(usize::MAX).await.unwrap(), "504");
     assert_eq!(fetch_calls(), 3, "the first attempt and the two more it was allowed");
 
     restore_fetch();
@@ -359,18 +359,18 @@ async fn a_url_that_can_not_be_used_is_the_error_of_the_request() {
     restore_fetch();
 }
 
-/// The body is read once and kept: every later read gives the same bytes, and
-/// `receive_body` hands them over.
+/// The body is taken out of the response, once; the response keeps its head.
 #[wasm_bindgen_test]
-async fn the_body_is_read_once_and_kept() {
+async fn the_body_is_taken_once() {
     script_fetch(vec![200]);
 
     let mut response = FlUrl::new(URL).get().await.unwrap();
 
-    assert_eq!(response.get_body_as_str().await.unwrap(), "200");
-    assert_eq!(response.get_body_as_slice().await.unwrap(), b"200");
-    assert_eq!(response.get_json::<u16>().await.unwrap(), 200);
-    assert_eq!(response.receive_body().await.unwrap(), b"200");
+    let body = response.get_body().unwrap();
+    assert_eq!(response.get_status_code(), 200);
+    assert!(response.get_body().is_err());
+
+    assert_eq!(body.into_json::<u16>(usize::MAX).await.unwrap(), 200);
     assert_eq!(fetch_calls(), 1);
 
     restore_fetch();

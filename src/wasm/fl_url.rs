@@ -148,29 +148,19 @@ impl FlUrl {
         self.map(|inner| inner.print_input_request())
     }
 
+    /// Bounds the request up to the response head. 10 seconds by default. Reading the
+    /// body is not bounded by it under wasm — natively a read of the whole body is —
+    /// but by [`Self::set_response_body_timeout`].
     pub fn set_timeout(self, timeout: Duration) -> Self {
         self.map(|inner| inner.set_timeout(timeout))
     }
 
-    /// Bounds how long reading the response body may take: the read is aborted
-    /// through the request's `AbortController` and fails with
-    /// [`FlUrlError::Timeout`]. Unbounded by default, as on the native backend.
+    /// Bounds how long reading the response body may take — a read of the whole body
+    /// as a whole, a read piece by piece for each piece: the read is aborted through
+    /// the request's `AbortController` and fails with [`FlUrlError::Timeout`].
+    /// Unbounded by default, as on the native backend.
     pub fn set_response_body_timeout(self, timeout: Duration) -> Self {
         self.map(|inner| inner.set_response_body_timeout(timeout))
-    }
-
-    /// The largest response body a buffered read accepts, in bytes; a bigger one
-    /// fails the read with [`FlUrlError::ResponseBodyTooLarge`]. 100 MB by default
-    /// ([`crate::DEFAULT_MAX_RESPONSE_BODY_SIZE`]); `usize::MAX` lifts the limit. The
-    /// browser downloads the body whole before it can be measured, so the limit keeps
-    /// it out of wasm memory, not out of the browser's — unless the response
-    /// announces its size in `Content-Length` and is not compressed, in which case it
-    /// is refused unread (the `Content-Length` of a compressed response counts the
-    /// encoded bytes, not the body the browser hands over).
-    ///
-    /// [`FlUrlError::ResponseBodyTooLarge`]: crate::FlUrlError::ResponseBodyTooLarge
-    pub fn set_max_response_body_size(self, max_size: usize) -> Self {
-        self.map(|inner| inner.set_max_response_body_size(max_size))
     }
 
     /// No-op under wasm (the browser owns connection reuse). Kept for API parity.

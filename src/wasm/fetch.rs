@@ -2,13 +2,18 @@
 //! `AbortController`-based timeout), and read back status / headers / body.
 
 use std::cell::Cell;
+use std::future::Future;
+use std::pin::Pin;
 use std::rc::Rc;
+use std::task::{ready, Context, Poll};
 use std::time::Duration;
 
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
-use web_sys::{AbortController, Headers, Request, RequestInit, Response};
+use web_sys::{
+    AbortController, Headers, ReadableStreamDefaultReader, Request, RequestInit, Response,
+};
 
 use crate::FlUrlError;
 
@@ -59,9 +64,9 @@ pub(crate) fn build_request(
 }
 
 /// Performs one `fetch` round-trip for a request from [`build_request`] and returns
-/// the raw `Response` (headers only — the body is read lazily by
-/// [`read_response_body`]) together with the request's `AbortController`, so the
-/// caller can later bound the body read on the same signal.
+/// the raw `Response` (headers only — the body is read later, by the reader of the
+/// body) together with the request's `AbortController`, so the body read can be
+/// bounded on the same signal.
 ///
 /// `request_timeout_millis` bounds only the request→headers round-trip (mirroring
 /// the native `request_timeout`, which bounds `do_request`). The timer is cleared
@@ -110,30 +115,12 @@ pub(crate) async fn execute_fetch(
 ///
 /// When `body_timeout_millis` is set (from `set_response_body_timeout`), the read
 /// is bounded on the request's `AbortController`; the resulting abort is surfaced
-/// as [`FlUrlError::Timeout`]. With no body timeout the read is unbounded,
-/// matching the native default (`response_body_timeout = None`).
-///
-/// A body bigger than `max_body_size` fails with [`FlUrlError::ResponseBodyTooLarge`]:
-/// before the download when `Content-Length` says so, otherwise before it is copied
-/// into wasm memory. `carries_body` is `false` for a response whose `Content-Length`
-/// is not about a body it carries (a HEAD response, a 204, a 304).
+/// as [`FlUrlError::Timeout`]. With no body timeout the read is unbounded.
 pub(crate) async fn read_response_body(
     response: &Response,
     controller: Option<&AbortController>,
     body_timeout_millis: Option<i32>,
-    max_body_size: usize,
-    carries_body: bool,
 ) -> Result<Vec<u8>, FlUrlError> {
-    if carries_body && announced_length(response).is_some_and(|len| len > max_body_size as u64) {
-        // Ends the download the browser may already have started.
-        if let Some(controller) = controller {
-            controller.abort();
-        }
-        return Err(FlUrlError::ResponseBodyTooLarge {
-            limit: max_body_size,
-        });
-    }
-
     let timed_out = Rc::new(Cell::new(false));
     let timer_handle = match (controller, body_timeout_millis) {
         (Some(controller), Some(millis)) => set_abort_timer(controller, millis, timed_out.clone()),
@@ -163,11 +150,6 @@ pub(crate) async fn read_response_body(
                     "Response.arrayBuffer() did not return an ArrayBuffer".to_string(),
                 )
             })?;
-            if array_buffer.byte_length() as usize > max_body_size {
-                return Err(FlUrlError::ResponseBodyTooLarge {
-                    limit: max_body_size,
-                });
-            }
             Ok(js_sys::Uint8Array::new(&array_buffer).to_vec())
         }
         Err(err) => {
@@ -180,20 +162,153 @@ pub(crate) async fn read_response_body(
     }
 }
 
-/// The size `Content-Length` announces for the body as it will be handed over. The
-/// browser decodes a `Content-Encoding` itself and the header then counts the encoded
-/// bytes, so such a response announces nothing here.
+/// Why a response body can not be read to its end. The reader of the body keeps it,
+/// and keeps answering with it.
+#[derive(Clone)]
+pub(crate) enum BodyReadFailure {
+    /// A piece of the body has not come within `set_response_body_timeout`.
+    Timeout,
+    Fetch(String),
+}
+
+impl BodyReadFailure {
+    pub(crate) fn to_error(&self) -> FlUrlError {
+        match self {
+            Self::Timeout => FlUrlError::Timeout,
+            Self::Fetch(reason) => FlUrlError::FetchError(reason.clone()),
+        }
+    }
+}
+
+/// The reader of the stream a response gives its body as (`Response.body`): the body
+/// comes through it piece by piece. `Ok(None)` is a response which has no body — the
+/// answer to a HEAD request, a 204, a 304.
+pub(crate) fn body_stream_reader(
+    response: &Response,
+) -> Result<Option<ReadableStreamDefaultReader>, BodyReadFailure> {
+    let Some(stream) = response.body() else {
+        return Ok(None);
+    };
+
+    ReadableStreamDefaultReader::new(&stream)
+        .map(Some)
+        .map_err(|err| BodyReadFailure::Fetch(describe_js_value(&err)))
+}
+
+/// One `read()` of the stream of a response body: the next piece of it, as the browser
+/// has it from the network.
 ///
-/// Read as `u64`: wasm32's `usize` is 32 bits, and a size of 4 GB or more must still
-/// count as too large rather than as no size at all.
-fn announced_length(response: &Response) -> Option<u64> {
+/// When `timeout_millis` is set (from `set_response_body_timeout`) the piece is waited
+/// for no longer than that: the timer ends the download through the request's
+/// `AbortController`, and the read fails with [`BodyReadFailure::Timeout`].
+pub(crate) struct BodyPieceRead {
+    read: JsFuture,
+    timer_handle: Option<i32>,
+    timed_out: Rc<Cell<bool>>,
+}
+
+impl BodyPieceRead {
+    pub(crate) fn start(
+        reader: &ReadableStreamDefaultReader,
+        controller: Option<&AbortController>,
+        timeout_millis: Option<i32>,
+    ) -> Self {
+        let timed_out = Rc::new(Cell::new(false));
+        let timer_handle = match (controller, timeout_millis) {
+            (Some(controller), Some(millis)) => {
+                set_abort_timer(controller, millis, timed_out.clone())
+            }
+            _ => None,
+        };
+
+        Self {
+            read: JsFuture::from(reader.read()),
+            timer_handle,
+            timed_out,
+        }
+    }
+
+    /// `Ok(None)` is the end of the body.
+    pub(crate) fn poll(
+        &mut self,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<Option<Vec<u8>>, BodyReadFailure>> {
+        let result = ready!(Pin::new(&mut self.read).poll(cx));
+
+        Poll::Ready(match result {
+            Ok(result) => piece_of(&result),
+            // Only the timer aborts a body which is being read, so an AbortError
+            // means it fired.
+            Err(err) if self.timed_out.get() || is_abort_error(&err) => {
+                Err(BodyReadFailure::Timeout)
+            }
+            Err(err) => Err(BodyReadFailure::Fetch(describe_js_value(&err))),
+        })
+    }
+}
+
+impl Drop for BodyPieceRead {
+    fn drop(&mut self) {
+        // The read has settled, or the reader of the body is gone and has ended the
+        // download itself: the timer has nothing left to end.
+        if let Some(handle) = self.timer_handle.take() {
+            clear_timer(handle);
+        }
+    }
+}
+
+/// What a settled `read()` has brought: `{ done, value }`, the value being the piece —
+/// a `Uint8Array`. It lives in the memory of JS, so it is copied into the wasm one.
+fn piece_of(result: &JsValue) -> Result<Option<Vec<u8>>, BodyReadFailure> {
+    let field = |name: &str| {
+        js_sys::Reflect::get(result, &JsValue::from_str(name)).unwrap_or(JsValue::UNDEFINED)
+    };
+
+    if field("done").as_bool().unwrap_or(false) {
+        return Ok(None);
+    }
+
+    match field("value").dyn_into::<js_sys::Uint8Array>() {
+        Ok(piece) => Ok(Some(piece.to_vec())),
+        Err(_) => Err(BodyReadFailure::Fetch(
+            "a piece of the response body is not a Uint8Array".to_string(),
+        )),
+    }
+}
+
+/// Ends the download of a body nobody reads any more, when the request has no
+/// `AbortController` to end it with.
+pub(crate) fn cancel_body(reader: &ReadableStreamDefaultReader) {
+    // `cancel()` gives a promise. Nobody waits for it, but wrapping it is what gives
+    // it handlers, so that its rejection is not left unhandled.
+    drop(JsFuture::from(reader.cancel()));
+}
+
+/// The same for a body whose stream nobody has taken yet.
+pub(crate) fn cancel_response_body(response: &Response) {
+    if let Some(stream) = response.body() {
+        drop(JsFuture::from(stream.cancel()));
+    }
+}
+
+/// The size `Content-Length` announces for the body as it is handed over. The browser
+/// decodes a `Content-Encoding` itself and the header then counts the encoded bytes,
+/// so such a response announces nothing here.
+///
+/// A size which does not fit `usize` — 4 GB and up, `usize` being 32 bits under
+/// wasm32 — is the biggest one there is: it must count as too large for any limit
+/// rather than as no size at all.
+pub(crate) fn announced_length(response: &Response) -> Option<usize> {
     let headers = response.headers();
     if headers.has("content-encoding").unwrap_or(true)
         || headers.has("transfer-encoding").unwrap_or(true)
     {
         return None;
     }
-    headers.get("content-length").ok()??.trim().parse().ok()
+
+    let length: u64 = headers.get("content-length").ok()??.trim().parse().ok()?;
+
+    Some(usize::try_from(length).unwrap_or(usize::MAX))
 }
 
 /// Reads all response headers into a `(name, value)` list. The browser lower-cases

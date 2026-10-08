@@ -56,8 +56,6 @@ pub(crate) struct FlUrlInner {
     pub request_timeout: Duration,
     // Bounds how long reading the response body may take. `None` = unbounded.
     pub response_body_timeout: Option<Duration>,
-    // The largest body a buffered read accepts.
-    pub max_response_body_size: usize,
     pub do_not_reuse_connection: bool,
     pub connections_cache: Option<Arc<FlUrlHttpConnectionsCache>>,
     pub compress_body: bool,
@@ -153,7 +151,6 @@ impl FlUrlInner {
             retry: RetryPolicy::default(),
             request_timeout: Duration::from_secs(10),
             response_body_timeout: None,
-            max_response_body_size: crate::DEFAULT_MAX_RESPONSE_BODY_SIZE,
             print_input_request: false,
             compress_body: false,
             decompress_gzip_response: false,
@@ -303,11 +300,6 @@ impl FlUrlInner {
 
     pub fn set_response_body_timeout(mut self, timeout: Duration) -> Self {
         self.response_body_timeout = Some(timeout);
-        self
-    }
-
-    pub fn set_max_response_body_size(mut self, max_size: usize) -> Self {
-        self.max_response_body_size = max_size;
         self
     }
 
@@ -1419,22 +1411,23 @@ impl FlUrlInner {
                         continue;
                     }
 
-                    let mut response =
-                        FlUrlResponse::from_http1_response(self.url_builder, response);
-                    response.set_body_read_timeout(self.response_body_timeout);
-                    response.set_max_body_size(self.max_response_body_size);
-                    response.set_request_method(request.method());
-                    response.set_decompress_gzip(self.decompress_gzip_response);
                     // The connection stays checked out until the response body
                     // is fully consumed; the returner puts it back (or disposes
                     // it) at that point.
-                    response.set_connection_returner(Box::new(
+                    let connection = Box::new(
                         crate::non_wasm::http_clients_cache::PooledConnectionReturner {
                             resolver: http_connection_resolver.clone(),
                             connection,
                         },
+                    );
+
+                    return Ok(FlUrlResponse::of_request(
+                        self.url_builder,
+                        response,
+                        connection,
+                        self.response_body_timeout,
+                        self.decompress_gzip_response,
                     ));
-                    return Ok(response);
                 }
                 Err(err) => {
                     // A single timeout means a slow response, not a dead
@@ -1525,7 +1518,7 @@ mod test {
 
         println!("{}", fl_url_resp.get_status_code());
 
-        let resp = fl_url_resp.get_body_as_slice().await.unwrap();
+        let resp = fl_url_resp.get_body().unwrap().into_vec(usize::MAX).await.unwrap();
         println!("{}", resp.len());
     }
 
@@ -1539,7 +1532,7 @@ mod test {
             .await
             .unwrap();
 
-        let resp = fl_url_resp.get_body_as_slice().await.unwrap();
+        let resp = fl_url_resp.get_body().unwrap().into_vec(usize::MAX).await.unwrap();
 
         println!("{}", resp.len());
     }
@@ -1553,7 +1546,7 @@ mod test {
             .await
             .unwrap();
 
-        let resp = fl_url_resp.get_body_as_slice().await.unwrap();
+        let resp = fl_url_resp.get_body().unwrap().into_vec(usize::MAX).await.unwrap();
 
         println!("{}", resp.len());
     }

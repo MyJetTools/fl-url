@@ -18,7 +18,8 @@ This page is everything an ordinary request needs: installation, building and se
 - **Known IP, no DNS**: `https://domain.com@15.0.0.5/path` connects to the ip while the Host header and TLS SNI stay `domain.com` (native only) — see [Connecting to a Known IP](known-ip.md)
 - **Retry Logic**: `with_retries(n)` replays a request that got no response; `with_retry(delay, n)` also replays a 5xx, `delay` apart, to ride out a restart of the service — see [Retry Logic](retries.md)
 - **Request Compression**: `compress()` gzips a request body of 64 bytes and up
-- **Streaming Responses**: Support for streaming response bodies (native only)
+- **Response Body Reader**: `get_body()` gives the body as a reader — read it piece by piece, or as a whole within a size limit, as bytes, a string or JSON — native and wasm
+- **Passing a Response On**: `into_hyper_response()` hands the response on with its body still streaming (native only)
 - **Streaming Request Bodies**: Send a body of any size at constant memory, framed with `Content-Length` or chunked (native only) — see [Streamed Body](streamed-body.md)
 - **Debug Support**: Built-in request debugging capabilities
 - **WASM Support**: The same API compiles to `wasm32-unknown-unknown` (browser / web-worker) on top of the `fetch` API — see [WebAssembly (WASM) Support](wasm.md)
@@ -419,29 +420,30 @@ let status_code = response.get_status_code();
 println!("Status: {}", status_code);
 ```
 
-### Get Body as Slice
+### Read the Body
+
+A response arrives as soon as its head is read: the status and the headers are there,
+the body is not read yet. `get_body()` takes the body out of the response as its
+reader, and how the body is read is up to the reader.
 
 ```rust
 let mut response = FlUrl::new("https://api.example.com/data")
     .get()
     .await?;
 
-let body = response.get_body_as_slice().await?;
+// the whole body, 1 MB at most
+let body: Vec<u8> = response.get_body()?.into_vec(1024 * 1024).await?;
 println!("Body length: {}", body.len());
 ```
 
-### Get Body as String
+As a string:
 
 ```rust
-let mut response = FlUrl::new("https://api.example.com/data")
-    .get()
-    .await?;
-
-let body = response.get_body_as_str().await?;
+let body: String = response.get_body()?.into_string(1024 * 1024).await?;
 println!("Body: {}", body);
 ```
 
-### Get JSON Response
+As JSON:
 
 ```rust
 use serde::Deserialize;
@@ -451,40 +453,82 @@ struct ApiResponse {
     data: Vec<String>,
 }
 
-let mut response = FlUrl::new("https://api.example.com/data")
-    .get()
-    .await?;
-
-let api_response: ApiResponse = response.get_json().await?;
+let api_response: ApiResponse = response.get_body()?.into_json(1024 * 1024).await?;
 ```
 
-### Receive Full Body
+Piece by piece, as it comes over the network — a body of any size at constant memory,
+or one which is read as it is sent, like an event stream:
 
 ```rust
-let mut response = FlUrl::new("https://api.example.com/data")
-    .get()
-    .await?;
+let mut body = response.get_body()?;
 
-let body_bytes = response.receive_body().await?;
-```
-
-### Streaming Response
-
-```rust
-let response = FlUrl::new("https://api.example.com/large-file")
-    .get()
-    .await?;
-
-let mut stream = response.get_body_as_stream();
-while let Some(chunk) = stream.get_next_chunk().await? {
-    // Process chunk
-    println!("Received {} bytes", chunk.len());
+// `None` is the end of the body
+while let Some(piece) = body.next_item().await? {
+    println!("Received {} bytes", piece.len());
 }
 ```
 
-The chunks are read off the connection as they come. Called after a buffered read
-(`get_body_as_slice`, `get_json`, …), `get_body_as_stream` gives the body that read
-loaded; after one that failed, its first chunk fails with the reason.
+| method of the reader | gives |
+| --- | --- |
+| `next_item()` | the next piece of the body (`&[u8]`), good until the next call; `None` at its end |
+| `into_vec(max_size)` | the whole body as `Vec<u8>` — what is left of it, when a part is taken by `next_item` already |
+| `into_string(max_size)` | the whole body as a `String` |
+| `into_json::<T>(max_size)` | the whole body deserialized from JSON |
+| `content_length()` | the size of the body when the response says it |
+| `remains_to_read()` | how much of it is not read yet |
+
+- **`max_size` is the limit of the body in memory, in bytes, and there is no other.**
+  A body which says it is bigger is refused before a byte of it is read; one which does
+  not say is cut off as soon as it grows past the limit. Either way the read fails with
+  `FlUrlError::ResponseBodyTooLarge { limit }`. `usize::MAX` takes a body of any size.
+  See [Response Body Size](timeouts-and-limits.md#response-body-size).
+- **The body is taken once.** `get_body()` moves it out of the response, which keeps
+  its status and its headers; a second call fails.
+- A body which is cut short ends with an error and keeps answering with it, so a part
+  of a body never passes for a whole one.
+- **A piece is good until the next call** of `next_item`, which lets go of it: in
+  `FlUrlMode::Http1NoHyper` a piece is a part of one of the two buffers the connection
+  is read into, and the buffer is read into again while the next piece is waited for.
+  What is needed for longer is copied out of it: `piece.to_vec()`.
+- A reader dropped before the end of the body — and a response dropped with its body
+  in it — ends the download: natively the connection is closed instead of going back to
+  the pool (in `FlUrlMode::H2` only that stream is dropped), under wasm the `fetch` is
+  aborted.
+- With `accept_gzip()` the reader gives the body decoded, however it is read — see
+  [Compression](compression.md#response-decompression).
+- What bounds the read in time: [Timeouts](timeouts-and-limits.md#timeouts).
+
+`FlUrlBodyReader` has the same methods on both backends. Natively it is the reader of
+my-http-client with what a request of FlUrl adds to it — the connection of the pool,
+the timeout, the decoding; under wasm it reads the stream of the `fetch` response.
+
+Natively it is a `rust_extensions::AsyncBytesStream<FlUrlError>` as well, for code
+which reads any stream of bytes. Its `get_next()` gives a piece of its own, a
+`FlUrlBodyPiece` — a `&[u8]` through `Deref`, decoded when `accept_gzip()` asked for it.
+Such a piece can be kept while the next one is asked for, and is let go of soon all the
+same: a reader which keeps pieces of both read buffers of the connection holds the
+reading back until it lets one go.
+
+### Pass the Response On
+
+Native only. `into_hyper_response()` turns the response into hyper's, its body still
+streaming from the connection as it came — nothing is decoded, and the trailers of an
+HTTP/2 response are passed on. It is what a proxy answers its own caller with:
+
+```rust
+let response = FlUrl::new("https://upstream.example.com/data")
+    .get()
+    .await?;
+
+let response: hyper::Response<_> = response.into_hyper_response();
+```
+
+The connection goes back to the pool once that body is read to its end.
+
+hyper's `collect()` keeps every frame of the body until its end, so in
+`FlUrlMode::Http1NoHyper` a body bigger than the two read buffers of the connection
+(64 KB each) never ends that way. A body is read into memory with
+`get_body()?.into_vec(max_size)`.
 
 ### Get Headers
 
@@ -568,12 +612,12 @@ match FlUrl::new("https://api.example.com/data").get().await {
   wasm. Each variant exists on its own backend only, so code meant for both leaves
   them to the catch-all arm.
 - **`err.is_timeout()`** is `true` for a timeout however it was reported.
-- **Reading the body has errors of its own**: `get_json` fails with
+- **Reading the body has errors of its own**: `into_json` fails with
   `FlUrlError::SerializationError` on a body that is not the expected JSON,
-  `get_body_as_str` with `FlUrlError::CanNotConvertToUtf8`, any read with
-  `FlUrlError::Timeout` once `set_response_body_timeout` runs out, and a buffered read
-  with `FlUrlError::ResponseBodyTooLarge` once the body is over
-  [the size limit](timeouts-and-limits.md#response-body-size).
+  `into_string` with `FlUrlError::CanNotConvertToUtf8`, any read with
+  `FlUrlError::Timeout` once [its time](timeouts-and-limits.md#timeouts) runs out, and
+  a read of the whole body with `FlUrlError::ResponseBodyTooLarge { limit }` on a body
+  over [the limit it was given](#read-the-body).
 
 ## Examples
 
@@ -608,7 +652,7 @@ async fn create_user(name: &str, email: &str) -> Result<User, Box<dyn std::error
         .post(HttpRequestBody::as_json(&user_data))
         .await?;
     
-    let user: User = response.get_json().await?;
+    let user: User = response.get_body()?.into_json(1024 * 1024).await?;
     Ok(user)
 }
 
@@ -620,7 +664,7 @@ async fn get_user(id: u64) -> Result<User, Box<dyn std::error::Error>> {
         .get()
         .await?;
     
-    let user: User = response.get_json().await?;
+    let user: User = response.get_body()?.into_json(1024 * 1024).await?;
     Ok(user)
 }
 ```
@@ -644,7 +688,7 @@ async fn get_user(id: u64) -> Result<User, Box<dyn std::error::Error>> {
 | [`ssh`](ssh.md) | SSH tunnels (`with-ssh`): `ssh://…->http(s)://…` urls, password, private key, credentials resolver, a unix socket on the ssh server |
 | [`unix-socket`](unix-socket.md) | Requests to a unix socket: every form the socket file can be named in |
 | [`known-ip`](known-ip.md) | `https://name@ip/path`: connect to a known ip without DNS while the Host header, SNI and certificate check stay on the name (native only) |
-| [`timeouts-and-limits`](timeouts-and-limits.md) | `set_timeout`, `set_response_body_timeout` and the 100 MB limit of a buffered response body (`set_max_response_body_size`) |
+| [`timeouts-and-limits`](timeouts-and-limits.md) | `set_timeout`, `set_response_body_timeout`, what each of them bounds, and how a response body is held to a size limit |
 | [`retries`](retries.md) | `with_retries(n)` vs `with_retry(delay, n)`: which outcomes are replayed, idempotent methods only, what the last attempt returns, how long it can take |
 | [`compression`](compression.md) | `compress()` of a request body and `accept_gzip()` for the response |
 | [`debugging`](debugging.md) | `print_input_request()` and the `*_with_debug` twin of every request method |

@@ -63,7 +63,7 @@ async fn http_request_goes_to_the_ip_with_the_server_name_as_host(mode: FlUrlMod
         .unwrap();
 
     assert_eq!(response.get_status_code(), 200);
-    assert_eq!(response.get_body_as_slice().await.unwrap(), b"ok");
+    assert_eq!(response.get_body().unwrap().into_vec(usize::MAX).await.unwrap(), b"ok");
 
     let head = server.await.unwrap();
 

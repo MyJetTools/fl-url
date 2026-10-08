@@ -91,7 +91,7 @@ async fn a_redirect_is_returned_as_it_is() {
             Some("/other"),
             "{mode:?}"
         );
-        assert_eq!(response.get_body_as_slice().await.unwrap(), b"moved", "{mode:?}");
+        assert_eq!(response.get_body().unwrap().into_vec(usize::MAX).await.unwrap(), b"moved", "{mode:?}");
 
         assert_eq!(*paths.lock().unwrap(), vec!["/start".to_string()], "{mode:?}");
     }

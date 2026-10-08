@@ -38,9 +38,9 @@ pub(crate) use retry_policy::RetryPolicy;
 
 pub extern crate my_http_utils;
 
-/// The largest response body a buffered read (`get_body_as_slice`, `get_json`, …)
-/// accepts unless `set_max_response_body_size` sets another limit: 100 MB.
-pub const DEFAULT_MAX_RESPONSE_BODY_SIZE: usize = 100 * 1024 * 1024;
+/// Its `AsyncBytesStream` is what the reader of a response body is read in chunks
+/// through, so it comes with fl-url, at the version fl-url is built on.
+pub extern crate rust_extensions;
 
 #[cfg(not(target_arch = "wasm32"))]
 mod consts;

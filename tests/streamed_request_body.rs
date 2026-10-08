@@ -206,7 +206,7 @@ async fn streamed_post_puts_the_payload_on_the_wire_chunked() {
         .unwrap();
 
     assert_eq!(response.get_status_code(), 200);
-    assert_eq!(response.get_body_as_slice().await.unwrap(), b"ok");
+    assert_eq!(response.get_body().unwrap().into_vec(usize::MAX).await.unwrap(), b"ok");
 
     let received = server.await.unwrap();
 
@@ -258,7 +258,7 @@ async fn stream_a_large_body_and_measure_rss(content_length: Option<usize>) -> u
         .unwrap();
 
     assert_eq!(response.get_status_code(), 200);
-    let _ = response.get_body_as_slice().await.unwrap();
+    let _ = response.get_body().unwrap().into_vec(usize::MAX).await.unwrap();
 
     let rss_after = rss_bytes();
 
@@ -425,7 +425,7 @@ async fn an_explicit_content_length_replaces_the_chunked_framing() {
         .unwrap();
 
     assert_eq!(response.get_status_code(), 200);
-    let _ = response.get_body_as_slice().await.unwrap();
+    let _ = response.get_body().unwrap().into_vec(usize::MAX).await.unwrap();
 
     let received = server.await.unwrap();
 
@@ -506,7 +506,7 @@ async fn streamed_put_with_a_length_uses_content_length_framing() {
         .unwrap();
 
     assert_eq!(response.get_status_code(), 200);
-    let _ = response.get_body_as_slice().await.unwrap();
+    let _ = response.get_body().unwrap().into_vec(usize::MAX).await.unwrap();
 
     let received = server.await.unwrap();
 
@@ -550,7 +550,7 @@ async fn the_content_length_argument_wins_over_a_manually_added_header() {
         .unwrap();
 
     assert_eq!(response.get_status_code(), 200);
-    let _ = response.get_body_as_slice().await.unwrap();
+    let _ = response.get_body().unwrap().into_vec(usize::MAX).await.unwrap();
 
     let received = server.await.unwrap();
 
@@ -593,7 +593,7 @@ async fn a_none_length_strips_a_manually_added_content_length() {
         .unwrap();
 
     assert_eq!(response.get_status_code(), 200);
-    let _ = response.get_body_as_slice().await.unwrap();
+    let _ = response.get_body().unwrap().into_vec(usize::MAX).await.unwrap();
 
     let received = server.await.unwrap();
 
@@ -670,7 +670,7 @@ async fn a_model_stream_body_goes_out_chunked_with_the_models_url_and_headers() 
         .unwrap();
 
     assert_eq!(response.get_status_code(), 200);
-    assert_eq!(response.get_body_as_slice().await.unwrap(), b"ok");
+    assert_eq!(response.get_body().unwrap().into_vec(usize::MAX).await.unwrap(), b"ok");
 
     let received = server.await.unwrap();
 
@@ -719,7 +719,7 @@ async fn the_streams_own_content_length_picks_the_framing() {
         .unwrap();
 
     assert_eq!(response.get_status_code(), 200);
-    let _ = response.get_body_as_slice().await.unwrap();
+    let _ = response.get_body().unwrap().into_vec(usize::MAX).await.unwrap();
 
     let received = server.await.unwrap();
 

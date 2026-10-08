@@ -12,7 +12,7 @@ let mut response1 = FlUrl::new("https://api.example.com/endpoint1")
     .await?;
 
 // The connection goes back to the pool once the body has been read to the end
-let body = response1.get_body_as_slice().await?;
+let body = response1.get_body()?.into_vec(1024 * 1024).await?;
 
 let response2 = FlUrl::new("https://api.example.com/endpoint2")
     .get()
@@ -45,14 +45,16 @@ let response = FlUrl::new("https://api.example.com/data")
 
 An HTTP/1.1 connection serves one request at a time. It is taken out of the pool for
 the request and goes back only once the response body has been read to the end — by
-`get_body_as_slice`, `get_json`, `get_body_as_str`, `receive_body`, or by a stream
-read to its last chunk. Instead of going back it is closed, and the next request opens
-a new one, when:
+`into_vec`, `into_string` or `into_json` of its reader, by `next_item` reaching the end
+of the body, or by whoever reads the body of `into_hyper_response`. Instead of going
+back it is closed, and the next request opens a new one, when:
 
 - the response has a status above 400 other than 404 — `401`, `403`, `500`, `503` and
   so on, but not `400` and not `404`;
 - the response carries `Connection: close`;
-- the response is dropped with its body unread, or reading the body fails or times out;
+- the response is dropped with its body in it, or the reader of the body is dropped
+  before the end of the body;
+- reading the body fails, times out, or meets a body over the limit it was given;
 - the request itself fails;
 - the request was made with `do_not_reuse_connection()`;
 - the pool already holds its maximum of idle connections to that endpoint — 5 by

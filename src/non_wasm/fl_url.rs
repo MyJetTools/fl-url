@@ -135,9 +135,9 @@ impl FlUrl {
     }
 
     /// Advertises gzip support to the server (`Accept-Encoding: gzip`) and
-    /// transparently decompresses a gzip-encoded response body on buffered
-    /// reads (`get_body_as_slice`, `get_json`, `get_body_as_str`, `receive_body`).
-    /// Streamed bodies (`get_body_as_stream`) are NOT decompressed.
+    /// has the reader of the body (`get_body`) give a gzip-encoded response body
+    /// decoded, whichever way it is read. `into_hyper_response` passes the body on as
+    /// it came.
     pub fn accept_gzip(self) -> Self {
         self.map(|inner| inner.accept_gzip())
     }
@@ -254,26 +254,19 @@ impl FlUrl {
         self.map(|inner| inner.set_ssh_user_password(password))
     }
 
+    /// Bounds the request: sending it, the response head and — on the same clock,
+    /// which does not start over — the read of the whole body after it (`into_vec`,
+    /// `into_string`, `into_json` of its reader). 10 seconds by default. A body which
+    /// is read piece by piece (`next_item`) is not bounded by it.
     pub fn set_timeout(self, timeout: Duration) -> Self {
         self.map(|inner| inner.set_timeout(timeout))
     }
 
-    /// Bounds how long reading the response body may take. Applies both to
-    /// buffered reads (`get_body_as_slice`, `get_json`, …) and to each chunk of
-    /// a streamed body. Unbounded by default.
+    /// Bounds how long reading the response body may take: a read of the whole body
+    /// (`into_vec`, `into_string`, `into_json` of its reader) as a whole, a read piece
+    /// by piece (`next_item`) for each piece. Unbounded by default.
     pub fn set_response_body_timeout(self, timeout: Duration) -> Self {
         self.map(|inner| inner.set_response_body_timeout(timeout))
-    }
-
-    /// The largest response body a buffered read (`get_body_as_slice`, `get_json`,
-    /// `get_body_as_str`, `receive_body`) accepts, in bytes; a bigger one fails the
-    /// read with [`FlUrlError::ResponseBodyTooLarge`]. 100 MB by default
-    /// ([`crate::DEFAULT_MAX_RESPONSE_BODY_SIZE`]); `usize::MAX` lifts the limit. A
-    /// streamed body (`get_body_as_stream`) is not limited — it is never held whole.
-    ///
-    /// [`FlUrlError::ResponseBodyTooLarge`]: crate::FlUrlError::ResponseBodyTooLarge
-    pub fn set_max_response_body_size(self, max_size: usize) -> Self {
-        self.map(|inner| inner.set_max_response_body_size(max_size))
     }
 
     pub fn do_not_reuse_connection(self) -> Self {

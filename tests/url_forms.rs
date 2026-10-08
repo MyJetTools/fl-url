@@ -33,7 +33,7 @@ async fn echo(
 
 async fn read_body(mut response: flurl::FlUrlResponse) -> (u16, String) {
     let status = response.get_status_code();
-    let body = response.get_body_as_slice().await.unwrap().to_vec();
+    let body = response.get_body().unwrap().into_vec(usize::MAX).await.unwrap().to_vec();
     (status, String::from_utf8(body).unwrap())
 }
 

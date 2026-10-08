@@ -14,8 +14,8 @@ use std::sync::Arc;
 mod compiled_http_request;
 mod escaped_body_guard;
 mod fl_response;
-mod fl_response_as_stream;
 mod fl_url;
+mod fl_url_body_reader;
 mod fl_url_headers;
 mod fl_url_inner;
 mod http_clients_cache;
@@ -24,15 +24,13 @@ mod into_fl_url;
 mod model_body_stream;
 mod my_http_client_wrapper;
 mod resolved_ip;
-mod response_body;
 
 pub use fl_response::*;
-pub use fl_response_as_stream::*;
 pub use fl_url::{FlUrl, FlUrlMode, HttpVerb};
+pub use fl_url_body_reader::{FlUrlBodyPiece, FlUrlBodyReader};
 pub use fl_url_headers::*;
 pub use http_clients_cache::*;
 pub use into_fl_url::*;
-pub use response_body::*;
 
 pub extern crate hyper;
 

@@ -57,6 +57,8 @@ my-http-utils = { tag = "0.1.0", git = "https://github.com/MyJetTools/my-http-ut
 serde = { version = "*", features = ["derive"] }
 serde_json = { version = "*" }
 async-trait = "*"
+# A piece of a response body, as `FlUrlBodyReader::get_next` gives it on both backends.
+bytes = "*"
 # Pure-Rust backend so it compiles under wasm too (used by `.compress()`).
 flate2 = { version = "*", default-features = false, features = [
     "rust_backend",
@@ -68,7 +70,8 @@ flate2 = { version = "*", default-features = false, features = [
 hyper = { version = "*", features = ["full"] }
 # Declared explicitly rather than free-ridden off my-http-client's feature
 # unification: `net` for Tcp/UnixStream, `io-util` for the split halves of a
-# connection, `time` for the request timeout.
+# connection, `time` for the request timeout, `sync` for the lock a response body is
+# read through a shared reference with.
 tokio = { version = "*", features = [
     "rt",
     "rt-multi-thread",
@@ -76,6 +79,7 @@ tokio = { version = "*", features = [
     "net",
     "io-util",
     "time",
+    "sync",
 ] }
 hyper-util = { version = "*", features = ["tokio"] }
 http-body-util = { version = "*" }
@@ -83,7 +87,6 @@ my-http-client = { tag = "0.1.0", git = "https://github.com/my-jet-tools/my-http
 my-hyper-utils = { tag = "0.1.0", git = "https://github.com/MyJetTools/my-hyper-utils.git" }
 my-tls = { tag = "0.1.5", git = "https://github.com/MyJetTools/my-tls.git", optional = true }
 http = "*"
-bytes = "*"
 parking_lot = "*"
 ahash = "*"
 lazy_static = "*"
@@ -105,6 +108,8 @@ web-sys = { version = "0.3", features = [
     "AbortController",
     "AbortSignal",
     "DomException",
+    "ReadableStream",
+    "ReadableStreamDefaultReader",
     "console",
 ] }
 
@@ -119,7 +124,7 @@ tokio = { version = "*", features = [
     "time",
 ] }
 
-# Gzips a response body for tests/max_response_body_size.rs.
+# Gzips a response body for tests/body_reader.rs.
 [dev-dependencies]
 flate2 = { version = "*" }
 

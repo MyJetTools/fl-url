@@ -24,7 +24,7 @@ let mut response = FlUrl::new("https://api.example.com")
     .get()
     .await?;
 
-let users: Vec<User> = response.get_json().await?;
+let users: Vec<User> = response.get_body()?.into_json(1024 * 1024).await?;
 ```
 
 ## Documentation
@@ -39,7 +39,7 @@ The library is documented in [`docs/`](docs). [The basics](docs/index_resource.m
 - [**ssh**](docs/ssh.md) — requests through an SSH tunnel (`with-ssh`).
 - [**unix-socket**](docs/unix-socket.md) — requests to a unix socket.
 - [**known-ip**](docs/known-ip.md) — connect to a known ip without DNS, keeping the host name for `Host`, SNI and the certificate check.
-- [**timeouts-and-limits**](docs/timeouts-and-limits.md) — request and body timeouts, the size limit of a buffered response body.
+- [**timeouts-and-limits**](docs/timeouts-and-limits.md) — request and body timeouts, the size limit a response body is read with.
 - [**retries**](docs/retries.md) — `with_retries` and `with_retry`.
 - [**compression**](docs/compression.md) — gzip of a request body and of a response.
 - [**debugging**](docs/debugging.md) — printing a request and the `*_with_debug` methods.

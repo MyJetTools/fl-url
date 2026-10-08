@@ -21,7 +21,6 @@ pub(crate) struct FlUrlInner {
     pub accept_invalid_certificate: bool,
     pub request_timeout: Duration,
     pub response_body_timeout: Option<Duration>,
-    pub max_response_body_size: usize,
     pub do_not_reuse_connection: bool,
     pub connections_cache: Option<Arc<FlUrlHttpConnectionsCache>>,
     pub compress_body: bool,
@@ -69,7 +68,6 @@ impl FlUrlInner {
             accept_invalid_certificate: false,
             request_timeout: Duration::from_secs(10),
             response_body_timeout: None,
-            max_response_body_size: crate::DEFAULT_MAX_RESPONSE_BODY_SIZE,
             do_not_reuse_connection: false,
             connections_cache: None,
             compress_body: false,
@@ -126,11 +124,6 @@ impl FlUrlInner {
 
     pub fn set_response_body_timeout(mut self, timeout: Duration) -> Self {
         self.response_body_timeout = Some(timeout);
-        self
-    }
-
-    pub fn set_max_response_body_size(mut self, max_size: usize) -> Self {
-        self.max_response_body_size = max_size;
         self
     }
 
@@ -461,8 +454,6 @@ impl FlUrlInner {
             response,
             controller,
             body_timeout_millis,
-            self.max_response_body_size,
-            method,
         ))
     }
 
